@@ -197,7 +197,7 @@ if CLIENT then
                 row:DockMargin(0, 0, 0, 6)
                 row:SetTall(34)
                 row.GCALText = line
-                row.GCALAccent = string.StartWith(line, " - ") and colMuted or colWarn
+                row.GCALAccent = string.StartsWith(line, " - ") and colMuted or colWarn
 
                 local label = vgui.Create("DLabel", row)
                 label:Dock(FILL)
@@ -205,7 +205,7 @@ if CLIENT then
                 label:SetWrap(true)
                 label:SetAutoStretchVertical(true)
                 label:SetFont("GCAL.Menu.Body")
-                label:SetTextColor(string.StartWith(line, " - ") and colMuted or colText)
+                label:SetTextColor(string.StartsWith(line, " - ") and colMuted or colText)
                 label:SetText(line)
 
                 row.PerformLayout = function(self, w)

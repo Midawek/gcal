@@ -230,6 +230,8 @@ if CLIENT then
     local scaleflipvec = Vector(1, 1, -1)
     local properang = Angle(-79.750, 0, -90)
     local tableintensity = {1, 1, 1}
+    local angleFlip = Angle(180, 0, 0)
+    local angleZero = Angle(0, 0, 0)
 
     local SyncLegacyVManipFields
 
@@ -260,7 +262,7 @@ if CLIENT then
             local modelBaseName = string.GetFileFromFilename(anim.model or "")
             modelBaseName = string.StripExtension(modelBaseName)
 
-            if string.StartWith(modelBaseName, "c_vmanip") then
+            if string.StartsWith(modelBaseName, "c_vmanip") then
                 AddCandidate(string.sub(modelBaseName, 9), "model filename")
             end
 
@@ -341,7 +343,7 @@ if CLIENT then
                 AddTokenSubsequenceTargets(animName, AddNormalizedTarget)
                 AddTokenSubsequenceTargets(anim.sequence, AddNormalizedTarget)
 
-                if string.StartWith(modelBaseName, "c_vmanip") then
+                if string.StartsWith(modelBaseName, "c_vmanip") then
                     AddNormalizedTarget(string.sub(modelBaseName, 9))
                 end
                 AddTokenSubsequenceTargets(modelBaseName, AddNormalizedTarget)
@@ -946,7 +948,7 @@ if CLIENT then
         local flip = GetLegacyFlipState(weapon)
         local flipmode = flip.flipmode
         local flipped = (track.lerpVal <= 0.5 and scaleflipvec or scalevec)
-        local sourceAngleOffset = Angle((flipmode and 180 or 0), 0, 0)
+        local sourceAngleOffset = flipmode and angleFlip or angleZero
 
         if track.data.assurepos then
             if posparentcache ~= weapon then
@@ -1044,10 +1046,10 @@ if CLIENT then
             track.model:SetAngles(renderAngles)
             track.model:SetPos(vm:GetPos())
         elseif track.data.legacy then
-            track.model:SetAngles(eyeang + Angle((flipmode and 180 or 0), 0, 0))
+            track.model:SetAngles(flipmode and eyeang + angleFlip or eyeang)
             track.model:SetPos(eyepos)
         elseif track.data.locktoply or track.data.assurepos then
-            track.model:SetAngles(eyeang + Angle((flipmode and 180 or 0), 0, 0))
+            track.model:SetAngles(flipmode and eyeang + angleFlip or eyeang)
             track.model:SetPos(eyepos)
         else
             track.model:SetAngles(vm:GetAngles())
@@ -1114,6 +1116,7 @@ if CLIENT then
 
     local curtimecheck = 0
     local function ProcessQueuedTracks()
+        if not next(GCAL.QueuedAnims) then return end
         for queuedTrackID, queuedName in pairs(GCAL.QueuedAnims) do
             if not GCAL.ActiveTracks[queuedTrackID] and GCAL:Play(queuedName, queuedTrackID) then
                 GCAL.QueuedAnims[queuedTrackID] = nil
@@ -1125,7 +1128,6 @@ if CLIENT then
     local function RenderTracks(hands, vm, ply, weapon, flags, fromHandsHook)
         if renderTracksBusy then return end
         if not IsValid(vm) then return end
-        if UsesMWBaseViewModel(weapon) then return end
 
         renderTracksBusy = true
         local handsEnt = IsValid(hands) and hands or (IsValid(ply) and ply:GetHands() or nil)
@@ -1140,7 +1142,7 @@ if CLIENT then
             ProcessQueuedTracks()
         end
 
-        if table.Count(GCAL.ActiveTracks) == 0 then
+        if next(GCAL.ActiveTracks) == nil then
             if not alreadyUpdated and VManip and VManip.QueuedAnim and VManip:PlayAnim(VManip.QueuedAnim) then
                 VManip.QueuedAnim = nil
             end
@@ -1271,7 +1273,7 @@ if CLIENT then
 
         for name in pairs(GCAL.Anims or {}) do
             name = tostring(name)
-            if needle == "" or string.StartWith(string.lower(name), needle) then
+            if needle == "" or string.StartsWith(string.lower(name), needle) then
                 matches[#matches + 1] = command .. " " .. name
             end
         end

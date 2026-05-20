@@ -352,7 +352,7 @@ function VMLegs:GetCurrentAnim()
     local track = GCAL.ActiveTracks["legs"]
     if not track or not track.name then return nil end
 
-    if string.StartWith(track.name, "legs_") then
+    if string.StartsWith(track.name, "legs_") then
         return string.sub(track.name, 6)
     end
 
