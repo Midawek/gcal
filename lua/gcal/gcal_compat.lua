@@ -365,14 +365,17 @@ end
 
 GCAL.ImportedFiles = GCAL.ImportedFiles or {}
 
+local importedFileSet = {}
+
 -- Auto-Import Legacy Animations from other addons
 local function GCAL_ImportLegacy()
     local path = "vmanip/anims/"
     local files = file.Find(path .. "*.lua", "LUA")
-    
-    for _, v in pairs(files) do
+
+    for _, v in ipairs(files) do
         local fullPath = path .. v
-        if not table.HasValue(GCAL.ImportedFiles, fullPath) then
+        if not importedFileSet[fullPath] then
+            importedFileSet[fullPath] = true
             table.insert(GCAL.ImportedFiles, fullPath)
             if SERVER then
                 AddCSLuaFile(fullPath)

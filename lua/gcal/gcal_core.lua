@@ -222,19 +222,14 @@ function GCAL:IsPreventQuit(trackID)
 end
 
 if CLIENT then
+    local EyeAngles = EyeAngles
+    local EyePos = EyePos
+
     local curtime = 0
     local scalevec = Vector(1, 1, 1)
     local scaleflipvec = Vector(1, 1, -1)
     local properang = Angle(-79.750, 0, -90)
     local tableintensity = {1, 1, 1}
-
-    local function GetMainEyePos()
-        return EyePos()
-    end
-
-    local function GetMainEyeAngles()
-        return EyeAngles()
-    end
 
     local SyncLegacyVManipFields
 
@@ -522,7 +517,7 @@ if CLIENT then
             segmentCount = 0,
             camAng = anim.cam_ang or properang,
             camAngInt = anim.cam_angint or tableintensity,
-            lockZ = anim.locktoply and GetMainEyePos().z or 0,
+            lockZ = anim.locktoply and EyePos().z or 0,
             attachment = nil,
             bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
@@ -918,21 +913,19 @@ if CLIENT then
         return thirdpersonState.rootRemap * modelMatrix
     end
 
+    local flipState = { lefty = false, flippedNow = false, flipmode = false, targetRight = false, targetBones = nil, targetSide = "left_arm" }
     local function GetLegacyFlipState(weapon)
         local validWeapon = IsValid(weapon)
         local lefty = validWeapon and tobool(weapon.ViewModelFlipDefault) or false
         local flippedNow = validWeapon and tobool(weapon.ViewModelFlip) or false
         local flipmode = validWeapon and lefty ~= flippedNow or false
-        local targetRight = flipmode
-
-        return {
-            lefty = lefty,
-            flippedNow = flippedNow,
-            flipmode = flipmode,
-            targetRight = targetRight,
-            targetBones = targetRight and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM,
-            targetSide = targetRight and "right_arm" or "left_arm"
-        }
+        flipState.lefty = lefty
+        flipState.flippedNow = flippedNow
+        flipState.flipmode = flipmode
+        flipState.targetRight = flipmode
+        flipState.targetBones = flipmode and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
+        flipState.targetSide = flipmode and "right_arm" or "left_arm"
+        return flipState
     end
 
     local function DrawGShaderFriendlyModel(model, flags)
@@ -975,7 +968,7 @@ if CLIENT then
             track.model:SetAngles(newang + sourceAngleOffset)
             track.model:SetPos(eyepos)
         elseif not track.data.assurepos then
-            local eyeang, eyepos = GetMainEyeAngles(), GetMainEyePos()
+            local eyeang, eyepos = EyeAngles(), EyePos()
             track.model:SetAngles(eyeang + sourceAngleOffset)
             track.model:SetPos(eyepos)
         end
@@ -987,15 +980,16 @@ if CLIENT then
 
         track.model:SetupBones()
         track.model:SetModelScale(flipmode and -1 or 1)
-        if flipmode then
-            render.CullMode(MATERIAL_CULLMODE_CW)
-        end
+        if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
         DrawGShaderFriendlyModel(track.model, flags)
-        render.CullMode(MATERIAL_CULLMODE_CCW)
+        if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
 
         local rigpick = GCAL.GROUPS.LEFT_ARM
         local targetRig = flip.targetBones
         local boneCount = 0
+        local lerpVal = track.lerpVal
+        local lerpCurve = track.lerpCurve or 1
+        local legacyLerp = GCAL.Lerp.Legacy
 
         for k, boneName in ipairs(rigpick) do
             local sourceBoneName = boneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or boneName
@@ -1013,7 +1007,7 @@ if CLIENT then
 
                     for i, row in pairs(gestureTable) do
                         for j, value in pairs(row) do
-                            gestureTable[i][j] = GCAL.Lerp.Legacy(track.lerpVal, value, targetTable[i][j], track.lerpCurve or 1)
+                            gestureTable[i][j] = legacyLerp(lerpVal, value, targetTable[i][j], lerpCurve)
                         end
                     end
 
@@ -1043,7 +1037,7 @@ if CLIENT then
 
         local flip = GetLegacyFlipState(weapon)
         local flipmode = flip.flipmode
-        local eyeang, eyepos = GetMainEyeAngles(), GetMainEyePos()
+        local eyeang, eyepos = EyeAngles(), EyePos()
         
         if thirdperson then
             local renderAngles = vm.GetRenderAngles and vm:GetRenderAngles() or vm:GetAngles()
@@ -1066,10 +1060,13 @@ if CLIENT then
         if not thirdperson and not suppressSourceDraw then
             DrawGShaderFriendlyModel(track.model, flags)
         end
-        render.CullMode(MATERIAL_CULLMODE_CCW)
+        if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
 
         local boneCount = 0
         local curve = track.lerpCurve or track.data.lerp_curve or 1
+        local lerpVal = track.lerpVal
+        local matrixLerp = track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp
+        local scaleVec = flip.lefty and lerpVal <= 0.5 and scaleflipvec or scalevec
         local thirdpersonState = thirdperson and {} or nil
 
         for k, boneName in ipairs(track.bones) do
@@ -1077,7 +1074,7 @@ if CLIENT then
             sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or sourceBoneName
             local modelBone = track.model:LookupBone(sourceBoneName)
             if not modelBone or modelBone < 0 then continue end
-            
+
             local modelMatrix = track.model:GetBoneMatrix(modelBone)
             if modelMatrix then
                 local targetBoneName = flip.targetBones[k] or boneName
@@ -1096,17 +1093,14 @@ if CLIENT then
                 local targetTable = targetMatrix:ToTable()
 
                 for i = 1, 4 do
+                    local mi, ti = mTable[i], targetTable[i]
                     for j = 1, 4 do
-                        if track.legacyMatrixLerp then
-                            mTable[i][j] = GCAL.Lerp.Legacy(track.lerpVal, mTable[i][j], targetTable[i][j], curve)
-                        else
-                            mTable[i][j] = Lerp(track.lerpVal, mTable[i][j], targetTable[i][j])
-                        end
+                        mi[j] = matrixLerp(lerpVal, mi[j], ti[j], curve)
                     end
                 end
 
                 local m = Matrix(mTable)
-                m:SetScale(lefty and track.lerpVal <= 0.5 and scaleflipvec or scalevec)
+                m:SetScale(scaleVec)
                 vm:SetBoneMatrix(targetBone, m)
                 boneCount = boneCount + 1
             end
@@ -1188,7 +1182,7 @@ if CLIENT then
         if ply ~= LocalPlayer() or not IsValid(ply) or not ply:Alive() then return end
         local viewEntity = ply.GetViewEntity and ply:GetViewEntity() or ply
         if not ply:ShouldDrawLocalPlayer() and viewEntity == ply then return end
-        if table.Count(GCAL.ActiveTracks) == 0 then return end
+        if next(GCAL.ActiveTracks) == nil then return end
         if thirdpersonFrame == FrameNumber() then return end
         thirdpersonFrame = FrameNumber()
 

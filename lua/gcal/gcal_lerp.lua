@@ -55,12 +55,12 @@ function GCAL.Lerp.OutElastic(t, b, c, d, a, p)
     else
         s = p / (2 * math.pi) * math.asin(c / a)
     end
-    return a * math.pow(2, -10 * t) * math.sin((t * d - s) * (2 * math.pi) / p) + c + b
+    return a * 2 ^ (-10 * t) * math.sin((t * d - s) * (2 * math.pi) / p) + c + b
 end
 
 -- Legacy Power-based Lerp (for compatibility)
 function GCAL.Lerp.Legacy(t, a, b, powa)
-    return a + (b - a) * math.pow(t, powa)
+    return a + (b - a) * t ^ powa
 end
 
 -- Helper to get lerp function by name
