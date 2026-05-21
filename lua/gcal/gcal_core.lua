@@ -924,8 +924,8 @@ if CLIENT then
         flipState.lefty = lefty
         flipState.flippedNow = flippedNow
         flipState.flipmode = flipmode
-        flipState.targetRight = flipmode
-        flipState.targetBones = flipmode and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
+        flipState.targetRight = lefty
+        flipState.targetBones = lefty and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
         flipState.targetSide = flipmode and "right_arm" or "left_arm"
         return flipState
     end
@@ -1039,6 +1039,7 @@ if CLIENT then
 
         local flip = GetLegacyFlipState(weapon)
         local flipmode = flip.flipmode
+        local sourceAngleOffset = flipmode and angleFlip or angleZero
         local eyeang, eyepos = EyeAngles(), EyePos()
         
         if thirdperson then
@@ -1046,13 +1047,13 @@ if CLIENT then
             track.model:SetAngles(renderAngles)
             track.model:SetPos(vm:GetPos())
         elseif track.data.legacy then
-            track.model:SetAngles(flipmode and eyeang + angleFlip or eyeang)
+            track.model:SetAngles(eyeang + sourceAngleOffset)
             track.model:SetPos(eyepos)
         elseif track.data.locktoply or track.data.assurepos then
-            track.model:SetAngles(flipmode and eyeang + angleFlip or eyeang)
+            track.model:SetAngles(eyeang + sourceAngleOffset)
             track.model:SetPos(eyepos)
         else
-            track.model:SetAngles(vm:GetAngles())
+            track.model:SetAngles(vm:GetAngles() + sourceAngleOffset)
             track.model:SetPos(vm:GetPos())
         end
 
