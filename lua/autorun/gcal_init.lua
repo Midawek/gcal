@@ -19,6 +19,12 @@ if CLIENT then
         ["3425927104"] = "Vmanip Base with knockdown",
         ["2844472642"] = "Vmanip +",
         ["3714993549"] = "Vmanip (Lite)",
+        ["3037375111"] = "Quick Slide With Legs [VManip],
+        ["3075697216"] = "[VManip] Tactical Spray",
+        ["3091371851"] = "Timer HUD for [VManip] Quick Grenades",
+        ["3100506899"] = "[VManip] Alien: Isolation - Motion Tracker ",
+        ["3161191076"] = "[VManip] MW Stim (also MWII/MWIII)".
+
         -- ["1234567890"] = "Example Addon"
     }
 
