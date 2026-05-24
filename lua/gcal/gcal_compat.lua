@@ -463,7 +463,6 @@ if CLIENT then
         end,
         resolveViewModel = OwnerViewModel,
         resolveLegsViewModel = OwnerViewModel,
-        resolveArmTarget = PreferHandsWhenUseHands,
         preActCheck = function(ply, weapon, name, vm)
             if weapon:ShouldDrawCrosshair() or (IsValid(vm) and vm:GetCycle() > 0.99) then return true end
         end,

@@ -1298,7 +1298,7 @@ if CLIENT then
     end)
 
     hook.Add("PostDrawViewModel", "VManip", function(vm, ply, weapon, flags)
-        if not IsValid(weapon) or not weapon:IsScripted() then return end
+        if not IsValid(weapon) or not weapon:IsScripted() or weapon.UseHands then return end
         RenderTracks(nil, vm, ply, weapon, flags, false)
     end)
 
