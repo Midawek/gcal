@@ -936,12 +936,90 @@ if CLIENT then
         model:DrawModel(flags)
     end
 
-    local function UsesMWBaseViewModel(weapon)
-        return IsValid(weapon) and IsValid(weapon.m_ViewModel)
+    GCAL.WeaponBaseStrategies = GCAL.WeaponBaseStrategies or {}
+
+    local function EntityHasAnyBone(ent, bones)
+        if not IsValid(ent) or not bones then return false end
+
+        for _, boneName in ipairs(bones) do
+            local bone = ent:LookupBone(boneName)
+            if bone ~= nil and bone >= 0 then return true end
+        end
+
+        return false
+    end
+
+    function GCAL:RegisterWeaponBaseStrategy(id, strategy)
+        if not id or not strategy or not isfunction(strategy.detect) then return false end
+
+        strategy.id = id
+        for k, existing in ipairs(self.WeaponBaseStrategies) do
+            if existing.id == id then
+                self.WeaponBaseStrategies[k] = strategy
+                return true
+            end
+        end
+
+        self.WeaponBaseStrategies[#self.WeaponBaseStrategies + 1] = strategy
+        return true
+    end
+
+    function GCAL:GetWeaponBaseStrategy(ply, weapon)
+        if not IsValid(weapon) then return nil end
+
+        for _, strategy in ipairs(self.WeaponBaseStrategies or {}) do
+            if strategy.detect(ply, weapon) then return strategy end
+        end
+
+        return nil
+    end
+
+    function GCAL:FindArmTarget(vm, handsEnt, targetBones)
+        if EntityHasAnyBone(vm, targetBones) then return vm end
+        if EntityHasAnyBone(handsEnt, targetBones) then return handsEnt end
+
+        return vm
+    end
+
+    function GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
+        local strategy = self:GetWeaponBaseStrategy(ply, weapon)
+        local context = {
+            strategy = strategy,
+            strategy_id = strategy and strategy.id or "normal",
+            ply = ply,
+            weapon = weapon,
+            vm = vm,
+            handsEnt = handsEnt
+        }
+
+        if strategy and strategy.resolveViewModel then
+            local resolved = strategy.resolveViewModel(ply, weapon, vm, handsEnt, context)
+            if IsValid(resolved) then context.vm = resolved end
+        elseif hook.GetTable and hook.GetTable().VManipVMEntity then
+            local resolved = hook.Run("VManipVMEntity", ply, weapon)
+            if IsValid(resolved) then
+                context.strategy_id = "hook"
+                context.vm = resolved
+            end
+        end
+
+        return context
+    end
+
+    function GCAL:ResolveArmTarget(context, targetBones)
+        if not context then return nil end
+
+        local strategy = context.strategy
+        if strategy and strategy.resolveArmTarget then
+            local target = strategy.resolveArmTarget(context.ply, context.weapon, context.vm, context.handsEnt, targetBones, context)
+            if IsValid(target) then return target end
+        end
+
+        return self:FindArmTarget(context.vm, context.handsEnt, targetBones)
     end
 
     local posparentcache
-    local function ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags)
+    local function ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext)
         if not IsValid(track.model) or not IsValid(vm) then return end
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
 
@@ -988,6 +1066,10 @@ if CLIENT then
 
         local rigpick = GCAL.GROUPS.LEFT_ARM
         local targetRig = flip.targetBones
+        local targetEnt = GCAL:ResolveArmTarget(renderContext, targetRig)
+        if not IsValid(targetEnt) then return end
+        targetEnt:SetupBones()
+
         local boneCount = 0
         local lerpVal = track.lerpVal
         local lerpCurve = track.lerpCurve or 1
@@ -999,10 +1081,10 @@ if CLIENT then
             if sourceBone == nil or sourceBone < 0 then continue end
 
             local gestureMatrix = track.model:GetBoneMatrix(sourceBone)
-            local targetBone = vm:LookupBone(targetRig[k] or boneName)
+            local targetBone = targetEnt:LookupBone(targetRig[k] or boneName)
 
             if targetBone ~= nil and targetBone >= 0 and gestureMatrix ~= nil then
-                local targetBoneMatrix = vm:GetBoneMatrix(targetBone)
+                local targetBoneMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if targetBoneMatrix then
                     local targetTable = targetBoneMatrix:ToTable()
                     local gestureTable = gestureMatrix:ToTable()
@@ -1015,19 +1097,22 @@ if CLIENT then
 
                     local m = Matrix(gestureTable)
                     m:SetScale(flip.targetRight and flipped or scalevec)
-                    vm:SetBoneMatrix(targetBone, m)
+                    targetEnt:SetBoneMatrix(targetBone, m)
                     boneCount = boneCount + 1
                 end
             end
         end
 
+        if targetEnt ~= vm then
+            targetEnt:InvalidateBoneCache()
+        end
         if IsValid(handsEnt) then
             handsEnt:InvalidateBoneCache()
         end
         track.debugBoneCount = boneCount
     end
 
-    local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags)
+    local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext)
         if not IsValid(vm) or not track.bones then return end
 
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
@@ -1041,6 +1126,10 @@ if CLIENT then
         local flipmode = flip.flipmode
         local sourceAngleOffset = flipmode and angleFlip or angleZero
         local eyeang, eyepos = EyeAngles(), EyePos()
+        local targetBones = flip.targetBones or track.bones
+        local targetEnt = thirdperson and vm or GCAL:ResolveArmTarget(renderContext, targetBones)
+        if not IsValid(targetEnt) then return end
+        targetEnt:SetupBones()
         
         if thirdperson then
             local renderAngles = vm.GetRenderAngles and vm:GetRenderAngles() or vm:GetAngles()
@@ -1081,15 +1170,15 @@ if CLIENT then
             local modelMatrix = track.model:GetBoneMatrix(modelBone)
             if modelMatrix then
                 local targetBoneName = flip.targetBones[k] or boneName
-                local targetBone = vm:LookupBone(targetBoneName)
+                local targetBone = targetEnt:LookupBone(targetBoneName)
                 if not targetBone or targetBone < 0 then continue end
 
-                local targetMatrix = vm:GetBoneMatrix(targetBone)
+                local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if not targetMatrix then continue end
 
                 local finalMatrix = modelMatrix
                 if thirdperson then
-                    finalMatrix = BuildThirdPersonMatrix(track, vm, targetBone, modelBone, targetMatrix, modelMatrix, thirdpersonState)
+                    finalMatrix = BuildThirdPersonMatrix(track, targetEnt, targetBone, modelBone, targetMatrix, modelMatrix, thirdpersonState)
                 end
 
                 local mTable = finalMatrix:ToTable()
@@ -1104,11 +1193,14 @@ if CLIENT then
 
                 local m = Matrix(mTable)
                 m:SetScale(scaleVec)
-                vm:SetBoneMatrix(targetBone, m)
+                targetEnt:SetBoneMatrix(targetBone, m)
                 boneCount = boneCount + 1
             end
         end
 
+        if targetEnt ~= vm then
+            targetEnt:InvalidateBoneCache()
+        end
         if IsValid(handsEnt) and handsEnt ~= vm then
             handsEnt:InvalidateBoneCache()
         end
@@ -1151,8 +1243,8 @@ if CLIENT then
             return
         end
 
-        local vment = hook.Run("VManipVMEntity", ply, weapon)
-        if IsValid(vment) then vm = vment end
+        local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
+        vm = renderContext.vm
 
         for id, track in pairs(GCAL.ActiveTracks) do
             if id == "legacy_left_arm" and IsValid(ply) and not ply:Alive() then
@@ -1169,9 +1261,9 @@ if CLIENT then
             
             if not alreadyUpdated and UpdateTrack(track, id) then continue end
             if id == "legacy_left_arm" then
-                ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags)
+                ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext)
             else
-                ApplyBones(track, vm, handsEnt, ply, weapon, false, false, flags)
+                ApplyBones(track, vm, handsEnt, ply, weapon, false, false, flags, renderContext)
             end
         end
 
@@ -1373,13 +1465,16 @@ if CLIENT then
         local ply = LocalPlayer()
         local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
         local vm = IsValid(ply) and ply:GetViewModel() or nil
-        local vment = hook.Run("VManipVMEntity", ply, weapon)
-        if IsValid(vment) then vm = vment end
+        local handsEnt = IsValid(ply) and ply:GetHands() or nil
+        local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
+        vm = renderContext.vm
 
         if not IsValid(vm) then
             MsgC(Color(255, 176, 93), " - no valid viewmodel entity\n")
             return
         end
+
+        MsgC(Color(236, 242, 255), " - weapon strategy: " .. tostring(renderContext.strategy_id) .. "\n")
 
         local flip = GetLegacyFlipState(weapon)
         if IsValid(weapon) then
@@ -1391,7 +1486,21 @@ if CLIENT then
         end
 
         vm:SetupBones()
+        if IsValid(handsEnt) then handsEnt:SetupBones() end
         if IsValid(track.model) then track.model:SetupBones() end
+
+        local targetBones = track.bones or {}
+        if track.data and track.data.legacy then
+            targetBones = flip.targetBones
+        end
+
+        local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
+        if not IsValid(targetEnt) then
+            MsgC(Color(255, 176, 93), " - no valid arm target entity\n")
+            return
+        end
+
+        MsgC(Color(236, 242, 255), " - arm target entity: " .. tostring(targetEnt) .. "\n")
 
         local matched = 0
         local samples = 0
@@ -1400,7 +1509,7 @@ if CLIENT then
             if track.data and track.data.legacy then
                 targetBoneName = flip.targetBones[k] or boneName
             end
-            local targetBone = vm:LookupBone(targetBoneName)
+            local targetBone = targetEnt:LookupBone(targetBoneName)
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
             sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or sourceBoneName
             local modelBone = IsValid(track.model) and track.model:LookupBone(sourceBoneName) or nil
@@ -1409,7 +1518,7 @@ if CLIENT then
                 MsgC(Color(236, 242, 255), "   * " .. tostring(targetBoneName) .. " <- " .. tostring(sourceBoneName) .. "\n")
 
                 if samples < 3 then
-                    local targetMatrix = vm:GetBoneMatrix(targetBone)
+                    local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
                     local sourceMatrix = track.model:GetBoneMatrix(modelBone)
                     if targetMatrix and sourceMatrix then
                         local targetPos = targetMatrix:GetTranslation()

@@ -434,69 +434,105 @@ if CLIENT then
         end
     end
 
-    hook.Add("VManipPreActCheck", "GCAL_Compat_ArcCWActCheck", function(name, vm)
-        local ply = LocalPlayer()
-        local weapon = ply:GetActiveWeapon()
-        if IsValid(weapon) and weapon.ArcCW then
+    local function OwnerViewModel(ply, weapon)
+        local owner = IsValid(weapon) and weapon.GetOwner and weapon:GetOwner() or ply
+        if IsValid(owner) and owner.GetViewModel then return owner:GetViewModel() end
+        if IsValid(ply) and ply.GetViewModel then return ply:GetViewModel() end
+    end
+
+    local function PreferHandsWhenUseHands(_, weapon, vm, handsEnt, targetBones)
+        if IsValid(weapon) and weapon.UseHands then
+            return GCAL:FindArmTarget(handsEnt, vm, targetBones)
+        end
+
+        return GCAL:FindArmTarget(vm, handsEnt, targetBones)
+    end
+
+    GCAL:RegisterWeaponBaseStrategy("tfa", {
+        detect = function(_, weapon)
+            return IsValid(weapon) and weapon.IsTFAWeapon
+        end,
+        resolveViewModel = OwnerViewModel,
+        resolveLegsViewModel = OwnerViewModel,
+        resolveArmTarget = PreferHandsWhenUseHands
+    })
+
+    GCAL:RegisterWeaponBaseStrategy("arccw", {
+        detect = function(_, weapon)
+            return IsValid(weapon) and weapon.ArcCW
+        end,
+        resolveViewModel = OwnerViewModel,
+        resolveLegsViewModel = OwnerViewModel,
+        resolveArmTarget = PreferHandsWhenUseHands,
+        preActCheck = function(ply, weapon, name, vm)
             if weapon:ShouldDrawCrosshair() or (IsValid(vm) and vm:GetCycle() > 0.99) then return true end
+        end,
+        prePlayAnim = function(_, weapon)
+            if weapon:GetNWBool("reloading") then return false end
         end
-    end)
+    })
 
-    hook.Add("VManipPrePlayAnim", "GCAL_Compat_ArcCWReload", function()
-        local weapon = LocalPlayer():GetActiveWeapon()
-        if IsValid(weapon) and weapon.ArcCW and weapon:GetNWBool("reloading") then return false end
-    end)
-
-    hook.Add("VManipPrePlayAnim", "GCAL_Compat_MWBaseReload", function()
-        local weapon = LocalPlayer():GetActiveWeapon()
-        if IsValid(weapon) and weapon.GetIsReloading and weapon:GetIsReloading() then return false end
-    end)
-
-    hook.Add("VManipVMEntity", "GCAL_Compat_ArcCW", function(ply, weapon)
-        if IsValid(weapon) and weapon.ArcCW then
-            return weapon:GetOwner():GetViewModel()
-        end
-    end)
-
-    hook.Add("VManipLegsVMEntity", "GCAL_Compat_ArcCW", function(ply, weapon)
-        if IsValid(weapon) and weapon.ArcCW then
-            return weapon:GetOwner():GetViewModel()
-        end
-    end)
-
-    hook.Add("VManipVMEntity", "GCAL_Compat_TFA", function(ply, weapon)
-        if IsValid(weapon) and weapon.IsTFAWeapon then
-            return weapon:GetOwner():GetViewModel()
-        end
-    end)
-
-    hook.Add("VManipLegsVMEntity", "GCAL_Compat_TFA", function(ply, weapon)
-        if IsValid(weapon) and weapon.IsTFAWeapon then
-            return weapon:GetOwner():GetViewModel()
-        end
-    end)
-
-    hook.Add("VManipVMEntity", "GCAL_Compat_MWBase", function(ply, weapon)
-        if IsValid(weapon) and IsValid(weapon.m_ViewModel) then
+    GCAL:RegisterWeaponBaseStrategy("mwbase", {
+        detect = function(_, weapon)
+            return IsValid(weapon) and IsValid(weapon.m_ViewModel)
+        end,
+        resolveViewModel = function(_, weapon)
             return weapon.m_ViewModel
-        end
-    end)
-
-    hook.Add("VManipLegsVMEntity", "GCAL_Compat_MWBase", function(ply, weapon)
-        if IsValid(weapon) and IsValid(weapon.m_ViewModel) then
+        end,
+        resolveLegsViewModel = function(_, weapon)
             return weapon.m_ViewModel
+        end,
+        prePlayAnim = function(_, weapon)
+            if weapon.GetIsReloading and weapon:GetIsReloading() then return false end
         end
-    end)
+    })
 
-    hook.Add("VManipVMEntity", "GCAL_Compat_CW2", function(ply, weapon)
-        if IsValid(weapon) and IsValid(weapon.CW_VM) then
+    GCAL:RegisterWeaponBaseStrategy("cw2", {
+        detect = function(_, weapon)
+            return IsValid(weapon) and IsValid(weapon.CW_VM)
+        end,
+        resolveViewModel = function(_, weapon)
+            return weapon.CW_VM
+        end,
+        resolveLegsViewModel = function(_, weapon)
             return weapon.CW_VM
         end
+    })
+
+    hook.Add("VManipPreActCheck", "GCAL_Compat_StrategyActCheck", function(name, vm)
+        local ply = LocalPlayer()
+        local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
+        local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+        if strategy and strategy.preActCheck then
+            return strategy.preActCheck(ply, weapon, name, vm, strategy)
+        end
     end)
 
-    hook.Add("VManipLegsVMEntity", "GCAL_Compat_CW2", function(ply, weapon)
-        if IsValid(weapon) and IsValid(weapon.CW_VM) then
-            return weapon.CW_VM
+    hook.Add("VManipPrePlayAnim", "GCAL_Compat_StrategyPrePlay", function(name)
+        local ply = LocalPlayer()
+        local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
+        local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+        if strategy and strategy.prePlayAnim then
+            return strategy.prePlayAnim(ply, weapon, name, strategy)
+        end
+    end)
+
+    hook.Add("VManipVMEntity", "GCAL_Compat_StrategyVMEntity", function(ply, weapon)
+        local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+        if not strategy or not strategy.resolveViewModel then return end
+
+        local vm = IsValid(ply) and ply.GetViewModel and ply:GetViewModel() or nil
+        return strategy.resolveViewModel(ply, weapon, vm, nil, strategy)
+    end)
+
+    hook.Add("VManipLegsVMEntity", "GCAL_Compat_StrategyLegsVMEntity", function(ply, weapon)
+        local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+        if not strategy then return end
+
+        local resolver = strategy.resolveLegsViewModel or strategy.resolveViewModel
+        if resolver then
+            local vm = IsValid(ply) and ply.GetViewModel and ply:GetViewModel() or nil
+            return resolver(ply, weapon, vm, nil, strategy)
         end
     end)
 end
