@@ -282,7 +282,62 @@ If your addon already uses VManip, you don't need to change anything!
 - Legacy helpers such as `VManip:QueueAnim`, `VManip:QuitHolding(anim)`, `VManip:PlaySegment`, `VManip:GetCycle`, and camera attachment offsets are supported.
 - Legacy sequence resolution is tolerant of common old-addon mistakes: GCAL tries the registered animation name, an explicit `sequence`, a lowercase name, normalized and partial normalized legacy-name matches, a `c_vmanip...` model-filename match, and the only model sequence when one exists.
 - If a legacy model reports zero sequences, GCAL can fall back to a compatible surrogate animation or a pose-only compatibility mode instead of hard-failing immediately.
-- Chen patch behavior for flipped viewmodels, player legs, and MWBase/CW2/TFA/ArcCW viewmodel hooks is built into the compatibility layer.
+- Chen patch behavior for flipped viewmodels, player legs, and MWBase/TFA/ArcCW special handling is built into the compatibility layer.
+
+### Weapon Base Strategies
+
+GCAL resolves special weapon-base behavior through ordered clientside strategies instead of scattering one-off checks through the renderer.
+
+Built-in strategy order:
+
+1. `tfa`
+2. `arccw`
+3. `mwbase`
+4. Normal GCAL rendering fallback
+
+Each strategy can detect a weapon base, choose the viewmodel entity GCAL should render against, choose the entity that owns the target arm bones, and block legacy VManip playback during base-specific reload states.
+
+Current built-in behavior:
+
+| Strategy | Detection | Viewmodel handling | Notes |
+| :------- | :-------- | :----------------- | :---- |
+| `tfa` | `weapon.IsTFAWeapon` | Uses the owner's normal viewmodel. | Matches Chen's patch: no TFA-specific VM hook and no forced hands-first target. TFA still uses the shared `PreDrawPlayerHands` path for `UseHands` weapons and `TFA_PreReload` reload blocking. |
+| `arccw` | `weapon.ArcCW` | Uses the owner's normal viewmodel. | Matches Chen's patch: `UseHands` weapons render through `PreDrawPlayerHands`, skip the generic `PostDrawViewModel` pass, and keep VM-first arm targeting. Reload playback is blocked while ArcCW reports `reloading`. |
+| `mwbase` | valid `weapon.m_ViewModel` | Uses `weapon.m_ViewModel`. | Custom VM entity is used for arms and legs when present. |
+
+To add another special weapon base, register a strategy clientside:
+
+```lua
+if CLIENT then
+    GCAL:RegisterWeaponBaseStrategy("examplebase", {
+        detect = function(ply, weapon)
+            return IsValid(weapon) and weapon.ExampleBase
+        end,
+
+        resolveViewModel = function(ply, weapon, vm, handsEnt, context)
+            return IsValid(weapon.ExampleViewModel) and weapon.ExampleViewModel or vm
+        end,
+
+        resolveLegsViewModel = function(ply, weapon, vm, handsEnt, context)
+            return IsValid(weapon.ExampleViewModel) and weapon.ExampleViewModel or vm
+        end,
+
+        resolveArmTarget = function(ply, weapon, vm, handsEnt, targetBones, context)
+            return GCAL:FindArmTarget(vm, handsEnt, targetBones)
+        end,
+
+        prePlayAnim = function(ply, weapon, animName, strategy)
+            if weapon.GetIsReloading and weapon:GetIsReloading() then return false end
+        end,
+
+        preActCheck = function(ply, weapon, animName, vm, strategy)
+            if IsValid(vm) and vm:GetCycle() > 0.99 then return true end
+        end
+    })
+end
+```
+
+Only `detect` is required. Omit callbacks you do not need. If no strategy matches, GCAL uses the regular viewmodel and player hands entities passed by Garry's Mod. Legacy `VManipVMEntity` hooks are still respected as a fallback for external addons that provide their own compatibility hook.
 
 ### Registering Conflicting Workshop Addons
 
@@ -361,9 +416,13 @@ Use these console commands during development:
 - `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
 - `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.
 - `gcal_debug_sequences <animation>`: Prints the runtime sequence list for the animation model and warns when the model exposes zero sequences.
-- `gcal_debug_track [track]`: Dumps the current track state, matched bones, source/target deltas, and active flip-side information.
+- `gcal_debug_track [track]`: Dumps the current track state, selected weapon-base strategy, arm target entity, matched bones, source/target deltas, and active flip-side information.
 - `gcal_stop [track]`: Stops one track, or all active tracks when no track is provided.
 - `gcal_dynabase_status`: Shows whether DynaBase is detected and lists queued GCAL DynaBase sources.
+- `gcal_menu_open`: Opens the GCAL desktop-window menu.
+- `gcal_debug_menu`: Dumps GCAL menu state and attempts a menu refresh.
+- `gcal_show_now`: Opens and refreshes the current GCAL menu window immediately.
+- `gcal_rebuild_menu`: Removes and rebuilds the current GCAL menu window.
 
 ---
 

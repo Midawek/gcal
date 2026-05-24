@@ -440,21 +440,12 @@ if CLIENT then
         if IsValid(ply) and ply.GetViewModel then return ply:GetViewModel() end
     end
 
-    local function PreferHandsWhenUseHands(_, weapon, vm, handsEnt, targetBones)
-        if IsValid(weapon) and weapon.UseHands then
-            return GCAL:FindArmTarget(handsEnt, vm, targetBones)
-        end
-
-        return GCAL:FindArmTarget(vm, handsEnt, targetBones)
-    end
-
     GCAL:RegisterWeaponBaseStrategy("tfa", {
         detect = function(_, weapon)
             return IsValid(weapon) and weapon.IsTFAWeapon
         end,
         resolveViewModel = OwnerViewModel,
-        resolveLegsViewModel = OwnerViewModel,
-        resolveArmTarget = PreferHandsWhenUseHands
+        resolveLegsViewModel = OwnerViewModel
     })
 
     GCAL:RegisterWeaponBaseStrategy("arccw", {
@@ -483,18 +474,6 @@ if CLIENT then
         end,
         prePlayAnim = function(_, weapon)
             if weapon.GetIsReloading and weapon:GetIsReloading() then return false end
-        end
-    })
-
-    GCAL:RegisterWeaponBaseStrategy("cw2", {
-        detect = function(_, weapon)
-            return IsValid(weapon) and IsValid(weapon.CW_VM)
-        end,
-        resolveViewModel = function(_, weapon)
-            return weapon.CW_VM
-        end,
-        resolveLegsViewModel = function(_, weapon)
-            return weapon.CW_VM
         end
     })
 
