@@ -1103,12 +1103,10 @@ if CLIENT then
             end
         end
 
-        if targetEnt ~= vm then
-            targetEnt:InvalidateBoneCache()
-        end
-        if IsValid(handsEnt) then
+        if IsValid(handsEnt) and handsEnt ~= targetEnt then
             handsEnt:InvalidateBoneCache()
         end
+        track.debugTargetEntity = tostring(targetEnt)
         track.debugBoneCount = boneCount
     end
 
@@ -1198,12 +1196,10 @@ if CLIENT then
             end
         end
 
-        if targetEnt ~= vm then
-            targetEnt:InvalidateBoneCache()
-        end
-        if IsValid(handsEnt) and handsEnt ~= vm then
+        if IsValid(handsEnt) and handsEnt ~= targetEnt then
             handsEnt:InvalidateBoneCache()
         end
+        track.debugTargetEntity = tostring(targetEnt)
         track.debugBoneCount = boneCount
     end
 
@@ -1267,7 +1263,6 @@ if CLIENT then
             end
         end
 
-        if IsValid(handsEnt) then handsEnt:InvalidateBoneCache() end
         renderTracksBusy = false
     end
 
@@ -1460,6 +1455,7 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - cycle: " .. tostring(math.Round(track.cycle or 0, 4)) .. "\n")
         MsgC(Color(236, 242, 255), " - lerp: " .. tostring(math.Round(track.lerpVal or 0, 4)) .. "\n")
         MsgC(Color(236, 242, 255), " - poseOnlyLegacy: " .. tostring(track.poseOnlyLegacy or false) .. "\n")
+        MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
 
         local ply = LocalPlayer()

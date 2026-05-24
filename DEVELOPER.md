@@ -301,7 +301,7 @@ Current built-in behavior:
 
 | Strategy | Detection | Viewmodel handling | Notes |
 | :------- | :-------- | :----------------- | :---- |
-| `tfa` | `weapon.IsTFAWeapon` | Uses the owner's normal viewmodel. | Matches Chen's patch: no TFA-specific VM hook and no forced hands-first target. TFA still uses the shared `PreDrawPlayerHands` path for `UseHands` weapons and `TFA_PreReload` reload blocking. |
+| `tfa` | `weapon.IsTFAWeapon` | Uses the owner's normal viewmodel. | Matches Chen's patch: no TFA-specific VM hook and no forced hands-first target. TFA still uses the shared `PreDrawPlayerHands` path for `UseHands` weapons, falls back to the player hands entity when the VM has no arm bones, and uses `TFA_PreReload` reload blocking. |
 | `arccw` | `weapon.ArcCW` | Uses the owner's normal viewmodel. | Matches Chen's patch: `UseHands` weapons render through `PreDrawPlayerHands`, skip the generic `PostDrawViewModel` pass, and keep VM-first arm targeting. Reload playback is blocked while ArcCW reports `reloading`. |
 | `mwbase` | valid `weapon.m_ViewModel` | Uses `weapon.m_ViewModel`. | Custom VM entity is used for arms and legs when present. |
 
@@ -416,7 +416,7 @@ Use these console commands during development:
 - `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
 - `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.
 - `gcal_debug_sequences <animation>`: Prints the runtime sequence list for the animation model and warns when the model exposes zero sequences.
-- `gcal_debug_track [track]`: Dumps the current track state, selected weapon-base strategy, arm target entity, matched bones, source/target deltas, and active flip-side information.
+- `gcal_debug_track [track]`: Dumps the current track state, selected weapon-base strategy, current and last arm target entity, matched bones, source/target deltas, and active flip-side information.
 - `gcal_stop [track]`: Stops one track, or all active tracks when no track is provided.
 - `gcal_dynabase_status`: Shows whether DynaBase is detected and lists queued GCAL DynaBase sources.
 - `gcal_menu_open`: Opens the GCAL desktop-window menu.
