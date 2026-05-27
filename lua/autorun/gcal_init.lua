@@ -23,7 +23,6 @@ if CLIENT then
         ["3075697216"] = "[VManip] Tactical Spray",
         ["3091371851"] = "Timer HUD for [VManip] Quick Grenades",
         ["3100506899"] = "[VManip] Alien: Isolation - Motion Tracker ",
-        ["3161191076"] = "[VManip] MW Stim (also MWII/MWIII)",
         ["349050451"] = "Chuck's Weaponry 2.0",
         -- ["1234567890"] = "Example Addon"
     }
@@ -91,9 +90,9 @@ if CLIENT then
 
         local lines = {
             "Conflicting addons were detected.",
-            "Please disable them to prevent conflicts.",
+            "Please disable them to prevent issues.",
             "GCAL won't work with those properly.",
-            "If you post a bug/issue with any of these addons on, you'll get laughed at and/or ignored. So please disable them before using GCAL.",
+            "If you post a bug/issue with any of these addons on, you'll get laughed at and/or ignored. So please disable them before reporting issues regarding GCAL.",
         }
 
         if hasLegacyFile then
