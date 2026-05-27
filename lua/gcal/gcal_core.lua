@@ -930,24 +930,27 @@ if CLIENT then
         return flipState
     end
 
-    local function TrackUsesLegacyFlip(track)
-        return track and track.data and track.data.legacy
+    local function TrackUsesViewmodelFlip(track, weapon, flip)
+        if not track or not track.data then return false end
+        if track.data.legacy then return true end
+
+        return hook.Run("GCALUseViewmodelFlip", track, weapon, flip) == true
     end
 
-    local function GetTrackTargetBones(track, flip)
-        if TrackUsesLegacyFlip(track) then return flip.targetBones end
+    local function GetTrackTargetBones(track, weapon, flip)
+        if TrackUsesViewmodelFlip(track, weapon, flip) then return flip.targetBones end
 
         return track.bones
     end
 
-    local function GetTrackSourceAngleOffset(track, flip)
-        if TrackUsesLegacyFlip(track) and flip.flipmode then return angleFlip end
+    local function GetTrackSourceAngleOffset(track, weapon, flip)
+        if TrackUsesViewmodelFlip(track, weapon, flip) and flip.flipmode then return angleFlip end
 
         return angleZero
     end
 
-    local function GetTrackModelScale(track, flip)
-        if TrackUsesLegacyFlip(track) and flip.flipmode then return -1 end
+    local function GetTrackModelScale(track, weapon, flip)
+        if TrackUsesViewmodelFlip(track, weapon, flip) and flip.flipmode then return -1 end
 
         return 1
     end
@@ -1048,7 +1051,7 @@ if CLIENT then
         local flip = GetLegacyFlipState(weapon)
         local flipmode = flip.flipmode
         local flipped = (track.lerpVal <= 0.5 and scaleflipvec or scalevec)
-        local sourceAngleOffset = GetTrackSourceAngleOffset(track, flip)
+        local sourceAngleOffset = GetTrackSourceAngleOffset(track, weapon, flip)
 
         if track.data.assurepos then
             if posparentcache ~= weapon then
@@ -1081,7 +1084,7 @@ if CLIENT then
         end
 
         track.model:SetupBones()
-        track.model:SetModelScale(GetTrackModelScale(track, flip))
+        track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
         DrawGShaderFriendlyModel(track.model, flags)
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
@@ -1143,10 +1146,11 @@ if CLIENT then
         end
 
         local flip = GetLegacyFlipState(weapon)
-        local flipmode = TrackUsesLegacyFlip(track) and flip.flipmode or false
-        local sourceAngleOffset = GetTrackSourceAngleOffset(track, flip)
+        local useViewmodelFlip = TrackUsesViewmodelFlip(track, weapon, flip)
+        local flipmode = useViewmodelFlip and flip.flipmode or false
+        local sourceAngleOffset = GetTrackSourceAngleOffset(track, weapon, flip)
         local eyeang, eyepos = EyeAngles(), EyePos()
-        local targetBones = GetTrackTargetBones(track, flip)
+        local targetBones = GetTrackTargetBones(track, weapon, flip)
         local targetEnt = thirdperson and vm or GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then return end
         targetEnt:SetupBones()
@@ -1166,7 +1170,7 @@ if CLIENT then
             track.model:SetPos(vm:GetPos())
         end
 
-        track.model:SetModelScale(GetTrackModelScale(track, flip))
+        track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
         track.model:SetupBones()
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
         if not thirdperson and not suppressSourceDraw then
@@ -1178,7 +1182,7 @@ if CLIENT then
         local curve = track.lerpCurve or track.data.lerp_curve or 1
         local lerpVal = track.lerpVal
         local matrixLerp = track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp
-        local scaleVec = TrackUsesLegacyFlip(track) and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
+        local scaleVec = useViewmodelFlip and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
         local thirdpersonState = thirdperson and {} or nil
 
         for k, boneName in ipairs(track.bones) do
