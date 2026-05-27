@@ -924,10 +924,32 @@ if CLIENT then
         flipState.lefty = lefty
         flipState.flippedNow = flippedNow
         flipState.flipmode = flipmode
-        flipState.targetRight = lefty
-        flipState.targetBones = lefty and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
-        flipState.targetSide = flipmode and "right_arm" or "left_arm"
+        flipState.targetRight = flippedNow
+        flipState.targetBones = flippedNow and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
+        flipState.targetSide = flippedNow and "right_arm" or "left_arm"
         return flipState
+    end
+
+    local function TrackUsesLegacyFlip(track)
+        return track and track.data and track.data.legacy
+    end
+
+    local function GetTrackTargetBones(track, flip)
+        if TrackUsesLegacyFlip(track) then return flip.targetBones end
+
+        return track.bones
+    end
+
+    local function GetTrackSourceAngleOffset(track, flip)
+        if TrackUsesLegacyFlip(track) and flip.flipmode then return angleFlip end
+
+        return angleZero
+    end
+
+    local function GetTrackModelScale(track, flip)
+        if TrackUsesLegacyFlip(track) and flip.flipmode then return -1 end
+
+        return 1
     end
 
     local function DrawGShaderFriendlyModel(model, flags)
@@ -1026,7 +1048,7 @@ if CLIENT then
         local flip = GetLegacyFlipState(weapon)
         local flipmode = flip.flipmode
         local flipped = (track.lerpVal <= 0.5 and scaleflipvec or scalevec)
-        local sourceAngleOffset = flipmode and angleFlip or angleZero
+        local sourceAngleOffset = GetTrackSourceAngleOffset(track, flip)
 
         if track.data.assurepos then
             if posparentcache ~= weapon then
@@ -1059,7 +1081,7 @@ if CLIENT then
         end
 
         track.model:SetupBones()
-        track.model:SetModelScale(flipmode and -1 or 1)
+        track.model:SetModelScale(GetTrackModelScale(track, flip))
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
         DrawGShaderFriendlyModel(track.model, flags)
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
@@ -1121,10 +1143,10 @@ if CLIENT then
         end
 
         local flip = GetLegacyFlipState(weapon)
-        local flipmode = flip.flipmode
-        local sourceAngleOffset = flipmode and angleFlip or angleZero
+        local flipmode = TrackUsesLegacyFlip(track) and flip.flipmode or false
+        local sourceAngleOffset = GetTrackSourceAngleOffset(track, flip)
         local eyeang, eyepos = EyeAngles(), EyePos()
-        local targetBones = flip.targetBones or track.bones
+        local targetBones = GetTrackTargetBones(track, flip)
         local targetEnt = thirdperson and vm or GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then return end
         targetEnt:SetupBones()
@@ -1144,7 +1166,7 @@ if CLIENT then
             track.model:SetPos(vm:GetPos())
         end
 
-        track.model:SetModelScale(flipmode and -1 or 1)
+        track.model:SetModelScale(GetTrackModelScale(track, flip))
         track.model:SetupBones()
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
         if not thirdperson and not suppressSourceDraw then
@@ -1156,7 +1178,7 @@ if CLIENT then
         local curve = track.lerpCurve or track.data.lerp_curve or 1
         local lerpVal = track.lerpVal
         local matrixLerp = track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp
-        local scaleVec = flip.lefty and lerpVal <= 0.5 and scaleflipvec or scalevec
+        local scaleVec = TrackUsesLegacyFlip(track) and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
         local thirdpersonState = thirdperson and {} or nil
 
         for k, boneName in ipairs(track.bones) do
@@ -1167,7 +1189,7 @@ if CLIENT then
 
             local modelMatrix = track.model:GetBoneMatrix(modelBone)
             if modelMatrix then
-                local targetBoneName = flip.targetBones[k] or boneName
+                local targetBoneName = targetBones[k] or boneName
                 local targetBone = targetEnt:LookupBone(targetBoneName)
                 if not targetBone or targetBone < 0 then continue end
 

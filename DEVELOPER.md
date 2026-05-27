@@ -283,6 +283,7 @@ If your addon already uses VManip, you don't need to change anything!
 - Legacy sequence resolution is tolerant of common old-addon mistakes: GCAL tries the registered animation name, an explicit `sequence`, a lowercase name, normalized and partial normalized legacy-name matches, a `c_vmanip...` model-filename match, and the only model sequence when one exists.
 - If a legacy model reports zero sequences, GCAL can fall back to a compatible surrogate animation or a pose-only compatibility mode instead of hard-failing immediately.
 - Chen patch behavior for flipped viewmodels, player legs, and MWBase/TFA/ArcCW special handling is built into the compatibility layer.
+- Legacy flipped-viewmodel handling follows the weapon's current `ViewModelFlip` value for the target arm side, while `ViewModelFlipDefault != ViewModelFlip` controls source-model mirroring. Native GCAL tracks keep their registered hand/bone targets instead of being globally remapped by legacy flip state.
 
 ### Weapon Base Strategies
 
