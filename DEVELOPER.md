@@ -284,7 +284,6 @@ If your addon already uses VManip, you don't need to change anything!
 - If a legacy model reports zero sequences, GCAL can fall back to a compatible surrogate animation or a pose-only compatibility mode instead of hard-failing immediately.
 - Chen patch behavior for flipped viewmodels, player legs, and MWBase/TFA/ArcCW special handling is built into the compatibility layer.
 - Legacy flipped-viewmodel handling follows the weapon's current `ViewModelFlip` value for the target arm side, while `ViewModelFlipDefault != ViewModelFlip` controls source-model mirroring. Native GCAL tracks keep their registered hand/bone targets instead of being globally remapped by legacy flip state.
-- External addons can return `true` from `GCALUseViewmodelFlip(track, weapon, flipState)` to opt a native GCAL track into the same flipped-viewmodel remapping. Universal Viewmodel Flip uses this for standalone GCAL compatibility.
 
 ### Weapon Base Strategies
 
