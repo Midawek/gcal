@@ -70,6 +70,16 @@ local function GCAL_Log(...)
     MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat({...}, " "), "\n")
 end
 
+local function GCAL_ReadBooleanAlias(data, aliases)
+    if not data then return nil end
+
+    for _, key in ipairs(aliases) do
+        if data[key] ~= nil then return tobool(data[key]) end
+    end
+
+    return nil
+end
+
 function GCAL:NormalizeHand(hand)
     hand = string.lower(tostring(hand or "left"))
 
@@ -116,6 +126,16 @@ function GCAL:PrepareAnimData(data, hand)
     data.source_bones = isstring(data.source_bones) and self:GetHandBones(data.source_bones) or data.source_bones
     data.source_bones = data.source_bones or (data.source_hand and self:GetHandBones(data.source_hand)) or data.bones
     data.group_name = data.track or data.track_id or data.group_name or self:GetHandTrack(hand)
+    data.block_code = GCAL_ReadBooleanAlias(data, {
+        "block_code",
+        "blockcode",
+        "stop_code",
+        "stopcode",
+        "block_execution",
+        "stop_execution",
+        "pause_code"
+    }) or false
+    data.block_code_scope = data.block_code_scope or data.code_block_scope or data.block_scope or data.scope
 
     return data
 end
@@ -219,6 +239,28 @@ end
 function GCAL:IsPreventQuit(trackID)
     local track = self:GetTrack(trackID)
     return track and track.preventQuit or false
+end
+
+function GCAL:IsCodeBlocked(scope)
+    for _, track in pairs(self.ActiveTracks or {}) do
+        if track.blockCode and (scope == nil or track.blockCodeScope == nil or track.blockCodeScope == scope) then
+            return true, track
+        end
+    end
+
+    return false, nil
+end
+
+function GCAL:GetCodeBlockers(scope)
+    local blockers = {}
+
+    for trackID, track in pairs(self.ActiveTracks or {}) do
+        if track.blockCode and (scope == nil or track.blockCodeScope == nil or track.blockCodeScope == scope) then
+            blockers[trackID] = track
+        end
+    end
+
+    return blockers
 end
 
 if CLIENT then
@@ -510,6 +552,8 @@ if CLIENT then
             holdQuit = false,
             gestureOnHold = false,
             gesturePastHold = false,
+            blockCode = anim.block_code or false,
+            blockCodeScope = anim.block_code_scope,
             preventQuit = anim.preventquit or false,
             loop = anim.loop or false,
             segmented = anim.segmented or false,
@@ -626,6 +670,9 @@ if CLIENT then
         if trackID == "legacy_left_arm" then
             SyncLegacyVManipFields(track)
         end
+        if track.blockCode then
+            hook.Run("GCALCodeBlockStarted", trackID, name, track, track.blockCodeScope)
+        end
         hook.Run("GCALTrackStarted", trackID, name, track)
         GCAL_Log("Started playback successfully! Track:", trackID)
         return true
@@ -645,6 +692,9 @@ if CLIENT then
                 SyncLegacyVManipFields(nil)
             end
             GCAL.ActiveTracks[trackID] = nil
+            if track.blockCode then
+                hook.Run("GCALCodeBlockStopped", trackID, track.name, track, track.blockCodeScope)
+            end
             hook.Run("GCALTrackStopped", trackID, track.name, track)
             if trackID == "legacy_left_arm" then
                 hook.Run("VManipRemove")
@@ -761,6 +811,8 @@ if CLIENT then
             VManip.HoldQuit = track.holdQuit or false
             VManip.GestureOnHold = track.gestureOnHold or false
             VManip.GesturePastHold = track.gesturePastHold or false
+            VManip.BlockCode = track.blockCode or false
+            VManip.BlockCodeScope = track.blockCodeScope
             VManip.PreventQuit = track.preventQuit or false
             VManip.Segmented = track.segmented or false
             VManip.SegmentFinished = track.segmentFinished or false
@@ -793,6 +845,8 @@ if CLIENT then
             VManip.HoldQuit = false
             VManip.GestureOnHold = false
             VManip.GesturePastHold = false
+            VManip.BlockCode = false
+            VManip.BlockCodeScope = nil
             VManip.PreventQuit = false
             VManip.Segmented = false
             VManip.SegmentFinished = false
@@ -1477,6 +1531,8 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - seqID: " .. tostring(track.seqID) .. "\n")
         MsgC(Color(236, 242, 255), " - cycle: " .. tostring(math.Round(track.cycle or 0, 4)) .. "\n")
         MsgC(Color(236, 242, 255), " - lerp: " .. tostring(math.Round(track.lerpVal or 0, 4)) .. "\n")
+        MsgC(Color(236, 242, 255), " - blockCode: " .. tostring(track.blockCode or false) .. "\n")
+        MsgC(Color(236, 242, 255), " - blockCodeScope: " .. tostring(track.blockCodeScope or "<global>") .. "\n")
         MsgC(Color(236, 242, 255), " - poseOnlyLegacy: " .. tostring(track.poseOnlyLegacy or false) .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")

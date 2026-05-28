@@ -93,6 +93,8 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Reserved for the unfinished thirdperson projection path. Currently ignored while thirdperson support is internally disabled.                          |
+| `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early. Aliases: `stop_code`, `block_execution`, `stop_execution`, `pause_code`. |
+| `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running. Aliases: `code_block_scope`, `block_scope`, `scope`.                 |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
 | `easing_out`         | string       | Easing function for the exit transition.                                                                                                              |
 | `locktoply`          | bool         | If true, pins the animation to the player's view (ignores weapon bob).                                                                                |
@@ -196,6 +198,24 @@ GCAL:SetCycle("left_arm", 0.5)
 GCAL:StopTrack("left_arm")
 ```
 
+For animations that should pause your addon's own follow-up logic while they play, register them with `block_code`:
+
+```lua
+GCAL:RegisterSecondHandAnim("scanner_insert", {
+    model = "myaddon/c_scanner_insert.mdl",
+    block_code = true,
+    block_code_scope = "myaddon_scanner"
+})
+
+hook.Add("Think", "MyAddon_ScannerLogic", function()
+    if GCAL:IsCodeBlocked("myaddon_scanner") then return end
+
+    -- Continue regular scanner logic only after scanner_insert finishes.
+end)
+```
+
+This does not literally pause Lua execution globally. It exposes a scoped runtime gate so cooperating addon code can stop itself for the lifetime of the animation.
+
 For held animations:
 
 ```lua
@@ -237,6 +257,8 @@ Useful native hooks:
 | :------------------------------------------------------------------------- | :------------------------------------------------------------- |
 | `GCALTrackStarted(trackID, animName, track)`                               | Fired after a track starts.                                    |
 | `GCALTrackStopped(trackID, animName, track)`                               | Fired after a track stops.                                     |
+| `GCALCodeBlockStarted(trackID, animName, track, scope)`                    | Fired when a `block_code` animation starts.                    |
+| `GCALCodeBlockStopped(trackID, animName, track, scope)`                    | Fired when a `block_code` animation stops.                     |
 | `GCALPreHoldQuit(trackID, animName, animToStop)`                           | Return `false` to block a native hold release.                 |
 | `GCALHoldQuit(trackID, animName, animToStop)`                              | Fired after a native hold release is accepted.                 |
 | `GCALSegmentFinish(trackID, animName, segment, lastSegment, segmentCount)` | Fired when a segmented animation reaches the end of a segment. |
