@@ -70,16 +70,6 @@ local function GCAL_Log(...)
     MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat({...}, " "), "\n")
 end
 
-local function GCAL_ReadBooleanAlias(data, aliases)
-    if not data then return nil end
-
-    for _, key in ipairs(aliases) do
-        if data[key] ~= nil then return tobool(data[key]) end
-    end
-
-    return nil
-end
-
 function GCAL:NormalizeHand(hand)
     hand = string.lower(tostring(hand or "left"))
 
@@ -126,16 +116,7 @@ function GCAL:PrepareAnimData(data, hand)
     data.source_bones = isstring(data.source_bones) and self:GetHandBones(data.source_bones) or data.source_bones
     data.source_bones = data.source_bones or (data.source_hand and self:GetHandBones(data.source_hand)) or data.bones
     data.group_name = data.track or data.track_id or data.group_name or self:GetHandTrack(hand)
-    data.block_code = GCAL_ReadBooleanAlias(data, {
-        "block_code",
-        "blockcode",
-        "stop_code",
-        "stopcode",
-        "block_execution",
-        "stop_execution",
-        "pause_code"
-    }) or false
-    data.block_code_scope = data.block_code_scope or data.code_block_scope or data.block_scope or data.scope
+    data.block_code = data.block_code ~= nil and tobool(data.block_code) or false
 
     return data
 end

@@ -93,8 +93,8 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Reserved for the unfinished thirdperson projection path. Currently ignored while thirdperson support is internally disabled.                          |
-| `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early. Aliases: `stop_code`, `block_execution`, `stop_execution`, `pause_code`. |
-| `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running. Aliases: `code_block_scope`, `block_scope`, `scope`.                 |
+| `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
+| `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
 | `easing_out`         | string       | Easing function for the exit transition.                                                                                                              |
 | `locktoply`          | bool         | If true, pins the animation to the player's view (ignores weapon bob).                                                                                |
