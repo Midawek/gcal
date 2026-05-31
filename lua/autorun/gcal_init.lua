@@ -11,7 +11,11 @@ end
 
 if CLIENT then
     GCAL = GCAL or {}
-    GCAL.ConflictingWorkshopAddons = GCAL.ConflictingWorkshopAddons or {
+    if not GetConVar("gcal_conflict_popup") then
+        CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
+    end
+
+    local conflictingWorkshopAddons = {
         ["2155366756"] = "VManip (Base)",
         ["3262499127"] = "Chen's VManip Patch",
         ["3080114310"] = "VManip (Base) Remix 2024",
@@ -31,7 +35,7 @@ if CLIENT then
         workshopID = tostring(workshopID or "")
         if workshopID == "" then return end
 
-        self.ConflictingWorkshopAddons[workshopID] = label or ("Workshop addon " .. workshopID)
+        conflictingWorkshopAddons[workshopID] = label or ("Workshop addon " .. workshopID)
     end
 
     local function GetMountedConflictingWorkshopAddons()
@@ -39,7 +43,7 @@ if CLIENT then
 
         for _, addon in ipairs(engine.GetAddons()) do
             local workshopID = tostring(addon.wsid or "")
-            local label = GCAL.ConflictingWorkshopAddons[workshopID]
+            local label = conflictingWorkshopAddons[workshopID]
 
             if label and addon.mounted then
                 found[#found + 1] = {
@@ -54,6 +58,11 @@ if CLIENT then
             return a.display < b.display
         end)
         return found
+    end
+
+    local function ConflictPopupEnabled()
+        local convar = GetConVar("gcal_conflict_popup")
+        return convar == nil or convar:GetBool()
     end
 
     local function ShowConflictPopup(hasLegacyFile, mountedConflicts)
@@ -91,7 +100,7 @@ if CLIENT then
         local lines = {
             "Conflicting addons were detected.",
             "Please disable them to prevent issues.",
-            "GCAL won't work with those properly.",
+            "GCAL won't work with those properly. It doesn't stop any code execution and you're free to use GCAL with them, but expect various issues.",
             "If you post a bug/issue with any of these addons on, you'll get laughed at and/or ignored. So please disable them before reporting issues regarding GCAL.",
         }
 
@@ -248,6 +257,18 @@ if CLIENT then
             gui.OpenURL("https://steamcommunity.com/profiles/" .. steamID64 .. "/myworkshopfiles?appid=4000&browsefilter=mysubscriptions")
         end
 
+        local suppressCheck = vgui.Create("DCheckBoxLabel", frame)
+        suppressCheck:Dock(BOTTOM)
+        suppressCheck:DockMargin(18, 0, 16, 8)
+        suppressCheck:SetTall(24)
+        suppressCheck:SetText("Do not show this popup again")
+        suppressCheck:SetTextColor(colMuted)
+        suppressCheck:SetFont("GCAL.Menu.Body")
+        suppressCheck:SetChecked(not ConflictPopupEnabled())
+        suppressCheck.OnChange = function(_, checked)
+            RunConsoleCommand("gcal_conflict_popup", checked and "0" or "1")
+        end
+
         local closeButton = vgui.Create("DButton", frame)
         closeButton:Dock(BOTTOM)
         closeButton:DockMargin(16, 0, 16, 16)
@@ -279,7 +300,7 @@ if CLIENT then
 
         if hasLegacyFile or #mountedConflicts > 0 then
             local msg = "!!! GCAL WARNING: Conflicting Workshop addons detected! !!!"
-            local msg2 = "Please disable the conflicting Workshop addons to prevent animation conflicts and performance issues. GCAL is a complete replacement! :3"
+            local msg2 = "Please disable the conflicting Workshop addons. Info in the popup."
             
             MsgC(Color(255, 0, 0), msg .. "\n")
             MsgC(Color(255, 255, 255), msg2 .. "\n")
@@ -292,7 +313,11 @@ if CLIENT then
                 MsgC(Color(255, 176, 93), "[GCAL] Conflicting mounted Workshop addons: " .. table.concat(displays, ", ") .. "\n")
             end
 
-            ShowConflictPopup(hasLegacyFile, mountedConflicts)
+            if ConflictPopupEnabled() then
+                ShowConflictPopup(hasLegacyFile, mountedConflicts)
+            else
+                MsgC(Color(151, 163, 177), "[GCAL] Conflict popup is disabled. Run gcal_conflict_popup 1 to show it again on startup.\n")
+            end
         end
     end)
 end

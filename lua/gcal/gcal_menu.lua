@@ -11,6 +11,9 @@ GCAL.Menu.Loaded = true
 -- Initialize ConVar, defaulting if needed
 CreateClientConVar("gcal_context_menu", "1", true, false, "Legacy toggle for the old GCAL context panel.")
 CreateClientConVar("gcal_menu_keep_open", "1", true, false, "Keep the GCAL desktop window open after releasing the context menu key.")
+if not GetConVar("gcal_conflict_popup") then
+    CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
+end
 
 local PANEL_PAD = 16
 
@@ -239,6 +242,11 @@ end
 local function KeepOpenEnabled()
     local keepOpenConVar = GetConVar("gcal_menu_keep_open")
     return keepOpenConVar ~= nil and keepOpenConVar:GetBool() or false
+end
+
+local function ConflictPopupEnabled()
+    local conflictPopupConVar = GetConVar("gcal_conflict_popup")
+    return conflictPopupConVar == nil or conflictPopupConVar:GetBool()
 end
 
 local function ThirdPersonEnabled()
@@ -614,6 +622,14 @@ function GCAL.Menu.Refresh()
     keepOpenButton:Dock(TOP)
     keepOpenButton:DockMargin(0, 0, 0, 7)
     keepOpenButton:SetTooltip("When enabled, click the GCAL icon once and release C.")
+
+    local conflictPopupButton = MakeButton(panel.ActionsScroll, ConflictPopupEnabled() and "Conflict popup: on" or "Conflict popup: off", ConflictPopupEnabled() and colAccent or colWarn, function()
+        RunConsoleCommand("gcal_conflict_popup", ConflictPopupEnabled() and "0" or "1")
+        timer.Simple(0, GCAL.Menu.Refresh)
+    end)
+    conflictPopupButton:Dock(TOP)
+    conflictPopupButton:DockMargin(0, 0, 0, 7)
+    conflictPopupButton:SetTooltip("Toggle the startup conflict warning popup. Console: gcal_conflict_popup 0/1.")
 
     if GCAL.InternalThirdPersonEnabled then
         local thirdPersonButton = MakeButton(panel.ActionsScroll, ThirdPersonEnabled() and "Thirdperson support: on" or "Thirdperson support: off", colAccent, function()
