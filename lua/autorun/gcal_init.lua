@@ -15,6 +15,14 @@ if CLIENT then
         CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
     end
 
+        --[[
+        Hey! This shouldn't be touched, really. 
+        I try to put in addons that I know don't work.
+        This list changes all the time and please let me know if anything should be changed!
+        There are many ways to contact me, creating fights or trying to override it are just not the way to go about it.
+        Thanks for taking the time to read this. 
+        ~Midawek
+        ]]
     local conflictingWorkshopAddons = {
         ["2155366756"] = "VManip (Base)",
         ["3262499127"] = "Chen's VManip Patch",
@@ -26,7 +34,6 @@ if CLIENT then
         ["3037375111"] = "Quick Slide With Legs [VManip]",
         ["3075697216"] = "[VManip] Tactical Spray",
         ["3091371851"] = "Timer HUD for [VManip] Quick Grenades",
-        ["3100506899"] = "[VManip] Alien: Isolation - Motion Tracker ",
         ["349050451"] = "Chuck's Weaponry 2.0",
         -- ["1234567890"] = "Example Addon"
     }
@@ -177,7 +184,7 @@ if CLIENT then
             end
 
             draw.SimpleText("GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-            draw.SimpleText("Conflicting addons can break arm rendering and legacy compatibility.", "GCAL.Menu.Subtitle", titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+            draw.SimpleText("Conflicting addons can break GCAL in unexpected ways!", "GCAL.Menu.Subtitle", titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 
             local pillText = tostring((hasLegacyFile and 1 or 0) + #mountedConflicts) .. " detected"
             draw.RoundedBox(5, w - 124, 18, 98, 22, Color(colWarn.r, colWarn.g, colWarn.b, 26))
@@ -257,18 +264,6 @@ if CLIENT then
             gui.OpenURL("https://steamcommunity.com/profiles/" .. steamID64 .. "/myworkshopfiles?appid=4000&browsefilter=mysubscriptions")
         end
 
-        local suppressCheck = vgui.Create("DCheckBoxLabel", frame)
-        suppressCheck:Dock(BOTTOM)
-        suppressCheck:DockMargin(18, 0, 16, 8)
-        suppressCheck:SetTall(24)
-        suppressCheck:SetText("Do not show this popup again")
-        suppressCheck:SetTextColor(colMuted)
-        suppressCheck:SetFont("GCAL.Menu.Body")
-        suppressCheck:SetChecked(not ConflictPopupEnabled())
-        suppressCheck.OnChange = function(_, checked)
-            RunConsoleCommand("gcal_conflict_popup", checked and "0" or "1")
-        end
-
         local closeButton = vgui.Create("DButton", frame)
         closeButton:Dock(BOTTOM)
         closeButton:DockMargin(16, 0, 16, 16)
@@ -280,6 +275,18 @@ if CLIENT then
         closeButton.DoClick = function()
             surface.PlaySound("ui/buttonclickrelease.wav")
             frame:Close()
+        end
+
+        local suppressCheck = vgui.Create("DCheckBoxLabel", frame)
+        suppressCheck:Dock(BOTTOM)
+        suppressCheck:DockMargin(18, 0, 16, 8)
+        suppressCheck:SetTall(24)
+        suppressCheck:SetText("Do not show this popup again")
+        suppressCheck:SetTextColor(colMuted)
+        suppressCheck:SetFont("GCAL.Menu.Body")
+        suppressCheck:SetChecked(not ConflictPopupEnabled())
+        suppressCheck.OnChange = function(_, checked)
+            RunConsoleCommand("gcal_conflict_popup", checked and "0" or "1")
         end
     end
 
