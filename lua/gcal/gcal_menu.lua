@@ -922,31 +922,11 @@ function GCAL.Menu.Refresh()
     MakeSection(panel.ActionsScroll, "TRACKS")
     BuildTracks(panel.ActionsScroll)
 
-    MakeSection(panel.ToggleScroll, "SEARCH")
-    local toggleSearch = MakeSearchEntry(panel.ToggleScroll, "toggle")
-    toggleSearch:Dock(TOP)
-    toggleSearch:DockMargin(0, 0, 0, 8)
-
     MakeSection(panel.ToggleScroll, "TOGGLE ANIMS")
     BuildToggleAnimList(panel.ToggleScroll)
 
-    MakeSection(panel.AnimsScroll, "SEARCH")
-    local animSearch = MakeSearchEntry(panel.AnimsScroll, "anims")
-    animSearch:Dock(TOP)
-    animSearch:DockMargin(0, 0, 0, 8)
-
     MakeSection(panel.AnimsScroll, "ANIMS")
     BuildAnimList(panel.AnimsScroll)
-
-    local focusedSearch = GCAL.Menu.AnimSearchFocus == "toggle" and toggleSearch or (GCAL.Menu.AnimSearchFocus == "anims" and animSearch or nil)
-    if IsValid(focusedSearch) then
-        timer.Simple(0, function()
-            if not IsValid(focusedSearch) then return end
-
-            focusedSearch:RequestFocus()
-            focusedSearch:SetCaretPos(#tostring(GCAL.Menu.AnimSearch or ""))
-        end)
-    end
 end
 
 function GCAL.Menu.BuildWindow(window)
@@ -1027,10 +1007,22 @@ function GCAL.Menu.BuildWindow(window)
         draw.SimpleText(status, "GCAL.Menu.Small", titleX + 1, 70, id and colAccent or colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
     end
 
+    local searchEntry = MakeSearchEntry(panel, "header")
+    panel.SearchEntry = searchEntry
+    searchEntry:SetTooltip("Filter animations by name, addon, model, or sequence.")
+
     local columns = vgui.Create("DPanel", panel)
     columns:Dock(FILL)
     columns:DockMargin(PANEL_PAD, 108, PANEL_PAD, PANEL_PAD)
     columns:SetPaintBackground(false)
+
+    panel.PerformLayout = function(self, w)
+        if IsValid(searchEntry) then
+            local searchWide = math.min(300, math.max(210, w * 0.34))
+            searchEntry:SetSize(searchWide, 30)
+            searchEntry:SetPos(w - searchWide - PANEL_PAD - 118, 58)
+        end
+    end
 
     local columnHolders = {}
     columns.PerformLayout = function(self)
