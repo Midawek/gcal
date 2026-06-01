@@ -253,7 +253,7 @@ function VManip:QuitHolding(animtostop)
         if hook.Run("VManipPreHoldQuit", track.name, animtostop) == false then return end
         if (not animtostop and not track.preventQuit) or track.name == animtostop then
             track.holdQuit = true
-            --VManip.HoldQuit = true
+            VManip.HoldQuit = true
             if track.segmented then track.lastSegment = true end
             hook.Run("VManipHoldQuit", track.name, animtostop)
         end
