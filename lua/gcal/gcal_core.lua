@@ -42,10 +42,98 @@ if CLIENT then
     GCAL.PlaybackSpeed = CreateClientConVar("gcal_playback_speed", "1", true, false, "Global GCAL playback speed multiplier.")
     GCAL.MuteSounds = CreateClientConVar("gcal_mute_sounds", "0", true, false, "Mute animation sounds emitted by GCAL.")
     GCAL.SoundPitch = CreateClientConVar("gcal_sound_pitch", "100", true, false, "Pitch used for animation sounds emitted by GCAL.")
+    GCAL.AnimationOffsetX = CreateClientConVar("gcal_anim_offset_x", "0", true, false, "Global GCAL animation forward/back offset.")
+    GCAL.AnimationOffsetY = CreateClientConVar("gcal_anim_offset_y", "0", true, false, "Global GCAL animation right/left offset.")
+    GCAL.AnimationOffsetZ = CreateClientConVar("gcal_anim_offset_z", "0", true, false, "Global GCAL animation up/down offset.")
+    GCAL.AnimationAngleP = CreateClientConVar("gcal_anim_angle_p", "0", true, false, "Global GCAL animation pitch offset.")
+    GCAL.AnimationAngleY = CreateClientConVar("gcal_anim_angle_y", "0", true, false, "Global GCAL animation yaw offset.")
+    GCAL.AnimationAngleR = CreateClientConVar("gcal_anim_angle_r", "0", true, false, "Global GCAL animation roll offset.")
+    GCAL.AnimationFOV = CreateClientConVar("gcal_anim_fov", "0", true, false, "Global GCAL animation FOV offset while GCAL tracks are active.")
     GCAL.InternalThirdPersonEnabled = false
+    GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
     function GCAL:IsThirdPersonEnabled()
         return self.InternalThirdPersonEnabled and self.ThirdPerson:GetBool()
+    end
+
+    local animationAdjustmentFields = {
+        pos_x = true,
+        pos_y = true,
+        pos_z = true,
+        ang_p = true,
+        ang_y = true,
+        ang_r = true,
+        fov = true
+    }
+
+    function GCAL:AnimationAdjustmentCookieKey(name, field)
+        return "gcal_anim_adjust_" .. string.gsub(tostring(name), "[^%w_]", "_") .. "_" .. tostring(field)
+    end
+
+    function GCAL:GetAnimationAdjustmentValue(name, field)
+        if not animationAdjustmentFields[field] then return 0 end
+
+        name = tostring(name or "")
+        local values = self.AnimationAdjustments[name]
+        if values and values[field] ~= nil then return tonumber(values[field]) or 0 end
+
+        if cookie and cookie.GetNumber then
+            return cookie.GetNumber(self:AnimationAdjustmentCookieKey(name, field), 0)
+        end
+
+        return 0
+    end
+
+    function GCAL:SetAnimationAdjustmentValue(name, field, value)
+        if not animationAdjustmentFields[field] then return end
+
+        name = tostring(name or "")
+        self.AnimationAdjustments[name] = self.AnimationAdjustments[name] or {}
+        self.AnimationAdjustments[name][field] = tonumber(value) or 0
+
+        if cookie and cookie.Set then
+            cookie.Set(self:AnimationAdjustmentCookieKey(name, field), tostring(self.AnimationAdjustments[name][field]))
+        end
+    end
+
+    function GCAL:ClearAnimationAdjustment(name)
+        name = tostring(name or "")
+        self.AnimationAdjustments[name] = nil
+
+        for field in pairs(animationAdjustmentFields) do
+            if cookie and cookie.Set then
+                cookie.Set(self:AnimationAdjustmentCookieKey(name, field), "0")
+            end
+        end
+    end
+
+    function GCAL:GetAnimationAdjustment(name)
+        return {
+            pos = Vector(
+                self.AnimationOffsetX:GetFloat() + self:GetAnimationAdjustmentValue(name, "pos_x"),
+                self.AnimationOffsetY:GetFloat() + self:GetAnimationAdjustmentValue(name, "pos_y"),
+                self.AnimationOffsetZ:GetFloat() + self:GetAnimationAdjustmentValue(name, "pos_z")
+            ),
+            ang = Angle(
+                self.AnimationAngleP:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_p"),
+                self.AnimationAngleY:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_y"),
+                self.AnimationAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_r")
+            ),
+            fov = self.AnimationFOV:GetFloat() + self:GetAnimationAdjustmentValue(name, "fov")
+        }
+    end
+
+    function GCAL:ApplyAnimationAdjustment(name, pos, ang)
+        local adjustment = self:GetAnimationAdjustment(name)
+        local offset = adjustment.pos
+        local adjustedPos = pos + ang:Forward() * offset.x + ang:Right() * offset.y + ang:Up() * offset.z
+        local angleOffset = adjustment.ang
+
+        return adjustedPos, Angle(ang.p + angleOffset.p, ang.y + angleOffset.y, ang.r + angleOffset.r)
+    end
+
+    function GCAL:GetAnimationFOVOffset(name)
+        return self:GetAnimationAdjustment(name).fov
     end
 end
 
@@ -987,6 +1075,12 @@ if CLIENT then
         return 1
     end
 
+    local function PlaceTrackModel(track, pos, ang)
+        local adjustedPos, adjustedAng = GCAL:ApplyAnimationAdjustment(track.name, pos, ang)
+        track.model:SetAngles(adjustedAng)
+        track.model:SetPos(adjustedPos)
+    end
+
     local function DrawGShaderFriendlyModel(model, flags)
         if not IsValid(model) then return end
 
@@ -1089,8 +1183,7 @@ if CLIENT then
             if posparentcache ~= weapon then
                 posparentcache = weapon
                 track.model:SetParent(nil)
-                track.model:SetPos(EyePos())
-                track.model:SetAngles(vm:GetAngles() + sourceAngleOffset)
+                PlaceTrackModel(track, EyePos(), vm:GetAngles() + sourceAngleOffset)
                 track.model:SetParent(vm)
             end
         end
@@ -1102,12 +1195,10 @@ if CLIENT then
             local finang = eyeang - vmang
             finang.y = 0
             local newang = eyeang + (finang * 0.25)
-            track.model:SetAngles(newang + sourceAngleOffset)
-            track.model:SetPos(eyepos)
+            PlaceTrackModel(track, eyepos, newang + sourceAngleOffset)
         elseif not track.data.assurepos then
             local eyeang, eyepos = EyeAngles(), EyePos()
-            track.model:SetAngles(eyeang + sourceAngleOffset)
-            track.model:SetPos(eyepos)
+            PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
         end
 
         vm:SetupBones()
@@ -1189,17 +1280,13 @@ if CLIENT then
         
         if thirdperson then
             local renderAngles = vm.GetRenderAngles and vm:GetRenderAngles() or vm:GetAngles()
-            track.model:SetAngles(renderAngles)
-            track.model:SetPos(vm:GetPos())
+            PlaceTrackModel(track, vm:GetPos(), renderAngles)
         elseif track.data.legacy then
-            track.model:SetAngles(eyeang + sourceAngleOffset)
-            track.model:SetPos(eyepos)
+            PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
         elseif track.data.locktoply or track.data.assurepos then
-            track.model:SetAngles(eyeang + sourceAngleOffset)
-            track.model:SetPos(eyepos)
+            PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
         else
-            track.model:SetAngles(vm:GetAngles() + sourceAngleOffset)
-            track.model:SetPos(vm:GetPos())
+            PlaceTrackModel(track, vm:GetPos(), vm:GetAngles() + sourceAngleOffset)
         end
 
         track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
@@ -1633,13 +1720,37 @@ if CLIENT then
     hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if self == true then return end
         local track = GCAL.ActiveTracks["legacy_left_arm"]
-        if not track or not track.attachment then return end
-        if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
+        local viewChanged = false
 
-        local camang = track.attachment.Ang - (track.camAng or properang)
-        angles.x = angles.x + camang.x * (track.camAngInt[1] or 1)
-        angles.y = angles.y + camang.y * (track.camAngInt[2] or 1)
-        angles.z = angles.z + camang.z * (track.camAngInt[3] or 1)
+        if track and track.attachment and ply:GetViewEntity() == ply and not ply:ShouldDrawLocalPlayer() then
+            local camang = track.attachment.Ang - (track.camAng or properang)
+            angles.x = angles.x + camang.x * (track.camAngInt[1] or 1)
+            angles.y = angles.y + camang.y * (track.camAngInt[2] or 1)
+            angles.z = angles.z + camang.z * (track.camAngInt[3] or 1)
+            viewChanged = true
+        end
+
+        local fovTrack = track
+        if not fovTrack then
+            for _, activeTrack in pairs(GCAL.ActiveTracks or {}) do
+                fovTrack = activeTrack
+                break
+            end
+        end
+
+        local fovOffset = fovTrack and GCAL:GetAnimationFOVOffset(fovTrack.name) or 0
+        if fovOffset ~= 0 then
+            fov = fov + fovOffset
+            viewChanged = true
+        end
+
+        if viewChanged then
+            return {
+                origin = origin,
+                angles = angles,
+                fov = fov
+            }
+        end
     end)
 
     hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)

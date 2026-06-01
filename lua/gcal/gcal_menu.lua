@@ -14,6 +14,19 @@ CreateClientConVar("gcal_menu_keep_open", "1", true, false, "Keep the GCAL deskt
 if not GetConVar("gcal_conflict_popup") then
     CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
 end
+for _, adjustmentConVar in ipairs({
+    {"gcal_anim_offset_x", "Global GCAL animation forward/back offset."},
+    {"gcal_anim_offset_y", "Global GCAL animation right/left offset."},
+    {"gcal_anim_offset_z", "Global GCAL animation up/down offset."},
+    {"gcal_anim_angle_p", "Global GCAL animation pitch offset."},
+    {"gcal_anim_angle_y", "Global GCAL animation yaw offset."},
+    {"gcal_anim_angle_r", "Global GCAL animation roll offset."},
+    {"gcal_anim_fov", "Global GCAL animation FOV offset while GCAL tracks are active."}
+}) do
+    if not GetConVar(adjustmentConVar[1]) then
+        CreateClientConVar(adjustmentConVar[1], "0", true, false, adjustmentConVar[2])
+    end
+end
 
 local PANEL_PAD = 16
 
@@ -101,6 +114,17 @@ end
 GCAL.Menu.DisabledAnims = GCAL.Menu.DisabledAnims or {}
 GCAL.Menu.CollapsedAddonGroups = GCAL.Menu.CollapsedAddonGroups or {}
 GCAL.Menu.SoundOverrides = GCAL.Menu.SoundOverrides or {}
+GCAL.Menu.AnimSearch = GCAL.Menu.AnimSearch or ""
+
+local adjustmentFields = {
+    {key = "pos_x", convar = "gcal_anim_offset_x", label = "Offset X", min = -20, max = 20, decimals = 2},
+    {key = "pos_y", convar = "gcal_anim_offset_y", label = "Offset Y", min = -20, max = 20, decimals = 2},
+    {key = "pos_z", convar = "gcal_anim_offset_z", label = "Offset Z", min = -20, max = 20, decimals = 2},
+    {key = "ang_p", convar = "gcal_anim_angle_p", label = "Pitch", min = -45, max = 45, decimals = 1},
+    {key = "ang_y", convar = "gcal_anim_angle_y", label = "Yaw", min = -45, max = 45, decimals = 1},
+    {key = "ang_r", convar = "gcal_anim_angle_r", label = "Roll", min = -45, max = 45, decimals = 1},
+    {key = "fov", convar = "gcal_anim_fov", label = "FOV", min = -40, max = 40, decimals = 1}
+}
 
 local function AnimCookieKey(name)
     return "gcal_anim_enabled_" .. string.gsub(tostring(name), "[^%w_]", "_")
@@ -108,6 +132,24 @@ end
 
 local function AnimSoundCookieKey(name)
     return "gcal_anim_sound_" .. string.gsub(tostring(name), "[^%w_]", "_")
+end
+
+local function AnimSearchQuery()
+    return string.Trim(string.lower(tostring(GCAL.Menu.AnimSearch or "")))
+end
+
+local function AnimMatchesSearch(name, anim, addonName)
+    local query = AnimSearchQuery()
+    if query == "" then return true end
+
+    local haystack = string.lower(table.concat({
+        tostring(name or ""),
+        tostring(addonName or ""),
+        tostring(anim and anim.model or ""),
+        tostring(anim and anim.sequence or "")
+    }, " "))
+
+    return string.find(haystack, query, 1, true) ~= nil
 end
 
 local function AnimEnabled(name)
@@ -277,6 +319,35 @@ local function SoundPitch()
     return convar and convar:GetInt() or 100
 end
 
+local function GlobalAdjustmentValue(field)
+    local convar = GetConVar(field.convar)
+    return convar and convar:GetFloat() or 0
+end
+
+local function SetGlobalAdjustmentValue(field, value)
+    RunConsoleCommand(field.convar, tostring(math.Round(tonumber(value) or 0, field.decimals)))
+end
+
+local function ResetGlobalAdjustments()
+    for _, field in ipairs(adjustmentFields) do
+        RunConsoleCommand(field.convar, "0")
+    end
+end
+
+local function LocalAdjustmentValue(name, field)
+    if not GCAL.GetAnimationAdjustmentValue then return 0 end
+
+    return GCAL:GetAnimationAdjustmentValue(name, field.key)
+end
+
+local function HasLocalAdjustments(name)
+    for _, field in ipairs(adjustmentFields) do
+        if math.abs(LocalAdjustmentValue(name, field)) > 0.001 then return true end
+    end
+
+    return false
+end
+
 local function NextPresetIndex(values, current, key)
     local best = 1
     local bestDistance = math.huge
@@ -394,6 +465,39 @@ local function MakeSlider(parent, label, minValue, maxValue, decimals, value, ch
     return slider
 end
 
+local function MakeSearchEntry(parent, focusID)
+    local entry = vgui.Create("DTextEntry", parent)
+    entry:SetTall(30)
+    entry:SetText(GCAL.Menu.AnimSearch or "")
+    entry:SetUpdateOnType(true)
+    entry:SetPlaceholderText("Search animations")
+    entry:SetTextColor(colText)
+    entry:SetPlaceholderColor(colMuted)
+    entry:SetCursorColor(colAccent)
+    entry:SetHighlightColor(Color(colAccent.r, colAccent.g, colAccent.b, 90))
+    entry.Paint = function(self, w, h)
+        draw.RoundedBox(5, 0, 0, w, h, colPanelSoft)
+        surface.SetDrawColor(colLine)
+        surface.DrawOutlinedRect(0, 0, w, h, 1)
+        self:DrawTextEntryText(colText, colAccent, colText)
+    end
+    entry.OnValueChange = function(_, value)
+        GCAL.Menu.AnimSearch = value or ""
+        GCAL.Menu.AnimSearchFocus = focusID
+        timer.Simple(0, GCAL.Menu.Refresh)
+    end
+    entry.OnGetFocus = function()
+        GCAL.Menu.AnimSearchFocus = focusID
+    end
+    entry.OnLoseFocus = function()
+        if GCAL.Menu.AnimSearchFocus == focusID then
+            GCAL.Menu.AnimSearchFocus = nil
+        end
+    end
+
+    return entry
+end
+
 local function MakeSection(parent, title)
     local section = vgui.Create("DPanel", parent)
     section:Dock(TOP)
@@ -412,6 +516,42 @@ local function MakeSection(parent, title)
     return section
 end
 
+local function OpenAnimationAdjustmentEditor(name, label)
+    if not GCAL.GetAnimationAdjustmentValue or not GCAL.SetAnimationAdjustmentValue then return end
+
+    local frame = vgui.Create("DFrame")
+    frame:SetTitle("GCAL Adjust: " .. label)
+    frame:SetSize(420, 430)
+    frame:Center()
+    frame:MakePopup()
+
+    local scroll = vgui.Create("DScrollPanel", frame)
+    scroll:Dock(FILL)
+    scroll:DockMargin(12, 12, 12, 12)
+
+    for _, field in ipairs(adjustmentFields) do
+        local slider = MakeSlider(scroll, field.label, field.min, field.max, field.decimals, LocalAdjustmentValue(name, field), function(value)
+            GCAL:SetAnimationAdjustmentValue(name, field.key, math.Round(tonumber(value) or 0, field.decimals))
+        end)
+        slider:Dock(TOP)
+        slider:DockMargin(0, 0, 0, 8)
+    end
+
+    local resetButton = MakeButton(scroll, "Reset this animation", colWarn, function()
+        if GCAL.ClearAnimationAdjustment then
+            GCAL:ClearAnimationAdjustment(name)
+        end
+
+        frame:Close()
+        timer.Simple(0, function()
+            OpenAnimationAdjustmentEditor(name, label)
+            GCAL.Menu.Refresh()
+        end)
+    end)
+    resetButton:Dock(TOP)
+    resetButton:DockMargin(0, 4, 0, 8)
+end
+
 local function BuildAnimList(scroll)
     local names = SortedAnimNames()
 
@@ -427,16 +567,26 @@ local function BuildAnimList(scroll)
     end
 
     local groupNames, groups = SortedAnimGroups()
+    local shown = 0
 
     for _, addonName in ipairs(groupNames) do
         local groupAnims = groups[addonName]
+        local matchedAnims = {}
+        for _, name in ipairs(groupAnims) do
+            local anim = GCAL.Anims[name] or {}
+            if AnimMatchesSearch(name, anim, addonName) then
+                matchedAnims[#matchedAnims + 1] = name
+            end
+        end
+        if #matchedAnims == 0 then continue end
+
         local legacyLabel = GroupHasLegacyAnim(groupAnims) and "[LEGACY] " or ""
         local groupRow = MakeStaticRow(scroll, legacyLabel .. addonName, GroupHasLegacyAnim(groupAnims) and colWarn or colMuted)
         groupRow:Dock(TOP)
         groupRow:DockMargin(0, 0, 0, 4)
         groupRow:SetTooltip("Addon group")
 
-        for _, name in ipairs(groupAnims) do
+        for _, name in ipairs(matchedAnims) do
             local anim = GCAL.Anims[name] or {}
             local label = tostring(name)
             local enabled = AnimEnabled(name)
@@ -461,11 +611,30 @@ local function BuildAnimList(scroll)
             if soundOverride then
                 tooltip = tooltip .. "\nCustom sound: " .. soundOverride
             end
-            tooltip = tooltip .. "\nRight-click for sound options."
+            if HasLocalAdjustments(name) then
+                tooltip = tooltip .. "\nCustom offsets/FOV active."
+            end
+            tooltip = tooltip .. "\nRight-click for sound and adjustment options."
             btn:SetTooltip(tooltip)
 
             btn.DoRightClick = function()
                 local menu = DermaMenu()
+                menu:AddOption("Edit offsets/FOV...", function()
+                    OpenAnimationAdjustmentEditor(name, label)
+                end)
+
+                if HasLocalAdjustments(name) then
+                    menu:AddOption("Reset offsets/FOV", function()
+                        if GCAL.ClearAnimationAdjustment then
+                            GCAL:ClearAnimationAdjustment(name)
+                        end
+
+                        notification.AddLegacy("GCAL offsets reset for " .. label, NOTIFY_GENERIC, 2)
+                        GCAL.Menu.Refresh()
+                    end)
+                end
+
+                menu:AddSpacer()
                 menu:AddOption("Set custom sound...", function()
                     Derma_StringRequest(
                         "Custom animation sound",
@@ -489,6 +658,17 @@ local function BuildAnimList(scroll)
 
                 menu:Open()
             end
+            shown = shown + 1
+        end
+    end
+
+    if shown == 0 then
+        local empty = vgui.Create("DPanel", scroll)
+        empty:Dock(TOP)
+        empty:SetTall(52)
+        empty.Paint = function(_, w, h)
+            draw.RoundedBox(7, 0, 0, w, h, Color(28, 33, 43, 210))
+            draw.SimpleText("No animations match the search.", "GCAL.Menu.Body", 14, h * 0.5 - 1, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         end
     end
 end
@@ -508,18 +688,28 @@ local function BuildToggleAnimList(scroll)
     end
 
     local groupNames, groups = SortedAnimGroups()
+    local shown = 0
 
     for _, addonName in ipairs(groupNames) do
         local groupAnims = groups[addonName]
-        local state = GroupEnabledState(groupAnims)
+        local matchedAnims = {}
+        for _, name in ipairs(groupAnims) do
+            local anim = GCAL.Anims[name] or {}
+            if AnimMatchesSearch(name, anim, addonName) then
+                matchedAnims[#matchedAnims + 1] = name
+            end
+        end
+        if #matchedAnims == 0 then continue end
+
+        local state = GroupEnabledState(matchedAnims)
         local collapsed = GCAL.Menu.CollapsedAddonGroups[addonName] == true
         local marker = collapsed and "[+] " or "[-] "
-        local legacyLabel = GroupHasLegacyAnim(groupAnims) and "[LEGACY] " or ""
+        local legacyLabel = GroupHasLegacyAnim(matchedAnims) and "[LEGACY] " or ""
         local suffix = state == "mixed" and " mixed" or (" " .. state)
         local color = state == "enabled" and colAccent or (state == "disabled" and colBad or colWarn)
 
         local groupButton = MakeButton(scroll, marker .. legacyLabel .. addonName .. suffix, color, function()
-            SetGroupEnabled(groupAnims, state ~= "enabled")
+            SetGroupEnabled(matchedAnims, state ~= "enabled")
             notification.AddLegacy("GCAL " .. (state == "enabled" and "disabled " or "enabled ") .. addonName, NOTIFY_GENERIC, 2)
             timer.Simple(0, GCAL.Menu.Refresh)
         end)
@@ -533,7 +723,7 @@ local function BuildToggleAnimList(scroll)
         end
 
         if not collapsed then
-            for _, name in ipairs(groupAnims) do
+            for _, name in ipairs(matchedAnims) do
                 local label = tostring(name)
                 local enabled = AnimEnabled(name)
 
@@ -546,7 +736,20 @@ local function BuildToggleAnimList(scroll)
                 btn:Dock(TOP)
                 btn:DockMargin(10, 0, 0, 5)
                 btn:SetTooltip("Toggle this animation. Right-click the addon row to collapse it.")
+                shown = shown + 1
             end
+        else
+            shown = shown + #matchedAnims
+        end
+    end
+
+    if shown == 0 then
+        local empty = vgui.Create("DPanel", scroll)
+        empty:Dock(TOP)
+        empty:SetTall(52)
+        empty.Paint = function(_, w, h)
+            draw.RoundedBox(7, 0, 0, w, h, Color(28, 33, 43, 210))
+            draw.SimpleText("No animations match the search.", "GCAL.Menu.Body", 14, h * 0.5 - 1, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
         end
     end
 end
@@ -671,6 +874,24 @@ function GCAL.Menu.Refresh()
     speedSlider:DockMargin(0, 0, 0, 7)
     speedSlider:SetTooltip("Adjust global playback speed from 0.1x to 3.0x.")
 
+    MakeSection(panel.ActionsScroll, "ANIMATION ADJUST")
+
+    for _, field in ipairs(adjustmentFields) do
+        local slider = MakeSlider(panel.ActionsScroll, field.label, field.min, field.max, field.decimals, GlobalAdjustmentValue(field), function(value)
+            SetGlobalAdjustmentValue(field, value)
+        end)
+        slider:Dock(TOP)
+        slider:DockMargin(0, 0, 0, 7)
+        slider:SetTooltip("Global adjustment applied to every GCAL animation.")
+    end
+
+    local resetAdjustmentsButton = MakeButton(panel.ActionsScroll, "Reset global adjustments", colMuted, function()
+        ResetGlobalAdjustments()
+        timer.Simple(0, GCAL.Menu.Refresh)
+    end)
+    resetAdjustmentsButton:Dock(TOP)
+    resetAdjustmentsButton:DockMargin(0, 0, 0, 7)
+
     local soundButton = MakeButton(panel.ActionsScroll, SoundsMuted() and "Gesture sounds: muted" or "Gesture sounds: on", SoundsMuted() and colWarn or colAccent, function()
         RunConsoleCommand("gcal_mute_sounds", SoundsMuted() and "0" or "1")
         timer.Simple(0, GCAL.Menu.Refresh)
@@ -701,11 +922,31 @@ function GCAL.Menu.Refresh()
     MakeSection(panel.ActionsScroll, "TRACKS")
     BuildTracks(panel.ActionsScroll)
 
+    MakeSection(panel.ToggleScroll, "SEARCH")
+    local toggleSearch = MakeSearchEntry(panel.ToggleScroll, "toggle")
+    toggleSearch:Dock(TOP)
+    toggleSearch:DockMargin(0, 0, 0, 8)
+
     MakeSection(panel.ToggleScroll, "TOGGLE ANIMS")
     BuildToggleAnimList(panel.ToggleScroll)
 
+    MakeSection(panel.AnimsScroll, "SEARCH")
+    local animSearch = MakeSearchEntry(panel.AnimsScroll, "anims")
+    animSearch:Dock(TOP)
+    animSearch:DockMargin(0, 0, 0, 8)
+
     MakeSection(panel.AnimsScroll, "ANIMS")
     BuildAnimList(panel.AnimsScroll)
+
+    local focusedSearch = GCAL.Menu.AnimSearchFocus == "toggle" and toggleSearch or (GCAL.Menu.AnimSearchFocus == "anims" and animSearch or nil)
+    if IsValid(focusedSearch) then
+        timer.Simple(0, function()
+            if not IsValid(focusedSearch) then return end
+
+            focusedSearch:RequestFocus()
+            focusedSearch:SetCaretPos(#tostring(GCAL.Menu.AnimSearch or ""))
+        end)
+    end
 end
 
 function GCAL.Menu.BuildWindow(window)
