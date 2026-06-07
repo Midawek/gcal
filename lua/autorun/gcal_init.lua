@@ -9,6 +9,56 @@ if SERVER then
     AddCSLuaFile("autorun/client/gcal_menu_autorun.lua")
 end
 
+local function GCAL_IsOwnLuaError(errorMessage, stack, addonName)
+    local function MatchesGCAL(value)
+        value = string.lower(tostring(value or ""))
+        return string.find(value, "addons/gcal/", 1, true) ~= nil
+            or string.find(value, "addons\\gcal\\", 1, true) ~= nil
+            or string.find(value, "lua/gcal/", 1, true) ~= nil
+            or string.find(value, "lua\\gcal\\", 1, true) ~= nil
+            or string.find(value, "gcal_init.lua", 1, true) ~= nil
+    end
+
+    if MatchesGCAL(errorMessage) then return true end
+
+    local normalizedAddonName = string.lower(tostring(addonName or ""))
+    if normalizedAddonName == "gcal" or string.find(normalizedAddonName, "compliant armature layer", 1, true) then
+        return true
+    end
+
+    for _, frame in pairs(istable(stack) and stack or {}) do
+        if MatchesGCAL(frame) then return true end
+
+        if istable(frame) then
+            for _, value in pairs(frame) do
+                if MatchesGCAL(value) then return true end
+            end
+        end
+    end
+
+    return false
+end
+
+local gcalLastErrorNotice = 0
+hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, stack, addonName)
+    if not GCAL_IsOwnLuaError(errorMessage, stack, addonName) then return end
+
+    MsgC(
+        Color(236, 116, 121),
+        "[GCAL] An unexpected " .. tostring(realm or "Lua") .. " error occurred. ",
+        Color(239, 243, 248),
+        tostring(errorMessage or "Unknown error") .. "\n"
+    )
+
+    if CLIENT and notification and notification.AddLegacy and CurTime() >= gcalLastErrorNotice then
+        gcalLastErrorNotice = CurTime() + 5
+        notification.AddLegacy("GCAL encountered an error. Check the console for details.", NOTIFY_ERROR, 6)
+        if surface and surface.PlaySound then
+            surface.PlaySound("buttons/button10.wav")
+        end
+    end
+end)
+
 if CLIENT then
     GCAL = GCAL or {}
     if not GetConVar("gcal_conflict_popup") then
@@ -69,7 +119,15 @@ if CLIENT then
         return convar == nil or convar:GetBool()
     end
 
+    local conflictPopupFrame
+    local conflictPopupDim
+
     local function ShowConflictPopup(hasLegacyFile, mountedConflicts)
+        mountedConflicts = istable(mountedConflicts) and mountedConflicts or {}
+
+        if IsValid(conflictPopupFrame) then conflictPopupFrame:Remove() end
+        if IsValid(conflictPopupDim) then conflictPopupDim:Remove() end
+
         local colBg = Color(14, 16, 21, 242)
         local colPanel = Color(22, 25, 32, 248)
         local colPanelSoft = Color(30, 35, 44, 238)
@@ -82,8 +140,94 @@ if CLIENT then
         local colBad = Color(236, 116, 121)
         local logoMaterial = Material("gcal/logo", "smooth")
         local prideLogoMaterial = Material("gcal/pridelogo", "smooth")
+        local defaultAccent = Color(102, 207, 177)
+        local prideColors = {
+            Color(228, 3, 3),
+            Color(255, 140, 0),
+            Color(255, 237, 0),
+            Color(0, 128, 38),
+            Color(0, 77, 255),
+            Color(117, 7, 135)
+        }
+
+        local function PrideEnabled()
+            local prideConVar = GetConVar("gcal_pride")
+            return prideConVar and prideConVar:GetBool() or false
+        end
+
+        local function PrideGradientColor(fraction)
+            local scaled = (fraction % 1) * #prideColors
+            local index = math.floor(scaled) + 1
+            local blend = scaled - math.floor(scaled)
+            local from = prideColors[index]
+            local to = prideColors[index % #prideColors + 1]
+
+            return Color(
+                Lerp(blend, from.r, to.r),
+                Lerp(blend, from.g, to.g),
+                Lerp(blend, from.b, to.b)
+            )
+        end
+
+        local function UpdatePrideAccent()
+            if PrideEnabled() then
+                local rainbow = HSVToColor((RealTime() * 55) % 360, 0.72, 1)
+                colAccent.r = rainbow.r
+                colAccent.g = rainbow.g
+                colAccent.b = rainbow.b
+                return
+            end
+
+            colAccent.r = defaultAccent.r
+            colAccent.g = defaultAccent.g
+            colAccent.b = defaultAccent.b
+        end
+
+        local function PaintPrideLine(x, y, width, height)
+            if not PrideEnabled() then
+                surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 120)
+                surface.DrawRect(x, y, width, height)
+                return
+            end
+
+            local phase = (RealTime() * 0.12) % 1
+            local sliceWidth = 4
+            for sliceX = 0, width - 1, sliceWidth do
+                local color = PrideGradientColor((sliceX / math.max(width, 1) + phase) % 1)
+                surface.SetDrawColor(color)
+                surface.DrawRect(x + sliceX, y, math.min(sliceWidth, width - sliceX), height)
+            end
+        end
+
+        local function DrawPrideTitle(panel, text, font, x, y)
+            if not PrideEnabled() then
+                draw.SimpleText(text, font, x, y, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+                return
+            end
+
+            surface.SetFont(font)
+            local textWidth, textHeight = surface.GetTextSize(text)
+            local screenX, screenY = panel:LocalToScreen(x, y)
+            local phase = (RealTime() * 0.12) % 1
+            local stripeWidth = 3
+
+            for stripeX = 0, textWidth - 1, stripeWidth do
+                local color = PrideGradientColor((stripeX / math.max(textWidth - 1, 1) + phase) % 1)
+                render.SetScissorRect(
+                    screenX + stripeX,
+                    screenY,
+                    math.min(screenX + stripeX + stripeWidth, screenX + textWidth),
+                    screenY + textHeight,
+                    true
+                )
+                draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+            end
+
+            render.SetScissorRect(0, 0, 0, 0, false)
+        end
 
         local function PaintConflictButton(btn, w, h)
+            UpdatePrideAccent()
             btn.GCALHover = Lerp(FrameTime() * 12, btn.GCALHover or 0, btn:IsHovered() and 1 or 0)
 
             local a = btn.GCALHover
@@ -126,6 +270,7 @@ if CLIENT then
         surface.PlaySound("buttons/button10.wav")
 
         local dim = vgui.Create("DPanel")
+        conflictPopupDim = dim
         dim:SetSize(ScrW(), ScrH())
         dim:MakePopup()
         dim:SetKeyboardInputEnabled(false)
@@ -135,6 +280,7 @@ if CLIENT then
         end
 
         local frame = vgui.Create("DFrame")
+        conflictPopupFrame = frame
         frame:SetTitle("")
         frame:SetSize(math.min(ScrW() - 80, 760), math.min(ScrH() - 70, 680))
         frame:Center()
@@ -154,20 +300,23 @@ if CLIENT then
             if IsValid(dim) then
                 dim:Remove()
             end
+            conflictPopupFrame = nil
+            conflictPopupDim = nil
         end
 
         function frame:Paint(w, h)
+            UpdatePrideAccent()
             Derma_DrawBackgroundBlur(self, self.StartTime)
             draw.RoundedBox(0, 0, 0, w, h, colBg)
             draw.RoundedBox(0, 1, 1, w - 2, h - 2, colPanel)
             draw.RoundedBox(0, 1, 1, w - 2, 92, colHeader)
+            PaintPrideLine(10, 0, w - 20, PrideEnabled() and 3 or 1)
             surface.SetDrawColor(colLine)
             surface.DrawOutlinedRect(0, 0, w, h, 1)
             surface.DrawLine(16, 92, w - 16, 92)
 
             local titleX = 16
-            local prideConVar = GetConVar("gcal_pride")
-            local prideEnabled = prideConVar and prideConVar:GetBool() or false
+            local prideEnabled = PrideEnabled()
             local activeLogoMaterial = prideEnabled and prideLogoMaterial or logoMaterial
             if not activeLogoMaterial:IsError() then
                 local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
@@ -185,7 +334,7 @@ if CLIENT then
                 titleX = 16 + math.min(logoMaxWidth, logoMaxHeight * logoAspect) + 14
             end
 
-            draw.SimpleText("GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+            DrawPrideTitle(self, "GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15)
             draw.SimpleText("Conflicting addons can break GCAL in unexpected ways!", "GCAL.Menu.Subtitle", titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 
             local pillText = tostring((hasLegacyFile and 1 or 0) + #mountedConflicts) .. " detected"
@@ -290,6 +439,25 @@ if CLIENT then
         suppressCheck.OnChange = function(_, checked)
             RunConsoleCommand("gcal_conflict_popup", checked and "0" or "1")
         end
+
+        return frame
+    end
+
+    local function TryShowConflictPopup(hasLegacyFile, mountedConflicts)
+        local success, result = xpcall(function()
+            return ShowConflictPopup(hasLegacyFile, mountedConflicts)
+        end, debug.traceback)
+
+        if success then return true, result end
+
+        if IsValid(conflictPopupFrame) then conflictPopupFrame:Remove() end
+        if IsValid(conflictPopupDim) then conflictPopupDim:Remove() end
+        conflictPopupFrame = nil
+        conflictPopupDim = nil
+
+        MsgC(Color(236, 116, 121), "[GCAL] Conflict popup failed to open:\n")
+        MsgC(Color(239, 243, 248), tostring(result) .. "\n")
+        return false, result
     end
 
     include("gcal/gcal_lerp.lua")
@@ -367,12 +535,29 @@ if CLIENT then
             end
 
             if ConflictPopupEnabled() then
-                ShowConflictPopup(hasLegacyFile, mountedConflicts)
+                TryShowConflictPopup(hasLegacyFile, mountedConflicts)
             else
                 MsgC(Color(151, 163, 177), "[GCAL] Conflict popup is disabled. Run gcal_conflict_popup 1 to show it again on startup.\n")
             end
         end
     end)
+
+    concommand.Add("gcal_debug_conflict_popup", function()
+        local mountedConflicts = GetMountedConflictingWorkshopAddons()
+        local hasLegacyFile = file.Exists("autorun/client/cl_vmanip.lua", "LUA")
+
+        if not hasLegacyFile and #mountedConflicts == 0 then
+            mountedConflicts = {
+                {
+                    id = "debug",
+                    label = "Forced debug preview",
+                    display = "Forced debug preview [not a real conflict]"
+                }
+            }
+        end
+
+        TryShowConflictPopup(hasLegacyFile, mountedConflicts)
+    end, nil, "Force-open the GCAL conflict popup for debugging.")
 end
 
 if SERVER then

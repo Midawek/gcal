@@ -428,6 +428,8 @@ Use `GCAL:IsDynaBaseAvailable()` if your addon wants to branch behavior when Dyn
 
 ## 9. Debugging Tools
 
+GCAL listens for unhandled Lua errors originating from its own files. Client errors produce one rate-limited notification while full details remain in the console; server errors receive the same concise GCAL console prefix.
+
 Use these console commands during development:
 
 - `gcal_debug 1`: Enables the real-time HUD and console logging.
@@ -444,6 +446,7 @@ Use these console commands during development:
 - `gcal_dynabase_status`: Shows whether DynaBase is detected and lists queued GCAL DynaBase sources.
 - `gcal_menu_open`: Opens the GCAL desktop-window menu.
 - `gcal_debug_menu`: Dumps GCAL menu state and attempts a menu refresh.
+- `gcal_debug_conflict_popup`: Force-opens the conflict warning popup, using mounted conflicts or a labeled debug preview when none are present.
 - `gcal_show_now`: Opens and refreshes the current GCAL menu window immediately.
 - `gcal_rebuild_menu`: Removes and rebuilds the current GCAL menu window.
 
