@@ -75,6 +75,7 @@ local colWarn = Color(241, 181, 103)
 local colBad = Color(236, 116, 121)
 local colFrame = Color(10, 12, 16, 252)
 local logoMaterial = Material("gcal/logo", "smooth")
+local prideLogoMaterial = Material("gcal/pridelogo", "smooth")
 local defaultAccent = Color(102, 207, 177)
 local prideColors = {
     Color(228, 3, 3),
@@ -103,6 +104,49 @@ local function PaintPrideLine(x, y, width, height)
         surface.SetDrawColor(color)
         surface.DrawRect(stripeX, y, nextStripeX - stripeX, height)
     end
+end
+
+local function PrideGradientColor(fraction)
+    fraction = math.Clamp(fraction, 0, 1)
+
+    local scaled = fraction * (#prideColors - 1)
+    local index = math.min(math.floor(scaled) + 1, #prideColors - 1)
+    local blend = scaled - math.floor(scaled)
+    local from = prideColors[index]
+    local to = prideColors[index + 1]
+
+    return Color(
+        Lerp(blend, from.r, to.r),
+        Lerp(blend, from.g, to.g),
+        Lerp(blend, from.b, to.b),
+        255
+    )
+end
+
+local function DrawPrideTitle(panel, text, font, x, y, fallbackColor)
+    if not PrideEnabled() then
+        draw.SimpleText(text, font, x, y, fallbackColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        return
+    end
+
+    surface.SetFont(font)
+    local textWidth, textHeight = surface.GetTextSize(text)
+    local screenX, screenY = panel:LocalToScreen(x, y)
+    local stripeWidth = 3
+
+    for stripeX = 0, textWidth - 1, stripeWidth do
+        local color = PrideGradientColor(stripeX / math.max(textWidth - 1, 1))
+        render.SetScissorRect(
+            screenX + stripeX,
+            screenY,
+            math.min(screenX + stripeX + stripeWidth, screenX + textWidth),
+            screenY + textHeight,
+            true
+        )
+        draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+    end
+
+    render.SetScissorRect(0, 0, 0, 0, false)
 end
 
 hook.Add("Think", "GCAL_MenuPrideAccent", function()
@@ -1027,22 +1071,23 @@ function GCAL.Menu.BuildWindow(window)
 
         local titleX = PANEL_PAD
 
-        if not logoMaterial:IsError() then
-            local logoAspect = logoMaterial:Width() / math.max(logoMaterial:Height(), 1)
+        local activeLogoMaterial = PrideEnabled() and prideLogoMaterial or logoMaterial
+        if not activeLogoMaterial:IsError() then
+            local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
             local logoMaxWidth = 112
             local logoMaxHeight = 58
             local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
             local logoHeight = logoWidth / math.max(logoAspect, 0.01)
             local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
 
-            surface.SetMaterial(logoMaterial)
+            surface.SetMaterial(activeLogoMaterial)
             surface.SetDrawColor(255, 255, 255, 235)
             surface.DrawTexturedRect(PANEL_PAD, logoY, logoWidth, logoHeight)
 
             titleX = PANEL_PAD + logoWidth + 14
         end
 
-        draw.SimpleText("Garry's Mod Compliant Armature Layer", "GCAL.Menu.Title", titleX, 15, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+        DrawPrideTitle(panel, "Garry's Mod Compliant Armature Layer", "GCAL.Menu.Title", titleX, 15, colText)
         draw.SimpleText("Modern and modular offhand animation library", "GCAL.Menu.Subtitle", titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 
         local count = TrackCount()

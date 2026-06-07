@@ -81,6 +81,7 @@ if CLIENT then
         local colWarn = Color(241, 181, 103)
         local colBad = Color(236, 116, 121)
         local logoMaterial = Material("gcal/logo", "smooth")
+        local prideLogoMaterial = Material("gcal/pridelogo", "smooth")
 
         local function PaintConflictButton(btn, w, h)
             btn.GCALHover = Lerp(FrameTime() * 12, btn.GCALHover or 0, btn:IsHovered() and 1 or 0)
@@ -165,15 +166,17 @@ if CLIENT then
             surface.DrawLine(16, 92, w - 16, 92)
 
             local titleX = 16
-            if not logoMaterial:IsError() then
-                local logoAspect = logoMaterial:Width() / math.max(logoMaterial:Height(), 1)
+            local prideConVar = GetConVar("gcal_pride")
+            local activeLogoMaterial = prideConVar and prideConVar:GetBool() and prideLogoMaterial or logoMaterial
+            if not activeLogoMaterial:IsError() then
+                local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
                 local logoMaxWidth = 112
                 local logoMaxHeight = 58
                 local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
                 local logoHeight = logoWidth / math.max(logoAspect, 0.01)
                 local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
 
-                surface.SetMaterial(logoMaterial)
+                surface.SetMaterial(activeLogoMaterial)
                 surface.SetDrawColor(255, 255, 255, 235)
                 surface.DrawTexturedRect(16, logoY, logoWidth, logoHeight)
 
