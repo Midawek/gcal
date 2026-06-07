@@ -14,6 +14,10 @@ CreateClientConVar("gcal_menu_keep_open", "1", true, false, "Keep the GCAL deskt
 if not GetConVar("gcal_conflict_popup") then
     CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
 end
+local prideConVar = GetConVar("gcal_pride")
+if not prideConVar then
+    prideConVar = CreateClientConVar("gcal_pride", "0", true, false, "Enable GCAL's hidden pride theme.")
+end
 for _, adjustmentConVar in ipairs({
     {"gcal_anim_offset_x", "Global GCAL animation forward/back offset."},
     {"gcal_anim_offset_y", "Global GCAL animation right/left offset."},
@@ -71,6 +75,49 @@ local colWarn = Color(241, 181, 103)
 local colBad = Color(236, 116, 121)
 local colFrame = Color(10, 12, 16, 252)
 local logoMaterial = Material("gcal/logo", "smooth")
+local defaultAccent = Color(102, 207, 177)
+local prideColors = {
+    Color(228, 3, 3),
+    Color(255, 140, 0),
+    Color(255, 237, 0),
+    Color(0, 128, 38),
+    Color(0, 77, 255),
+    Color(117, 7, 135)
+}
+
+local function PrideEnabled()
+    return prideConVar and prideConVar:GetBool() or false
+end
+
+local function PaintPrideLine(x, y, width, height)
+    if not PrideEnabled() then
+        surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 120)
+        surface.DrawRect(x, y, width, height)
+        return
+    end
+
+    local stripeWidth = width / #prideColors
+    for i, color in ipairs(prideColors) do
+        local stripeX = x + math.floor((i - 1) * stripeWidth)
+        local nextStripeX = x + math.floor(i * stripeWidth)
+        surface.SetDrawColor(color)
+        surface.DrawRect(stripeX, y, nextStripeX - stripeX, height)
+    end
+end
+
+hook.Add("Think", "GCAL_MenuPrideAccent", function()
+    if PrideEnabled() then
+        local rainbow = HSVToColor((RealTime() * 55) % 360, 0.72, 1)
+        colAccent.r = rainbow.r
+        colAccent.g = rainbow.g
+        colAccent.b = rainbow.b
+        return
+    end
+
+    colAccent.r = defaultAccent.r
+    colAccent.g = defaultAccent.g
+    colAccent.b = defaultAccent.b
+end)
 
 local function PaintPill(x, y, w, h, color, text)
     draw.RoundedBox(5, x, y, w, h, Color(color.r, color.g, color.b, 26))
@@ -954,8 +1001,7 @@ function GCAL.Menu.BuildWindow(window)
     window.Paint = function(_, w, h)
         draw.RoundedBox(7, 0, 0, w, h, colFrame)
         draw.RoundedBox(6, 1, 1, w - 2, h - 2, colPanel)
-        surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 120)
-        surface.DrawLine(10, 0, w - 10, 0)
+        PaintPrideLine(10, 0, w - 20, PrideEnabled() and 3 or 1)
         surface.SetDrawColor(colLine)
         surface.DrawOutlinedRect(0, 0, w, h, 1)
     end
