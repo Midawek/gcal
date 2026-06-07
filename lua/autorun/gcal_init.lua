@@ -9,17 +9,30 @@ if SERVER then
     AddCSLuaFile("autorun/client/gcal_menu_autorun.lua")
 end
 
-local function GCAL_IsOwnLuaError(errorMessage, stack, addonName)
-    local function MatchesGCAL(value)
-        value = string.lower(tostring(value or ""))
-        return string.find(value, "addons/gcal/", 1, true) ~= nil
-            or string.find(value, "addons\\gcal\\", 1, true) ~= nil
-            or string.find(value, "lua/gcal/", 1, true) ~= nil
-            or string.find(value, "lua\\gcal\\", 1, true) ~= nil
-            or string.find(value, "gcal_init.lua", 1, true) ~= nil
-    end
+-- Kept script-local so error diagnostics and conflict detection share one source.
+local conflictingWorkshopAddons = {
+    ["2155366756"] = "VManip (Base)",
+    ["3262499127"] = "Chen's VManip Patch",
+    ["3080114310"] = "VManip (Base) Remix 2024",
+    ["3039950711"] = "VManip (Fix_and_function)",
+    ["3425927104"] = "Vmanip Base with knockdown",
+    ["2844472642"] = "Vmanip +",
+    ["3714993549"] = "Vmanip (Lite)",
+    ["349050451"] = "Chuck's Weaponry 2.0",
+    -- ["1234567890"] = "Example Addon"
+}
 
-    if MatchesGCAL(errorMessage) then return true end
+local function GCAL_MatchesOwnPath(value)
+    value = string.lower(tostring(value or ""))
+    return string.find(value, "addons/gcal/", 1, true) ~= nil
+        or string.find(value, "addons\\gcal\\", 1, true) ~= nil
+        or string.find(value, "lua/gcal/", 1, true) ~= nil
+        or string.find(value, "lua\\gcal\\", 1, true) ~= nil
+        or string.find(value, "gcal_init.lua", 1, true) ~= nil
+end
+
+local function GCAL_IsOwnLuaError(errorMessage, stack, addonName)
+    if GCAL_MatchesOwnPath(errorMessage) then return true end
 
     local normalizedAddonName = string.lower(tostring(addonName or ""))
     if normalizedAddonName == "gcal" or string.find(normalizedAddonName, "compliant armature layer", 1, true) then
@@ -27,11 +40,11 @@ local function GCAL_IsOwnLuaError(errorMessage, stack, addonName)
     end
 
     for _, frame in pairs(istable(stack) and stack or {}) do
-        if MatchesGCAL(frame) then return true end
+        if GCAL_MatchesOwnPath(frame) then return true end
 
         if istable(frame) then
             for _, value in pairs(frame) do
-                if MatchesGCAL(value) then return true end
+                if GCAL_MatchesOwnPath(value) then return true end
             end
         end
     end
@@ -39,9 +52,79 @@ local function GCAL_IsOwnLuaError(errorMessage, stack, addonName)
     return false
 end
 
+local function GCAL_KnownConflictLabel(addonName, addonID)
+    addonID = tostring(addonID or "")
+    if conflictingWorkshopAddons[addonID] then
+        return conflictingWorkshopAddons[addonID], addonID
+    end
+
+    local normalizedName = string.lower(string.Trim(tostring(addonName or "")))
+    if normalizedName == "" then return nil end
+
+    for workshopID, label in pairs(conflictingWorkshopAddons) do
+        if normalizedName == string.lower(label) then return label, workshopID end
+    end
+end
+
+local function GCAL_ErrorFrameDetails(stack)
+    local firstFrame
+    local externalFrame
+
+    for _, frame in ipairs(istable(stack) and stack or {}) do
+        local file
+        local line
+        local func
+
+        if istable(frame) then
+            file = frame.File or frame.file or frame.Source or frame.source
+            line = frame.Line or frame.line
+            func = frame.Function or frame.func or frame.Name or frame.name
+        elseif isstring(frame) then
+            file = frame
+        end
+
+        if file and tostring(file) ~= "[C]" then
+            local detail = tostring(file)
+            if line and tonumber(line) and tonumber(line) >= 0 then
+                detail = detail .. ":" .. tostring(line)
+            end
+            if func and tostring(func) ~= "" then
+                detail = detail .. " in " .. tostring(func)
+            end
+
+            firstFrame = firstFrame or detail
+            if not GCAL_MatchesOwnPath(file) then
+                externalFrame = externalFrame or detail
+            end
+        end
+    end
+
+    return firstFrame, externalFrame
+end
+
+local function GCAL_MountedConflictLabels()
+    if not CLIENT or not engine or not engine.GetAddons then return {} end
+
+    local mounted = {}
+    for _, addon in ipairs(engine.GetAddons()) do
+        local workshopID = tostring(addon.wsid or "")
+        local label = conflictingWorkshopAddons[workshopID]
+        if label and addon.mounted then
+            mounted[#mounted + 1] = label .. " [" .. workshopID .. "]"
+        end
+    end
+
+    table.sort(mounted)
+    return mounted
+end
+
 local gcalLastErrorNotice = 0
-hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, stack, addonName)
-    if not GCAL_IsOwnLuaError(errorMessage, stack, addonName) then return end
+hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, stack, addonName, addonID)
+    local conflictLabel, conflictID = GCAL_KnownConflictLabel(addonName, addonID)
+    if not GCAL_IsOwnLuaError(errorMessage, stack, addonName) and not conflictLabel then return end
+
+    local firstFrame, externalFrame = GCAL_ErrorFrameDetails(stack)
+    local mountedConflicts = GCAL_MountedConflictLabels()
 
     MsgC(
         Color(236, 116, 121),
@@ -50,9 +133,39 @@ hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, 
         tostring(errorMessage or "Unknown error") .. "\n"
     )
 
+    if addonName or addonID then
+        MsgC(
+            Color(151, 163, 177),
+            "[GCAL] Engine attribution: " .. tostring(addonName or "unknown addon") ..
+                (addonID and (" [" .. tostring(addonID) .. "]") or "") .. "\n"
+        )
+    end
+    if firstFrame then
+        MsgC(Color(151, 163, 177), "[GCAL] First Lua frame: " .. firstFrame .. "\n")
+    end
+    if externalFrame then
+        MsgC(Color(255, 176, 93), "[GCAL] First external frame: " .. externalFrame .. "\n")
+    end
+    if conflictLabel then
+        MsgC(
+            Color(236, 116, 121),
+            "[GCAL] Known conflict implicated by engine attribution: " .. conflictLabel ..
+                " [" .. tostring(conflictID) .. "]\n"
+        )
+    elseif #mountedConflicts > 0 then
+        MsgC(
+            Color(255, 176, 93),
+            "[GCAL] Known conflicts currently mounted (context only, not proof): " ..
+                table.concat(mountedConflicts, ", ") .. "\n"
+        )
+    end
+
     if CLIENT and notification and notification.AddLegacy and CurTime() >= gcalLastErrorNotice then
         gcalLastErrorNotice = CurTime() + 5
-        notification.AddLegacy("GCAL encountered an error. Check the console for details.", NOTIFY_ERROR, 6)
+        local notice = conflictLabel
+            and ("GCAL error may involve " .. conflictLabel .. ". Check the console.")
+            or "GCAL encountered an error. Check the console for trace details."
+        notification.AddLegacy(notice, NOTIFY_ERROR, 6)
         if surface and surface.PlaySound then
             surface.PlaySound("buttons/button10.wav")
         end
@@ -60,30 +173,38 @@ hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, 
 end)
 
 if CLIENT then
+    concommand.Add("gcal_debug_unhandled_error", function(_, _, args)
+        if string.lower(tostring(args[1] or "")) == "conflict" then
+            local workshopID = "2155366756"
+            local label = conflictingWorkshopAddons[workshopID]
+            MsgC(Color(255, 176, 93), "[GCAL] Triggering a synthetic known-conflict attribution report.\n")
+            hook.Run(
+                "OnLuaError",
+                "Synthetic GCAL conflict-correlation test. No addon actually failed.",
+                "client",
+                {
+                    {File = "addons/gcal/lua/autorun/gcal_init.lua", Line = 1, Function = "debug_test"},
+                    {File = "addons/vmanip/lua/autorun/client/cl_vmanip.lua", Line = 1, Function = "debug_test"}
+                },
+                label,
+                workshopID
+            )
+            return
+        end
+
+        MsgC(Color(255, 176, 93), "[GCAL] Triggering a deliberate clientside Lua error for handler testing.\n")
+
+        timer.Simple(0, function()
+            error("Deliberate GCAL unhandled-error test. This error is expected.")
+        end)
+    end, nil, "Test GCAL error reporting. Use 'gcal_debug_unhandled_error conflict' to simulate known-conflict attribution.")
+end
+
+if CLIENT then
     GCAL = GCAL or {}
     if not GetConVar("gcal_conflict_popup") then
         CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
     end
-
-        --[[
-        Hey! This shouldn't be touched, really. 
-        I try to put in addons that I know don't work.
-        This list changes all the time and please let me know if anything should be changed!
-        There are many ways to contact me, creating fights or trying to override it are just not the way to go about it.
-        Thanks for taking the time to read this. 
-        ~Midawek
-        ]]
-    local conflictingWorkshopAddons = {
-        ["2155366756"] = "VManip (Base)",
-        ["3262499127"] = "Chen's VManip Patch",
-        ["3080114310"] = "VManip (Base) Remix 2024",
-        ["3039950711"] = "VManip (Fix_and_function)",
-        ["3425927104"] = "Vmanip Base with knockdown",
-        ["2844472642"] = "Vmanip +",
-        ["3714993549"] = "Vmanip (Lite)",
-        ["349050451"] = "Chuck's Weaponry 2.0",
-        -- ["1234567890"] = "Example Addon"
-    }
 
     function GCAL:RegisterConflictingWorkshopAddon(workshopID, label)
         workshopID = tostring(workshopID or "")

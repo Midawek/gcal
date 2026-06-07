@@ -447,6 +447,7 @@ Use these console commands during development:
 - `gcal_menu_open`: Opens the GCAL desktop-window menu.
 - `gcal_debug_menu`: Dumps GCAL menu state and attempts a menu refresh.
 - `gcal_debug_conflict_popup`: Force-opens the conflict warning popup, using mounted conflicts or a labeled debug preview when none are present.
+- `gcal_debug_unhandled_error`: Throws a deliberate clientside GCAL error through the normal engine error pipeline. Add `conflict` to simulate engine attribution to a known conflict and test correlation output.
 - `gcal_show_now`: Opens and refreshes the current GCAL menu window immediately.
 - `gcal_rebuild_menu`: Removes and rebuilds the current GCAL menu window.
 
