@@ -167,7 +167,8 @@ if CLIENT then
 
             local titleX = 16
             local prideConVar = GetConVar("gcal_pride")
-            local activeLogoMaterial = prideConVar and prideConVar:GetBool() and prideLogoMaterial or logoMaterial
+            local prideEnabled = prideConVar and prideConVar:GetBool() or false
+            local activeLogoMaterial = prideEnabled and prideLogoMaterial or logoMaterial
             if not activeLogoMaterial:IsError() then
                 local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
                 local logoMaxWidth = 112
@@ -175,12 +176,13 @@ if CLIENT then
                 local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
                 local logoHeight = logoWidth / math.max(logoAspect, 0.01)
                 local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
+                local logoX = 16
 
                 surface.SetMaterial(activeLogoMaterial)
-                surface.SetDrawColor(255, 255, 255, 235)
-                surface.DrawTexturedRect(16, logoY, logoWidth, logoHeight)
+                surface.SetDrawColor(255, 255, 255, prideEnabled and 245 or 235)
+                surface.DrawTexturedRect(logoX, logoY, logoWidth, logoHeight)
 
-                titleX = 16 + logoWidth + 14
+                titleX = 16 + math.min(logoMaxWidth, logoMaxHeight * logoAspect) + 14
             end
 
             draw.SimpleText("GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)

@@ -90,6 +90,8 @@ local function PrideEnabled()
     return prideConVar and prideConVar:GetBool() or false
 end
 
+local PrideGradientColor
+
 local function PaintPrideLine(x, y, width, height)
     if not PrideEnabled() then
         surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 120)
@@ -97,23 +99,23 @@ local function PaintPrideLine(x, y, width, height)
         return
     end
 
-    local stripeWidth = width / #prideColors
-    for i, color in ipairs(prideColors) do
-        local stripeX = x + math.floor((i - 1) * stripeWidth)
-        local nextStripeX = x + math.floor(i * stripeWidth)
+    local phase = (RealTime() * 0.12) % 1
+    local sliceWidth = 4
+    for sliceX = 0, width - 1, sliceWidth do
+        local color = PrideGradientColor((sliceX / math.max(width, 1) + phase) % 1)
         surface.SetDrawColor(color)
-        surface.DrawRect(stripeX, y, nextStripeX - stripeX, height)
+        surface.DrawRect(x + sliceX, y, math.min(sliceWidth, width - sliceX), height)
     end
 end
 
-local function PrideGradientColor(fraction)
-    fraction = math.Clamp(fraction, 0, 1)
+PrideGradientColor = function(fraction)
+    fraction = fraction % 1
 
-    local scaled = fraction * (#prideColors - 1)
-    local index = math.min(math.floor(scaled) + 1, #prideColors - 1)
+    local scaled = fraction * #prideColors
+    local index = math.floor(scaled) + 1
     local blend = scaled - math.floor(scaled)
     local from = prideColors[index]
-    local to = prideColors[index + 1]
+    local to = prideColors[index % #prideColors + 1]
 
     return Color(
         Lerp(blend, from.r, to.r),
@@ -133,9 +135,10 @@ local function DrawPrideTitle(panel, text, font, x, y, fallbackColor)
     local textWidth, textHeight = surface.GetTextSize(text)
     local screenX, screenY = panel:LocalToScreen(x, y)
     local stripeWidth = 3
+    local phase = (RealTime() * 0.12) % 1
 
     for stripeX = 0, textWidth - 1, stripeWidth do
-        local color = PrideGradientColor(stripeX / math.max(textWidth - 1, 1))
+        local color = PrideGradientColor((stripeX / math.max(textWidth - 1, 1) + phase) % 1)
         render.SetScissorRect(
             screenX + stripeX,
             screenY,
@@ -1079,12 +1082,17 @@ function GCAL.Menu.BuildWindow(window)
             local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
             local logoHeight = logoWidth / math.max(logoAspect, 0.01)
             local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
+            local logoX = PANEL_PAD
 
             surface.SetMaterial(activeLogoMaterial)
-            surface.SetDrawColor(255, 255, 255, 235)
-            surface.DrawTexturedRect(PANEL_PAD, logoY, logoWidth, logoHeight)
+            if PrideEnabled() then
+                surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 24)
+                surface.DrawTexturedRect(logoX - 2, logoY - 2, logoWidth + 4, logoHeight + 4)
+            end
+            surface.SetDrawColor(255, 255, 255, PrideEnabled() and 245 or 235)
+            surface.DrawTexturedRect(logoX, logoY, logoWidth, logoHeight)
 
-            titleX = PANEL_PAD + logoWidth + 14
+            titleX = PANEL_PAD + math.min(logoMaxWidth, logoMaxHeight * logoAspect) + 14
         end
 
         DrawPrideTitle(panel, "Garry's Mod Compliant Armature Layer", "GCAL.Menu.Title", titleX, 15, colText)
