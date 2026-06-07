@@ -302,6 +302,50 @@ if CLIENT then
     
     print("GCAL (Client) Initialized! :3")
 
+    timer.Simple(1, function()
+        local prideConVar = GetConVar("gcal_pride")
+        if not prideConVar or not prideConVar:GetBool() then return end
+
+        local prideColors = {
+            Color(228, 3, 3),
+            Color(255, 140, 0),
+            Color(255, 237, 0),
+            Color(0, 180, 65),
+            Color(70, 130, 255),
+            Color(170, 80, 210)
+        }
+
+        local function PrideChatColor(fraction)
+            local scaled = math.Clamp(fraction, 0, 1) * (#prideColors - 1)
+            local index = math.min(math.floor(scaled) + 1, #prideColors - 1)
+            local blend = scaled - math.floor(scaled)
+            local from = prideColors[index]
+            local to = prideColors[index + 1]
+            local lighten = 0.38
+
+            return Color(
+                Lerp(lighten, Lerp(blend, from.r, to.r), 255),
+                Lerp(lighten, Lerp(blend, from.g, to.g), 255),
+                Lerp(lighten, Lerp(blend, from.b, to.b), 255)
+            )
+        end
+
+        local function AddPrideChatLine(text)
+            local parts = {}
+            local length = #text
+
+            for i = 1, length do
+                parts[#parts + 1] = PrideChatColor((i - 1) / math.max(length - 1, 1))
+                parts[#parts + 1] = string.sub(text, i, i)
+            end
+
+            chat.AddText(unpack(parts))
+        end
+
+        AddPrideChatLine("GCAL proudly stands with LGBTQ+ players and creators.")
+        AddPrideChatLine("You are welcome here. You belong here. Be yourself.")
+    end)
+
     -- Conflict Detection Notice
     timer.Simple(1, function()
         local mountedConflicts = GetMountedConflictingWorkshopAddons()
