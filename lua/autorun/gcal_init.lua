@@ -19,6 +19,7 @@ local conflictingWorkshopAddons = {
     ["2844472642"] = "Vmanip +",
     ["3714993549"] = "Vmanip (Lite)",
     ["349050451"] = "Chuck's Weaponry 2.0",
+    ["3627079098"] = "VManip Legs Fix"
     -- ["1234567890"] = "Example Addon"
 }
 
