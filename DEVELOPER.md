@@ -92,7 +92,7 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `addon_name`         | string       | Optional display name used by GCAL's Toggle Anims tree to group animations by addon.                                                                  |
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
-| `thirdperson`        | bool         | Reserved for the unfinished thirdperson projection path. Currently ignored while thirdperson support is internally disabled.                          |
+| `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
@@ -269,16 +269,16 @@ Useful native hooks:
 
 ## 5. Thirdperson Support
 
-GCAL contains an unfinished thirdperson projection path, but it is currently internally disabled and not used at runtime.
+GCAL can project active arm tracks onto the local player model while the local player is rendered in thirdperson. The feature is experimental and enabled through `gcal_thirdperson`.
 
 ```lua
 GCAL:RegisterSecondHandAnim("radio_press", {
     model = "myaddon/c_radio_press.mdl",
-    thirdperson = true -- Reserved for future use while support is disabled internally.
+    thirdperson = true
 })
 ```
 
-The `thirdperson` field and `gcal_thirdperson` convar are kept for future work, but the internal gate currently prevents tracks from enabling or rendering thirdperson projection.
+GCAL aligns the animation model's initial source-arm root to a freshly built player skeleton, then preserves animation deltas from that baseline. Thirdperson interpolation blends bone positions and angles instead of raw matrix elements to avoid shear during large arm rotations. Set `thirdperson = false` for animations that should remain firstperson-only.
 
 ---
 
@@ -436,7 +436,7 @@ Use these console commands during development:
 - `gcal_playback_speed <multiplier>`: Changes global GCAL playback speed. The menu exposes this as a slider from `0.1` to `3`.
 - `gcal_mute_sounds 1`: Mutes sounds emitted by GCAL animations.
 - `gcal_sound_pitch <pitch>`: Changes GCAL animation sound pitch. The menu uses `75`, `100`, and `140` presets.
-- `gcal_thirdperson 1`: Reserved for the unfinished thirdperson projection path; ignored while the internal gate is disabled.
+- `gcal_thirdperson 1`: Enables experimental projection of active GCAL arm tracks onto the local player model in thirdperson.
 - `gcal_list_anims`: Lists every animation currently registered in GCAL.
 - `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
 - `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.

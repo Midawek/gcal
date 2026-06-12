@@ -49,7 +49,7 @@ if CLIENT then
     GCAL.AnimationAngleY = CreateClientConVar("gcal_anim_angle_y", "0", true, false, "Global GCAL animation yaw offset.")
     GCAL.AnimationAngleR = CreateClientConVar("gcal_anim_angle_r", "0", true, false, "Global GCAL animation roll offset.")
     GCAL.AnimationFOV = CreateClientConVar("gcal_anim_fov", "0", true, false, "Global GCAL animation FOV offset while GCAL tracks are active.")
-    GCAL.InternalThirdPersonEnabled = false
+    GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
     function GCAL:IsThirdPersonEnabled()
@@ -804,6 +804,7 @@ if CLIENT then
 
         track.model:ResetSequence(sequence)
         if IsValid(track.camModel) then track.camModel:ResetSequence(sequence) end
+        track.thirdpersonSourceRoot = nil
         track.curSegment = sequence
         track.cycle = 0
         track.segmentFinished = false
@@ -1022,19 +1023,44 @@ if CLIENT then
         return false
     end
 
-    local function BuildThirdPersonMatrix(track, vm, targetBone, modelBone, vmMatrix, modelMatrix, thirdpersonState)
-        if not thirdpersonState.targetRoot or not thirdpersonState.modelRoot then
-            thirdpersonState.targetRoot = vmMatrix
-            thirdpersonState.modelRoot = modelMatrix
-
-            local modelRootInverse = Matrix(modelMatrix:ToTable())
-            modelRootInverse:Invert()
-            thirdpersonState.rootRemap = Matrix(vmMatrix:ToTable()) * modelRootInverse
+    local function GetEntityWorldMatrix(ent)
+        if ent.GetWorldTransformMatrix then
+            local worldMatrix = ent:GetWorldTransformMatrix()
+            if worldMatrix then return Matrix(worldMatrix:ToTable()) end
         end
 
-        -- Move the entire animated source chain into the player arm's shoulder space
-        -- in one shot. Rebuilding bone-by-bone from the player chain leaks the
-        -- weapon-hold pose back into the forearm and hand.
+        local worldMatrix = Matrix()
+        worldMatrix:SetTranslation(ent:GetPos())
+        worldMatrix:SetAngles(ent:GetAngles())
+        return worldMatrix
+    end
+
+    local function BuildThirdPersonMatrix(track, vm, targetBone, modelBone, vmMatrix, modelMatrix, thirdpersonState)
+        if not thirdpersonState.rootRemap then
+            local modelWorld = GetEntityWorldMatrix(track.model)
+            local baseline = track.thirdpersonSourceRoot
+
+            if not baseline or baseline.modelBone ~= modelBone then
+                local modelWorldInverse = Matrix(modelWorld:ToTable())
+                modelWorldInverse:Invert()
+                baseline = {
+                    modelBone = modelBone,
+                    localMatrix = modelWorldInverse * modelMatrix
+                }
+                track.thirdpersonSourceRoot = baseline
+            end
+
+            local baselineWorld = modelWorld * baseline.localMatrix
+            local baselineWorldInverse = Matrix(baselineWorld:ToTable())
+            baselineWorldInverse:Invert()
+            thirdpersonState.rootRemap = Matrix(vmMatrix:ToTable()) * baselineWorldInverse
+
+            track.debugThirdPersonRootBone = modelBone
+        end
+
+        -- Anchor the source arm's initial root pose to the player's current upper
+        -- arm, then preserve animation deltas from that baseline. Aligning the
+        -- current root every frame would cancel all upper-arm animation.
         return thirdpersonState.rootRemap * modelMatrix
     end
 
@@ -1263,7 +1289,9 @@ if CLIENT then
 
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
 
-        vm:SetupBones()
+        if not thirdperson then
+            vm:SetupBones()
+        end
         if IsValid(handsEnt) and handsEnt ~= vm then
             handsEnt:SetupBones()
         end
@@ -1276,7 +1304,9 @@ if CLIENT then
         local targetBones = GetTrackTargetBones(track, weapon, flip)
         local targetEnt = thirdperson and vm or GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then return end
-        targetEnt:SetupBones()
+        if not thirdperson then
+            targetEnt:SetupBones()
+        end
         
         if thirdperson then
             local renderAngles = vm.GetRenderAngles and vm:GetRenderAngles() or vm:GetAngles()
@@ -1304,6 +1334,20 @@ if CLIENT then
         local scaleVec = useLegacyFlip and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
         local thirdpersonState = thirdperson and {} or nil
 
+        if thirdperson then
+            thirdpersonState.targetMatrices = {}
+            for k, boneName in ipairs(track.bones) do
+                local targetBoneName = targetBones[k] or boneName
+                local targetBone = targetEnt:LookupBone(targetBoneName)
+                if targetBone and targetBone >= 0 then
+                    local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
+                    if targetMatrix then
+                        thirdpersonState.targetMatrices[targetBone] = Matrix(targetMatrix:ToTable())
+                    end
+                end
+            end
+        end
+
         for k, boneName in ipairs(track.bones) do
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
             sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or sourceBoneName
@@ -1316,7 +1360,9 @@ if CLIENT then
                 local targetBone = targetEnt:LookupBone(targetBoneName)
                 if not targetBone or targetBone < 0 then continue end
 
-                local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
+                local targetMatrix = thirdperson
+                    and thirdpersonState.targetMatrices[targetBone]
+                    or targetEnt:GetBoneMatrix(targetBone)
                 if not targetMatrix then continue end
 
                 local finalMatrix = modelMatrix
@@ -1324,17 +1370,26 @@ if CLIENT then
                     finalMatrix = BuildThirdPersonMatrix(track, targetEnt, targetBone, modelBone, targetMatrix, modelMatrix, thirdpersonState)
                 end
 
-                local mTable = finalMatrix:ToTable()
-                local targetTable = targetMatrix:ToTable()
+                local m
+                if thirdperson then
+                    local blendToTarget = math.Clamp(matrixLerp(lerpVal, 0, 1, curve), 0, 1)
+                    m = Matrix(finalMatrix:ToTable())
+                    m:SetTranslation(LerpVector(blendToTarget, finalMatrix:GetTranslation(), targetMatrix:GetTranslation()))
+                    m:SetAngles(LerpAngle(blendToTarget, finalMatrix:GetAngles(), targetMatrix:GetAngles()))
+                else
+                    local mTable = finalMatrix:ToTable()
+                    local targetTable = targetMatrix:ToTable()
 
-                for i = 1, 4 do
-                    local mi, ti = mTable[i], targetTable[i]
-                    for j = 1, 4 do
-                        mi[j] = matrixLerp(lerpVal, mi[j], ti[j], curve)
+                    for i = 1, 4 do
+                        local mi, ti = mTable[i], targetTable[i]
+                        for j = 1, 4 do
+                            mi[j] = matrixLerp(lerpVal, mi[j], ti[j], curve)
+                        end
                     end
+
+                    m = Matrix(mTable)
                 end
 
-                local m = Matrix(mTable)
                 m:SetScale(scaleVec)
                 targetEnt:SetBoneMatrix(targetBone, m)
                 boneCount = boneCount + 1
@@ -1411,18 +1466,16 @@ if CLIENT then
         renderTracksBusy = false
     end
 
-    local thirdpersonFrame = 0
     local function RenderThirdPersonTracks(ply)
         if not GCAL:IsThirdPersonEnabled() then return end
         if ply ~= LocalPlayer() or not IsValid(ply) or not ply:Alive() then return end
         local viewEntity = ply.GetViewEntity and ply:GetViewEntity() or ply
         if not ply:ShouldDrawLocalPlayer() and viewEntity == ply then return end
         if next(GCAL.ActiveTracks) == nil then return end
-        if thirdpersonFrame == FrameNumber() then return end
-        thirdpersonFrame = FrameNumber()
 
         local weapon = ply:GetActiveWeapon()
         local alreadyUpdated = CurTime() == curtimecheck and not gui.IsGameUIVisible()
+        ply:InvalidateBoneCache()
         ply:SetupBones()
 
         for id, track in pairs(GCAL.ActiveTracks) do
@@ -1602,6 +1655,8 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - blockCode: " .. tostring(track.blockCode or false) .. "\n")
         MsgC(Color(236, 242, 255), " - blockCodeScope: " .. tostring(track.blockCodeScope or "<global>") .. "\n")
         MsgC(Color(236, 242, 255), " - poseOnlyLegacy: " .. tostring(track.poseOnlyLegacy or false) .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson: " .. tostring(track.thirdperson or false) .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson root bone: " .. tostring(track.debugThirdPersonRootBone or "<not cached>") .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
 
