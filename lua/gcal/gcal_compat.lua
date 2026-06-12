@@ -276,7 +276,7 @@ function VManip:PlaySegment(sequence, lastsegment, soundtable)
 
         track.model:ResetSequence(sequence)
         if IsValid(track.camModel) then track.camModel:ResetSequence(sequence) end
-        track.thirdpersonSourceRoot = nil
+        track.thirdpersonSourcePose = nil
         track.curSegment = sequence
         track.cycle = 0
         track.segmentFinished = false
