@@ -283,6 +283,8 @@ GCAL:RegisterSecondHandAnim("radio_press", {
 
 GCAL uses one TPIK path for thirdperson. The animation model supplies shoulder, elbow, and hand goals; GCAL solves the player model's upper arm and forearm using the player's own limb lengths, applies the animated hand orientation, and carries helper bones and fingers through the solved hierarchy. A separate clone of the animation's registered model renders addon-owned props such as spray cans or tablets; obvious viewmodel arm materials are hidden automatically. Set `thirdperson = false` for animations that should remain firstperson-only.
 
+Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, ARC9 weapons without native TPIK use `arc9_no_tpik`, and other weapon bases use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. The `arc9_no_tpik` method updates track timing but intentionally avoids player-bone and prop-clone overrides to preserve ARC9/GShaders rendering when ARC9 has no native TPIK stage.
+
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
 
 ---
@@ -331,6 +333,7 @@ Current built-in behavior:
 | :------- | :-------- | :----------------- | :---- |
 | `tfa` | `weapon.IsTFAWeapon` | Uses the owner's normal viewmodel. | Matches Chen's patch: no TFA-specific VM hook and no forced hands-first target. TFA still uses the shared `PreDrawPlayerHands` path for `UseHands` weapons, falls back to the player hands entity when the VM has no arm bones, and uses `TFA_PreReload` reload blocking. |
 | `arccw` | `weapon.ArcCW` | Uses the owner's normal viewmodel. | Matches Chen's patch: `UseHands` weapons render through `PreDrawPlayerHands`, skip the generic `PostDrawViewModel` pass, and keep VM-first arm targeting. Reload playback is blocked while ArcCW reports `reloading`. |
+| `arc9` | ARC9 markers or TPIK methods | Uses the owner's normal viewmodel. | Thirdperson uses explicit methods: `arc9_tpik` for ARC9's native post-solve hook, or `arc9_no_tpik` for ARC9 weapons with inactive/native-disabled TPIK. `arc9_no_tpik` does not alter the thirdperson player skeleton. |
 | `mwbase` | valid `weapon.m_ViewModel` | Uses `weapon.m_ViewModel`. | Custom VM entity is used for arms and legs when present. |
 
 To add another special weapon base, register a strategy clientside:

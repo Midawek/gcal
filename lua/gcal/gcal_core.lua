@@ -1565,6 +1565,16 @@ if CLIENT then
         return nil
     end
 
+    function GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy)
+        strategy = strategy or self:GetWeaponBaseStrategy(ply, weapon)
+        if strategy and strategy.thirdPersonMethod then
+            local method = strategy.thirdPersonMethod(ply, weapon, strategy)
+            if method then return method end
+        end
+
+        return "normal"
+    end
+
     function GCAL:FindArmTarget(vm, handsEnt, targetBones)
         if EntityHasAnyBone(vm, targetBones) then return vm end
         if EntityHasAnyBone(handsEnt, targetBones) then return handsEnt end
@@ -1853,16 +1863,36 @@ if CLIENT then
         renderTracksBusy = false
     end
 
-    local function RenderThirdPersonTracks(ply)
+    local function RenderThirdPersonTracks(ply, methodOverride, forcedWeapon)
         if not GCAL:IsThirdPersonEnabled() then return end
         if ply ~= LocalPlayer() or not IsValid(ply) or not ply:Alive() then return end
         local viewEntity = ply.GetViewEntity and ply:GetViewEntity() or ply
         if not ply:ShouldDrawLocalPlayer() and viewEntity == ply then return end
         if next(GCAL.ActiveTracks) == nil then return end
 
-        local weapon = ply:GetActiveWeapon()
+        local weapon = IsValid(forcedWeapon) and forcedWeapon or ply:GetActiveWeapon()
+        local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+        local method = methodOverride or GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy)
+        local hostedByWeaponTPIK = method == "arc9_tpik"
+        if hostedByWeaponTPIK and not methodOverride then return end
+
         UpdateTracksForFrame()
         if next(GCAL.ActiveTracks) == nil then return end
+
+        if method == "arc9_no_tpik" then
+            for id, track in pairs(GCAL.ActiveTracks) do
+                if id == "legs" or not track.thirdperson then continue end
+
+                track.thirdpersonSolveFrame = nil
+                track.thirdpersonBoneMatrices = nil
+                track.thirdpersonModelReadyFrame = nil
+                track.debugThirdPersonHost = method
+                track.debugThirdPersonMode = "disabled"
+                track.debugBoneCount = 0
+            end
+
+            return
+        end
 
         local needsSolve = false
         for id, track in pairs(GCAL.ActiveTracks) do
@@ -1877,8 +1907,11 @@ if CLIENT then
 
         local renderContext
         if needsSolve then
-            ply:InvalidateBoneCache()
-            ply:SetupBones()
+            if not hostedByWeaponTPIK then
+                ply:InvalidateBoneCache()
+                ply:SetupBones()
+            end
+
             local baseMatrices = {}
             for bone = 0, ply:GetBoneCount() - 1 do
                 local matrix = ply:GetBoneMatrix(bone)
@@ -1899,6 +1932,8 @@ if CLIENT then
             elseif renderContext then
                 ApplyBones(track, ply, nil, ply, weapon, true, false, nil, renderContext)
             end
+
+            track.debugThirdPersonHost = method
         end
     end
 
@@ -1918,6 +1953,20 @@ if CLIENT then
 
     hook.Add("PrePlayerDraw", "GCAL_RenderThirdPerson", function(ply)
         RenderThirdPersonTracks(ply)
+    end)
+
+    hook.Add("ARC9_TPIK_PostSolve", "GCAL_RenderARC9ThirdPerson", function(weapon, ply)
+        local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+        if not strategy then return end
+        if GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy) ~= "arc9_tpik" then return end
+
+        for _, track in pairs(GCAL.ActiveTracks) do
+            if track.thirdperson then
+                track.thirdpersonSolveFrame = nil
+            end
+        end
+
+        RenderThirdPersonTracks(ply, "arc9_tpik", weapon)
     end)
 
     hook.Add("PostPlayerDraw", "GCAL_RenderThirdPersonModels", function(ply)
@@ -2088,6 +2137,7 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - thirdperson: " .. tostring(track.thirdperson or false) .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson root bone: " .. tostring(track.debugThirdPersonRootBone or "<not cached>") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson mode: " .. tostring(track.debugThirdPersonMode or "<not evaluated>") .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson host: " .. tostring(track.debugThirdPersonHost or "gcal") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson model: " .. tostring(track.debugThirdPersonModel or "<not rendered>") .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
