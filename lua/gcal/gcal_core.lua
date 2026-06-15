@@ -49,7 +49,7 @@ if CLIENT then
     GCAL.AnimationAngleY = CreateClientConVar("gcal_anim_angle_y", "0", true, false, "Global GCAL animation yaw offset.")
     GCAL.AnimationAngleR = CreateClientConVar("gcal_anim_angle_r", "0", true, false, "Global GCAL animation roll offset.")
     GCAL.AnimationFOV = CreateClientConVar("gcal_anim_fov", "0", true, false, "Global GCAL animation FOV offset while GCAL tracks are active.")
-    GCAL.InternalThirdPersonEnabled = false
+    GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
     function GCAL:IsThirdPersonEnabled()
@@ -730,6 +730,16 @@ if CLIENT then
                 track.camModel:ResetSequence(track.seqID)
             end
         end
+
+        if track.thirdperson then
+            track.thirdpersonModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
+            if IsValid(track.thirdpersonModel) then
+                track.thirdpersonModel:SetNoDraw(true)
+                track.thirdpersonModel:ResetSequenceInfo()
+                track.thirdpersonModel:SetPlaybackRate(1)
+                track.thirdpersonModel:ResetSequence(track.seqID)
+            end
+        end
         
         if GCAL.ActiveTracks[trackID] then
             GCAL:StopTrack(trackID)
@@ -753,6 +763,7 @@ if CLIENT then
             GCAL_Log("Stopping track:", trackID)
             if IsValid(track.model) then track.model:Remove() end
             if IsValid(track.camModel) then track.camModel:Remove() end
+            if IsValid(track.thirdpersonModel) then track.thirdpersonModel:Remove() end
             if IsValid(track.legModel) then track.legModel:Remove() end
             if trackID == "legacy_left_arm" then
                 vmatrixpeakinfo = vmatrixpeakinfo or 0
@@ -804,7 +815,7 @@ if CLIENT then
 
         track.model:ResetSequence(sequence)
         if IsValid(track.camModel) then track.camModel:ResetSequence(sequence) end
-        track.thirdpersonSourcePose = nil
+        if IsValid(track.thirdpersonModel) then track.thirdpersonModel:ResetSequence(sequence) end
         track.curSegment = sequence
         track.cycle = 0
         track.segmentFinished = false
@@ -984,6 +995,10 @@ if CLIENT then
                 track.camModel:SetCycle(track.cycle)
                 track.camModel:InvalidateBoneCache()
             end
+            if IsValid(track.thirdpersonModel) then
+                track.thirdpersonModel:SetCycle(track.cycle)
+                track.thirdpersonModel:InvalidateBoneCache()
+            end
         end
 
         if (curtime < track.lerpPeakTime or (track.segmented and not track.lastSegment)) and (not track.gestureOnHold or track.gesturePastHold) then
@@ -1088,101 +1103,199 @@ if CLIENT then
         return parentInverse * worldMatrix, parent
     end
 
-    local function SourceRetargetLocalMatrix(ent, bone, worldMatrix)
-        local parent = ent:GetBoneParent(bone)
-        if not parent or parent < 0 then
-            return Matrix(worldMatrix:ToTable())
-        end
-
-        local parentName = ent:GetBoneName(parent) or ""
-        if string.EndsWith(parentName, "_Clavicle") then
-            local clavicleParent = ent:GetBoneParent(parent)
-            local clavicleParentMatrix = clavicleParent and clavicleParent >= 0
-                and ent:GetBoneMatrix(clavicleParent)
-
-            if clavicleParentMatrix then
-                local parentInverse = Matrix(clavicleParentMatrix:ToTable())
-                parentInverse:Invert()
-                return parentInverse * worldMatrix
-            end
-        end
-
-        return BoneLocalMatrix(ent, bone, worldMatrix)
+    local function BlendBoneMatrix(animated, base, blendToBase)
+        local matrix = Matrix(animated:ToTable())
+        matrix:SetTranslation(LerpVector(blendToBase, animated:GetTranslation(), base:GetTranslation()))
+        matrix:SetAngles(LerpAngle(blendToBase, animated:GetAngles(), base:GetAngles()))
+        return matrix
     end
 
-    local function CaptureThirdPersonSourcePose(track)
-        local model = track.model
-        local sequence = model:GetSequence()
-        local cached = track.thirdpersonSourcePose
-        if cached and cached.sequence == sequence then return cached end
+    local function RotateVectorBetween(vector, fromDirection, toDirection)
+        local from = Vector(fromDirection.x, fromDirection.y, fromDirection.z)
+        local to = Vector(toDirection.x, toDirection.y, toDirection.z)
+        if from:LengthSqr() <= 0.0001 or to:LengthSqr() <= 0.0001 then return vector end
+        from:Normalize()
+        to:Normalize()
 
-        local sampler = ClientsideModel(model:GetModel(), RENDERGROUP_OTHER)
-        if not IsValid(sampler) then return nil end
-        sampler:SetNoDraw(true)
-        sampler:ResetSequence(sequence)
-        sampler:SetPlaybackRate(0)
+        local dot = math.Clamp(from:Dot(to), -1, 1)
+        if dot > 0.9999 then return Vector(vector.x, vector.y, vector.z) end
 
-        local referenceCycle = track.segmentCount and track.segmentCount > 0
-            and 0
-            or (track.data and track.data.startcycle) or 0
+        local axis = from:Cross(to)
+        if axis:LengthSqr() <= 0.0001 then
+            axis = from:Cross(Vector(0, 0, 1))
+            if axis:LengthSqr() <= 0.0001 then
+                axis = from:Cross(Vector(0, 1, 0))
+            end
+        end
+        axis:Normalize()
 
-        cached = {
-            sequence = sequence,
-            localMatrices = {},
-            mode = track.data and track.data.thirdperson_mode
-        }
+        local angle = math.acos(dot)
+        local cosine = math.cos(angle)
+        local sine = math.sin(angle)
+        return vector * cosine
+            + axis:Cross(vector) * sine
+            + axis * axis:Dot(vector) * (1 - cosine)
+    end
 
-        local sourceBoneNames = track.sourceBones or track.bones or {}
-        sampler:SetCycle(referenceCycle)
-        sampler:InvalidateBoneCache()
-        sampler:SetupBones()
+    local function AimBoneMatrix(base, baseChildPosition, origin, target)
+        local baseDirection = baseChildPosition - origin
+        local targetDirection = target - origin
+        local matrix = Matrix(base:ToTable())
+        matrix:SetTranslation(origin)
+        if baseDirection:LengthSqr() <= 0.0001 or targetDirection:LengthSqr() <= 0.0001 then return matrix end
 
-        for _, sourceBoneName in ipairs(sourceBoneNames) do
-            local sourceBone = sampler:LookupBone(sourceBoneName)
-            if sourceBone and sourceBone >= 0 and not cached.localMatrices[sourceBone] then
-                local sourceWorld = sampler:GetBoneMatrix(sourceBone)
-                if sourceWorld then
-                    cached.localMatrices[sourceBone] = SourceRetargetLocalMatrix(sampler, sourceBone, sourceWorld)
+        local forward = RotateVectorBetween(base:GetForward(), baseDirection, targetDirection)
+        local up = RotateVectorBetween(base:GetUp(), baseDirection, targetDirection)
+        matrix:SetAngles(forward:AngleEx(up))
+        return matrix
+    end
+
+    local function SolveTwoBoneIK(shoulder, target, pole, upperLength, forearmLength)
+        local direction = target - shoulder
+        local distance = direction:Length()
+        if distance <= 0.0001 then return nil end
+        direction:Normalize()
+
+        local minimumReach = math.abs(upperLength - forearmLength) + 0.001
+        local maximumReach = math.max(upperLength + forearmLength - 0.001, minimumReach)
+        distance = math.Clamp(distance, minimumReach, maximumReach)
+        target = shoulder + direction * distance
+
+        local poleDirection = pole - shoulder
+        poleDirection = poleDirection - direction * poleDirection:Dot(direction)
+        if poleDirection:LengthSqr() <= 0.0001 then
+            poleDirection = direction:Cross(Vector(0, 0, 1))
+            if poleDirection:LengthSqr() <= 0.0001 then
+                poleDirection = direction:Cross(Vector(0, 1, 0))
+            end
+        end
+        poleDirection:Normalize()
+
+        local along = (
+            upperLength * upperLength
+            - forearmLength * forearmLength
+            + distance * distance
+        ) / (2 * distance)
+        local height = math.sqrt(math.max(upperLength * upperLength - along * along, 0))
+        local elbow = shoulder + direction * along + poleDirection * height
+
+        return elbow, target
+    end
+
+    local hiddenThirdPersonMaterial = CreateMaterial("gcal_thirdperson_hidden", "UnlitGeneric", {
+        ["$basetexture"] = "color/white",
+        ["$translucent"] = "1",
+        ["$alpha"] = "0",
+        ["$vertexalpha"] = "1"
+    })
+    local hiddenThirdPersonMaterialName = hiddenThirdPersonMaterial:GetName()
+    local thirdPersonArmMaterialTokens = {
+        "c_arm",
+        "/arms",
+        "_arms",
+        "arm_",
+        "forearm",
+        "/hands",
+        "_hands",
+        "hand_",
+        "glove",
+        "sleeve",
+        "v_models",
+        "viewmodel",
+        "player_shared"
+    }
+
+    local function ConfigureThirdPersonModelMaterials(track)
+        local model = track.thirdpersonModel
+        if not IsValid(model) or track.thirdpersonMaterialsConfigured then return end
+        track.thirdpersonMaterialsConfigured = true
+
+        local hideTokens = table.Copy(thirdPersonArmMaterialTokens)
+        local extraHideTokens = track.data.thirdperson_hide_materials
+        if isstring(extraHideTokens) then extraHideTokens = { extraHideTokens } end
+        for _, token in ipairs(extraHideTokens or {}) do
+            hideTokens[#hideTokens + 1] = string.lower(tostring(token))
+        end
+
+        local keepTokens = track.data.thirdperson_keep_materials
+        if isstring(keepTokens) then keepTokens = { keepTokens } end
+
+        local visibleMaterialCount = 0
+        local materials = model:GetMaterials() or {}
+        for index, materialName in ipairs(materials) do
+            local lowerName = string.lower(materialName)
+            local hide = false
+            for _, token in ipairs(hideTokens) do
+                if string.find(lowerName, token, 1, true) then
+                    hide = true
+                    break
                 end
+            end
+            for _, token in ipairs(keepTokens or {}) do
+                if string.find(lowerName, string.lower(tostring(token)), 1, true) then
+                    hide = false
+                    break
+                end
+            end
+
+            if hide then
+                model:SetSubMaterial(index - 1, hiddenThirdPersonMaterialName)
+            else
+                visibleMaterialCount = visibleMaterialCount + 1
             end
         end
 
-        if cached.mode ~= "absolute" and cached.mode ~= "delta" then
-            local maximumMotion = 0
-            for _, sampleCycle in ipairs({ 0.25, 0.5, 0.75, 0.99 }) do
-                sampler:SetCycle(sampleCycle)
-                sampler:InvalidateBoneCache()
-                sampler:SetupBones()
+        track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visibleMaterialCount > 0
+    end
 
-                local sampleMotion = 0
-                for _, sourceBoneName in ipairs(sourceBoneNames) do
-                    local sourceBone = sampler:LookupBone(sourceBoneName)
-                    local reference = sourceBone and sourceBone >= 0 and cached.localMatrices[sourceBone]
-                    local sourceWorld = reference and sampler:GetBoneMatrix(sourceBone)
-                    if sourceWorld then
-                        local sampleAngles = SourceRetargetLocalMatrix(sampler, sourceBone, sourceWorld):GetAngles()
-                        local referenceAngles = reference:GetAngles()
-                        sampleMotion = sampleMotion
-                            + math.abs(math.AngleDifference(sampleAngles.p, referenceAngles.p))
-                            + math.abs(math.AngleDifference(sampleAngles.y, referenceAngles.y))
-                            + math.abs(math.AngleDifference(sampleAngles.r, referenceAngles.r))
-                    end
-                end
+    local function PrepareThirdPersonModel(track, sourceToTarget)
+        local model = track.thirdpersonModel
+        if not IsValid(model) or track.data.thirdperson_model == false then return end
 
-                maximumMotion = math.max(maximumMotion, sampleMotion)
+        ConfigureThirdPersonModelMaterials(track)
+        if not track.thirdpersonModelHasVisibleMaterials then return end
+
+        model:SetPos(track.model:GetPos())
+        model:SetAngles(track.model:GetAngles())
+        model:SetModelScale(track.model:GetModelScale())
+        model:SetSkin(track.model:GetSkin())
+        for _, bodygroup in ipairs(track.model:GetBodyGroups() or {}) do
+            model:SetBodygroup(bodygroup.id, track.model:GetBodygroup(bodygroup.id))
+        end
+        model:SetCycle(track.cycle or 0)
+        model:SetupBones()
+
+        for bone = 0, model:GetBoneCount() - 1 do
+            local matrix = model:GetBoneMatrix(bone)
+            if matrix and sourceToTarget then
+                local transformed = sourceToTarget * matrix
+                model:SetBoneMatrix(bone, transformed)
+                model:SetBonePosition(bone, transformed:GetTranslation(), transformed:GetAngles())
             end
-
-            cached.mode = maximumMotion < 0.5 and "absolute" or "delta"
-            cached.motion = maximumMotion
         end
 
-        sampler:Remove()
-        track.thirdpersonSourcePose = cached
-        return cached
+        track.thirdpersonModelReadyFrame = FrameNumber()
+        track.debugThirdPersonModel = model:GetModel()
+    end
+
+    local function ApplyCachedThirdPersonBones(track, ply)
+        local matrices = track.thirdpersonBoneMatrices
+        if not matrices then return false end
+
+        for targetBone, matrix in pairs(matrices) do
+            ply:SetBoneMatrix(targetBone, matrix)
+            ply:SetBonePosition(targetBone, matrix:GetTranslation(), matrix:GetAngles())
+        end
+
+        return true
     end
 
     local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
         if not IsValid(track.model) or not baseMatrices then return end
+        if track.thirdpersonSolveFrame == FrameNumber() then
+            ApplyCachedThirdPersonBones(track, ply)
+            return
+        end
 
         local flip = GetLegacyFlipState(weapon)
         local targetBones = GetTrackTargetBones(track, weapon, flip)
@@ -1190,7 +1303,6 @@ if CLIENT then
         PlaceTrackModel(track, ply:GetPos(), renderAngles)
         track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
         track.model:SetupBones()
-        local sourcePose = CaptureThirdPersonSourcePose(track)
 
         local blendToTarget = math.Clamp(
             (track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp)(
@@ -1202,99 +1314,217 @@ if CLIENT then
             0,
             1
         )
-        local entries = {}
-        local entriesByTargetBone = {}
+        local mappings = {}
+        local mappingsByTarget = {}
 
         for k, boneName in ipairs(track.bones) do
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-            local targetBone = ply:LookupBone(targetBones[k] or boneName)
+            local targetBoneName = targetBones[k] or boneName
+            local targetBone = ply:LookupBone(targetBoneName)
             if not targetBone or targetBone < 0 then continue end
 
+            local sourceBone = track.model:LookupBone(sourceBoneName)
+            local sourceWorld = sourceBone and sourceBone >= 0
+                and track.model:GetBoneMatrix(sourceBone)
             local targetWorld = baseMatrices[targetBone]
             if not targetWorld then continue end
 
-            local targetLocal, targetParent = BoneLocalMatrix(ply, targetBone, targetWorld, baseMatrices)
-            local desiredAngles = targetLocal:GetAngles()
-            local isHelperBone = string.EndsWith(boneName, "_Wrist") or string.EndsWith(boneName, "_Ulna")
+            local isHelperBone = string.EndsWith(targetBoneName, "_Wrist")
+                or string.EndsWith(targetBoneName, "_Ulna")
+            if not sourceWorld and not isHelperBone then continue end
 
-            if not isHelperBone then
-                local sourceBone = track.model:LookupBone(sourceBoneName)
-                if sourceBone and sourceBone >= 0 then
-                    local sourceWorld = track.model:GetBoneMatrix(sourceBone)
-                    local sourceReference = sourcePose and sourcePose.localMatrices[sourceBone]
-                    if sourceWorld and sourceReference then
-                        local sourceLocal = SourceRetargetLocalMatrix(track.model, sourceBone, sourceWorld)
-                        local sourceAngles = sourceLocal:GetAngles()
-                        if sourcePose.mode == "absolute" then
-                            desiredAngles = sourceAngles
-                        else
-                            local referenceAngles = sourceReference:GetAngles()
-                            local targetAngles = targetLocal:GetAngles()
-                            desiredAngles = Angle(
-                                targetAngles.p + math.AngleDifference(sourceAngles.p, referenceAngles.p),
-                                targetAngles.y + math.AngleDifference(sourceAngles.y, referenceAngles.y),
-                                targetAngles.r + math.AngleDifference(sourceAngles.r, referenceAngles.r)
-                            )
-                        end
-                    end
-                end
-            end
-
-            local entry = {
+            local mapping = {
+                name = targetBoneName,
+                sourceBone = sourceBone,
+                sourceWorld = sourceWorld,
                 targetBone = targetBone,
-                targetParent = targetParent,
-                desiredAngles = desiredAngles,
-                targetLocal = targetLocal
+                targetWorld = targetWorld
             }
 
-            entries[#entries + 1] = entry
-            entriesByTargetBone[targetBone] = entry
+            mappings[#mappings + 1] = mapping
+            mappingsByTarget[targetBone] = mapping
         end
 
-        local solved = {}
-        local solving = {}
-        local function SolveEntry(entry)
-            if solved[entry.targetBone] then return solved[entry.targetBone] end
-            if solving[entry.targetBone] then return baseMatrices[entry.targetBone] end
-            solving[entry.targetBone] = true
+        local finalMatrices = {}
+        local thirdPersonModelTransform
+        local function SolveArm(side)
+            local upperName = "ValveBiped.Bip01_" .. side .. "_UpperArm"
+            local forearmName = "ValveBiped.Bip01_" .. side .. "_Forearm"
+            local handName = "ValveBiped.Bip01_" .. side .. "_Hand"
+            local upperBone = ply:LookupBone(upperName)
+            local forearmBone = ply:LookupBone(forearmName)
+            local handBone = ply:LookupBone(handName)
+            local upper = upperBone and mappingsByTarget[upperBone]
+            local forearm = forearmBone and mappingsByTarget[forearmBone]
+            local hand = handBone and mappingsByTarget[handBone]
+            if not upper or not forearm or not hand then return end
 
-            local parentWorld = baseMatrices[entry.targetParent]
-            local parentEntry = entriesByTargetBone[entry.targetParent]
-            if parentEntry then
-                parentWorld = SolveEntry(parentEntry)
+            local sourceUpper = upper.sourceWorld
+            local sourceForearm = forearm.sourceWorld
+            local sourceHand = hand.sourceWorld
+            local targetUpper = upper.targetWorld
+            local targetForearm = forearm.targetWorld
+            local targetHand = hand.targetWorld
+
+            local sourceAnchor = sourceUpper
+            local targetAnchor = targetUpper
+            local sourceUpperParent = track.model:GetBoneParent(upper.sourceBone)
+            local targetUpperParent = ply:GetBoneParent(upperBone)
+            if sourceUpperParent and sourceUpperParent >= 0 then
+                sourceAnchor = track.model:GetBoneMatrix(sourceUpperParent) or sourceAnchor
+            end
+            if targetUpperParent and targetUpperParent >= 0 then
+                targetAnchor = baseMatrices[targetUpperParent] or targetAnchor
+            end
+
+            local sourceAnchorInverse = Matrix(sourceAnchor:ToTable())
+            sourceAnchorInverse:Invert()
+            local sourceToTarget = Matrix(targetAnchor:ToTable()) * sourceAnchorInverse
+            local shoulder = targetUpper:GetTranslation()
+            local upperLength = shoulder:Distance(targetForearm:GetTranslation())
+            local forearmLength = targetForearm:GetTranslation():Distance(targetHand:GetTranslation())
+            local sourceLength = sourceUpper:GetTranslation():Distance(sourceForearm:GetTranslation())
+                + sourceForearm:GetTranslation():Distance(sourceHand:GetTranslation())
+            if upperLength <= 0.001 or forearmLength <= 0.001 or sourceLength <= 0.001 then return end
+
+            local scale = (upperLength + forearmLength) / sourceLength
+            local mappedHand = sourceToTarget * sourceHand:GetTranslation()
+            local mappedElbow = sourceToTarget * sourceForearm:GetTranslation()
+            local goal = shoulder + (mappedHand - shoulder) * scale
+            local pole = shoulder + (mappedElbow - shoulder) * scale
+            local elbow, handGoal = SolveTwoBoneIK(
+                shoulder,
+                goal,
+                pole,
+                upperLength,
+                forearmLength
+            )
+            if not elbow then return end
+
+            local solvedUpper = AimBoneMatrix(
+                targetUpper,
+                targetForearm:GetTranslation(),
+                shoulder,
+                elbow
+            )
+            local solvedForearm = AimBoneMatrix(
+                targetForearm,
+                targetHand:GetTranslation(),
+                elbow,
+                handGoal
+            )
+            local solvedHand = sourceToTarget * sourceHand
+            solvedHand:SetTranslation(handGoal)
+
+            finalMatrices[upperBone] = BlendBoneMatrix(solvedUpper, targetUpper, blendToTarget)
+            finalMatrices[forearmBone] = BlendBoneMatrix(solvedForearm, targetForearm, blendToTarget)
+            finalMatrices[handBone] = BlendBoneMatrix(solvedHand, targetHand, blendToTarget)
+
+            if not thirdPersonModelTransform then
+                local sourceHandInverse = Matrix(sourceHand:ToTable())
+                sourceHandInverse:Invert()
+                thirdPersonModelTransform = Matrix(finalMatrices[handBone]:ToTable()) * sourceHandInverse
+            end
+        end
+
+        SolveArm("L")
+        SolveArm("R")
+
+        local solving = {}
+        local function SolveChild(mapping)
+            if finalMatrices[mapping.targetBone] then return finalMatrices[mapping.targetBone] end
+            if solving[mapping.targetBone] then return mapping.targetWorld end
+            solving[mapping.targetBone] = true
+
+            local targetLocal, targetParent = BoneLocalMatrix(
+                ply,
+                mapping.targetBone,
+                mapping.targetWorld,
+                baseMatrices
+            )
+            local parentMapping = mappingsByTarget[targetParent]
+            local parentWorld
+            if parentMapping then
+                parentWorld = SolveChild(parentMapping)
+            else
+                parentWorld = finalMatrices[targetParent] or baseMatrices[targetParent]
             end
 
             if not parentWorld then
-                solving[entry.targetBone] = nil
-                return baseMatrices[entry.targetBone]
+                solving[mapping.targetBone] = nil
+                return mapping.targetWorld
             end
 
-            local localMatrix = Matrix(entry.targetLocal:ToTable())
-            localMatrix:SetAngles(LerpAngle(
-                blendToTarget,
-                entry.desiredAngles,
-                entry.targetLocal:GetAngles()
-            ))
+            local localMatrix = Matrix(targetLocal:ToTable())
+            local isHelperBone = string.EndsWith(mapping.name, "_Wrist")
+                or string.EndsWith(mapping.name, "_Ulna")
+            if not isHelperBone and mapping.sourceBone and mapping.sourceWorld then
+                local sourceLocal = BoneLocalMatrix(
+                    track.model,
+                    mapping.sourceBone,
+                    mapping.sourceWorld
+                )
+                localMatrix:SetAngles(sourceLocal:GetAngles())
+            end
 
-            solved[entry.targetBone] = parentWorld * localMatrix
-            solving[entry.targetBone] = nil
-            return solved[entry.targetBone]
+            local animated = parentWorld * localMatrix
+            finalMatrices[mapping.targetBone] = BlendBoneMatrix(
+                animated,
+                mapping.targetWorld,
+                blendToTarget
+            )
+            solving[mapping.targetBone] = nil
+            return finalMatrices[mapping.targetBone]
         end
 
-        local boneCount = 0
-        for _, entry in ipairs(entries) do
-            local finalMatrix = SolveEntry(entry)
-            if finalMatrix then
-                ply:SetBoneMatrix(entry.targetBone, finalMatrix)
-                boneCount = boneCount + 1
+        for _, mapping in ipairs(mappings) do
+            SolveChild(mapping)
+        end
+        if not thirdPersonModelTransform and mappings[1] and mappings[1].sourceWorld then
+            local sourceInverse = Matrix(mappings[1].sourceWorld:ToTable())
+            sourceInverse:Invert()
+            thirdPersonModelTransform = Matrix(mappings[1].targetWorld:ToTable()) * sourceInverse
+        end
+
+        local carried = {}
+        local function CarryArmChildren(parentBone)
+            if carried[parentBone] then return end
+            carried[parentBone] = true
+
+            for _, childBone in ipairs(ply:GetChildBones(parentBone) or {}) do
+                if not finalMatrices[childBone] then
+                    local baseParent = baseMatrices[parentBone]
+                    local baseChild = baseMatrices[childBone]
+                    local solvedParent = finalMatrices[parentBone]
+                    if baseParent and baseChild and solvedParent then
+                        local baseParentInverse = Matrix(baseParent:ToTable())
+                        baseParentInverse:Invert()
+                        finalMatrices[childBone] = solvedParent * baseParentInverse * baseChild
+                    end
+                end
+
+                if finalMatrices[childBone] then
+                    CarryArmChildren(childBone)
+                end
             end
         end
+
+        for _, side in ipairs({ "L", "R" }) do
+            local upperBone = ply:LookupBone("ValveBiped.Bip01_" .. side .. "_UpperArm")
+            if upperBone and upperBone >= 0 and finalMatrices[upperBone] then
+                CarryArmChildren(upperBone)
+            end
+        end
+
+        track.thirdpersonBoneMatrices = finalMatrices
+        track.thirdpersonSolveFrame = FrameNumber()
+        ApplyCachedThirdPersonBones(track, ply)
 
         track.debugTargetEntity = tostring(ply)
-        track.debugBoneCount = boneCount
-        track.debugThirdPersonRootBone = entries[1] and entries[1].targetBone or nil
-        track.debugThirdPersonMode = sourcePose and sourcePose.mode or "<unavailable>"
-        track.debugThirdPersonSourceMotion = sourcePose and sourcePose.motion
+        track.debugBoneCount = table.Count(finalMatrices)
+        track.debugThirdPersonRootBone = mappings[1] and mappings[1].targetBone or nil
+        track.debugThirdPersonMode = "tpik"
+        PrepareThirdPersonModel(track, thirdPersonModelTransform)
     end
 
     GCAL.WeaponBaseStrategies = GCAL.WeaponBaseStrategies or {}
@@ -1634,23 +1864,41 @@ if CLIENT then
         UpdateTracksForFrame()
         if next(GCAL.ActiveTracks) == nil then return end
 
-        ply:InvalidateBoneCache()
-        ply:SetupBones()
-        local baseMatrices = {}
-        for bone = 0, ply:GetBoneCount() - 1 do
-            local matrix = ply:GetBoneMatrix(bone)
-            if matrix then
-                baseMatrices[bone] = Matrix(matrix:ToTable())
+        local needsSolve = false
+        for id, track in pairs(GCAL.ActiveTracks) do
+            if id ~= "legs"
+                and track.thirdperson
+                and track.thirdpersonSolveFrame ~= FrameNumber()
+            then
+                needsSolve = true
+                break
             end
         end
-        local renderContext = {
-            thirdpersonBaseMatrices = baseMatrices
-        }
+
+        local renderContext
+        if needsSolve then
+            ply:InvalidateBoneCache()
+            ply:SetupBones()
+            local baseMatrices = {}
+            for bone = 0, ply:GetBoneCount() - 1 do
+                local matrix = ply:GetBoneMatrix(bone)
+                if matrix then
+                    baseMatrices[bone] = Matrix(matrix:ToTable())
+                end
+            end
+            renderContext = {
+                thirdpersonBaseMatrices = baseMatrices
+            }
+        end
 
         for id, track in pairs(GCAL.ActiveTracks) do
             if id == "legs" or not track.thirdperson then continue end
 
-            ApplyBones(track, ply, nil, ply, weapon, true, false, nil, renderContext)
+            if track.thirdpersonSolveFrame == FrameNumber() then
+                ApplyCachedThirdPersonBones(track, ply)
+            elseif renderContext then
+                ApplyBones(track, ply, nil, ply, weapon, true, false, nil, renderContext)
+            end
         end
     end
 
@@ -1670,6 +1918,20 @@ if CLIENT then
 
     hook.Add("PrePlayerDraw", "GCAL_RenderThirdPerson", function(ply)
         RenderThirdPersonTracks(ply)
+    end)
+
+    hook.Add("PostPlayerDraw", "GCAL_RenderThirdPersonModels", function(ply)
+        if ply ~= LocalPlayer() or not GCAL:IsThirdPersonEnabled() then return end
+
+        for _, track in pairs(GCAL.ActiveTracks) do
+            local model = track.thirdpersonModel
+            if track.thirdperson
+                and track.thirdpersonModelReadyFrame == FrameNumber()
+                and IsValid(model)
+            then
+                model:DrawModel()
+            end
+        end
     end)
 
     hook.Add("PreDrawViewModels", "GCAL_RenderLegs", function()
@@ -1826,7 +2088,7 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - thirdperson: " .. tostring(track.thirdperson or false) .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson root bone: " .. tostring(track.debugThirdPersonRootBone or "<not cached>") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson mode: " .. tostring(track.debugThirdPersonMode or "<not evaluated>") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson sampled motion: " .. tostring(track.debugThirdPersonSourceMotion or "<forced>") .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson model: " .. tostring(track.debugThirdPersonModel or "<not rendered>") .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
 

@@ -93,7 +93,9 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
-| `thirdperson_mode`   | string       | Optional thirdperson retarget mode: `"delta"` for moving clips or `"absolute"` for authored pose clips. GCAL detects the mode when omitted.            |
+| `thirdperson_model`  | bool         | Draws prop geometry from the animation's registered `model` in thirdperson. Defaults to true; set false for arm-only animations.                       |
+| `thirdperson_hide_materials` | string/table | Additional material-name fragments to hide on the thirdperson model clone.                                                                  |
+| `thirdperson_keep_materials` | string/table | Material-name fragments that must remain visible even if they match an automatic arm-material rule.                                         |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
@@ -279,11 +281,9 @@ GCAL:RegisterSecondHandAnim("radio_press", {
 })
 ```
 
-GCAL retargets the animation model onto the selected player arm in bone-local space. It measures normalized local-angle changes relative to the source sequence's starting pose, folds source clavicle motion into the upper-arm delta without overriding the player's clavicle, and layers the result onto the player model's native local pose. Shoulder placement, bone translations, limb lengths, and wrist/ulna helper transforms remain native to the player model. Set `thirdperson = false` for animations that should remain firstperson-only.
+GCAL uses one TPIK path for thirdperson. The animation model supplies shoulder, elbow, and hand goals; GCAL solves the player model's upper arm and forearm using the player's own limb lengths, applies the animated hand orientation, and carries helper bones and fingers through the solved hierarchy. A separate clone of the animation's registered model renders addon-owned props such as spray cans or tablets; obvious viewmodel arm materials are hidden automatically. Set `thirdperson = false` for animations that should remain firstperson-only.
 
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
-
-`thirdperson_mode` may be `"delta"` for moving clips or `"absolute"` for authored pose clips. When omitted, GCAL classifies the sequence once using a temporary model, then removes the sampler without touching live playback.
 
 ---
 
