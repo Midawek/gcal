@@ -1,5 +1,6 @@
 if SERVER then
     AddCSLuaFile("gcal/gcal_lerp.lua")
+    AddCSLuaFile("gcal/gcal_tpik.lua")
     AddCSLuaFile("gcal/gcal_core.lua")
     AddCSLuaFile("gcal/gcal_compat.lua")
     AddCSLuaFile("gcal/gcal_legs.lua")
