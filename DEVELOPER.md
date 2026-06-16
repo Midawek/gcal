@@ -96,6 +96,9 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `thirdperson_model`  | bool         | Draws prop geometry from the animation's registered `model` in thirdperson. Defaults to true; set false for arm-only animations.                       |
 | `thirdperson_hide_materials` | string/table | Additional material-name fragments to hide on the thirdperson model clone.                                                                  |
 | `thirdperson_keep_materials` | string/table | Material-name fragments that must remain visible even if they match an automatic arm-material rule.                                         |
+| `thirdperson_target_radius` | number | Optional thirdperson hand-goal clamp radius around the torso. Defaults to `38`; set `0` to disable. |
+| `thirdperson_pole_source` | number | Optional `0..1` weight for how much the source animation elbow controls the thirdperson elbow pole. Defaults to `0.35`. |
+| `thirdperson_pole_native` | number | Optional `0..1` weight for how much the player model's native forearm controls the thirdperson elbow pole. Defaults to `0.35`. |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |

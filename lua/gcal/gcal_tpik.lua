@@ -89,6 +89,54 @@ function GCAL.InstallTPIK(deps)
             return elbow, target
         end
 
+        local function ClampVectorAround(origin, value, radius)
+            if not origin or not value or not radius or radius <= 0 then return value end
+
+            return Vector(
+                math.Clamp(value.x, origin.x - radius, origin.x + radius),
+                math.Clamp(value.y, origin.y - radius, origin.y + radius),
+                math.Clamp(value.z, origin.z - radius, origin.z + radius)
+            )
+        end
+
+        local function GetTorsoClampOrigin(ply, baseMatrices)
+            local spine = IsValid(ply) and ply:LookupBone("ValveBiped.Bip01_Spine4")
+            local matrix = spine and baseMatrices and baseMatrices[spine]
+            return matrix and matrix:GetTranslation() or nil
+        end
+
+        local function StabilizePole(ply, track, side, shoulder, goal, sourcePole, nativePole, renderAngles)
+            local direction = goal - shoulder
+            if direction:LengthSqr() <= 0.0001 then return sourcePole end
+            direction:Normalize()
+
+            renderAngles = renderAngles or (IsValid(ply) and ply.GetRenderAngles and ply:GetRenderAngles()) or Angle(0, 0, 0)
+            local sideSign = side == "L" and -1 or 1
+            local sidePole = shoulder
+                + renderAngles:Right() * (sideSign * 12)
+                - renderAngles:Up() * 6
+                + direction * 4
+
+            local sourceWeight = tonumber(track.data.thirdperson_pole_source)
+            if sourceWeight == nil then sourceWeight = 0.35 end
+            sourceWeight = math.Clamp(sourceWeight, 0, 1)
+
+            local nativeWeight = tonumber(track.data.thirdperson_pole_native)
+            if nativeWeight == nil then nativeWeight = 0.35 end
+            nativeWeight = math.Clamp(nativeWeight, 0, 1)
+
+            local pole = LerpVector(nativeWeight, sidePole, nativePole or sidePole)
+            pole = LerpVector(sourceWeight, pole, sourcePole or pole)
+
+            local poleDelta = pole - shoulder
+            local upward = poleDelta:Dot(renderAngles:Up())
+            if upward > 0 then
+                pole = pole - renderAngles:Up() * upward * 0.85
+            end
+
+            return pole
+        end
+
         local hiddenThirdPersonMaterial = CreateMaterial("gcal_thirdperson_hidden", "UnlitGeneric", {
             ["$basetexture"] = "color/white",
             ["$translucent"] = "1",
@@ -298,7 +346,21 @@ function GCAL.InstallTPIK(deps)
                 local mappedHand = sourceToTarget * sourceHand:GetTranslation()
                 local mappedElbow = sourceToTarget * sourceForearm:GetTranslation()
                 local goal = shoulder + (mappedHand - shoulder) * scale
-                local pole = shoulder + (mappedElbow - shoulder) * scale
+                local clampRadius = tonumber(track.data.thirdperson_target_radius)
+                if clampRadius == nil then clampRadius = 38 end
+                goal = ClampVectorAround(GetTorsoClampOrigin(ply, baseMatrices), goal, clampRadius)
+
+                local sourcePole = shoulder + (mappedElbow - shoulder) * scale
+                local pole = StabilizePole(
+                    ply,
+                    track,
+                    side,
+                    shoulder,
+                    goal,
+                    sourcePole,
+                    targetForearm:GetTranslation(),
+                    renderAngles
+                )
                 local elbow, handGoal = SolveTwoBoneIK(
                     shoulder,
                     goal,
@@ -429,10 +491,11 @@ function GCAL.InstallTPIK(deps)
 
             track.debugTargetEntity = tostring(ply)
             track.debugBoneCount = table.Count(finalMatrices)
-            track.debugThirdPersonRootBone = mappings[1] and mappings[1].targetBone or nil
-            track.debugThirdPersonMode = "tpik"
-            PrepareThirdPersonModel(track, thirdPersonModelTransform)
-        end
+                track.debugThirdPersonRootBone = mappings[1] and mappings[1].targetBone or nil
+                track.debugThirdPersonMode = "tpik"
+                track.debugThirdPersonPole = "stabilized"
+                PrepareThirdPersonModel(track, thirdPersonModelTransform)
+            end
 
 
 
