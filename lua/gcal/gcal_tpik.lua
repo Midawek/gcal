@@ -6,6 +6,7 @@ function GCAL.InstallTPIK(deps)
     deps = deps or {}
     local BoneLocalMatrix = deps.BoneLocalMatrix
     local PlaceTrackModel = deps.PlaceTrackModel
+    local PlaceTPIKTrackModel = deps.PlaceTPIKTrackModel or PlaceTrackModel
     local GetLegacyFlipState = deps.GetLegacyFlipState
     local GetTrackTargetBones = deps.GetTrackTargetBones
     local GetTrackModelScale = deps.GetTrackModelScale
@@ -117,12 +118,19 @@ function GCAL.InstallTPIK(deps)
                 - renderAngles:Up() * 6
                 + direction * 4
 
-            local sourceWeight = tonumber(track.data.thirdperson_pole_source)
+            local data = track.data or {}
+            local sourceWeight = tonumber(data.thirdperson_pole_source)
             if sourceWeight == nil then sourceWeight = 0.35 end
+            if GCAL.GetTPIKOptionAdd then
+                sourceWeight = sourceWeight + GCAL:GetTPIKOptionAdd(track.name, "pole_source")
+            end
             sourceWeight = math.Clamp(sourceWeight, 0, 1)
 
-            local nativeWeight = tonumber(track.data.thirdperson_pole_native)
+            local nativeWeight = tonumber(data.thirdperson_pole_native)
             if nativeWeight == nil then nativeWeight = 0.35 end
+            if GCAL.GetTPIKOptionAdd then
+                nativeWeight = nativeWeight + GCAL:GetTPIKOptionAdd(track.name, "pole_native")
+            end
             nativeWeight = math.Clamp(nativeWeight, 0, 1)
 
             local pole = LerpVector(nativeWeight, sidePole, nativePole or sidePole)
@@ -255,7 +263,7 @@ function GCAL.InstallTPIK(deps)
             local flip = GetLegacyFlipState(weapon)
             local targetBones = GetTrackTargetBones(track, weapon, flip)
             local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
-            PlaceTrackModel(track, ply:GetPos(), renderAngles)
+            PlaceTPIKTrackModel(track, ply:GetPos(), renderAngles)
             track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
             track.model:SetupBones()
 
@@ -346,8 +354,12 @@ function GCAL.InstallTPIK(deps)
                 local mappedHand = sourceToTarget * sourceHand:GetTranslation()
                 local mappedElbow = sourceToTarget * sourceForearm:GetTranslation()
                 local goal = shoulder + (mappedHand - shoulder) * scale
-                local clampRadius = tonumber(track.data.thirdperson_target_radius)
+                local data = track.data or {}
+                local clampRadius = tonumber(data.thirdperson_target_radius)
                 if clampRadius == nil then clampRadius = 38 end
+                if GCAL.GetTPIKOptionAdd then
+                    clampRadius = clampRadius + GCAL:GetTPIKOptionAdd(track.name, "target_radius")
+                end
                 goal = ClampVectorAround(GetTorsoClampOrigin(ply, baseMatrices), goal, clampRadius)
 
                 local sourcePole = shoulder + (mappedElbow - shoulder) * scale

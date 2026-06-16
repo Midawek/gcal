@@ -290,6 +290,8 @@ Thirdperson rendering is selected by method: ARC9 weapons with active native TPI
 
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
 
+The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*`, `gcal_anim_angle_*`, and `gcal_anim_fov` affect the normal firstperson animation placement/FOV. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` affect only the thirdperson TPIK source placement. `gcal_tpik_target_radius_add`, `gcal_tpik_pole_source_add`, and `gcal_tpik_pole_native_add` are additive nudges on top of each animation's registered `thirdperson_target_radius`, `thirdperson_pole_source`, and `thirdperson_pole_native` values.
+
 ---
 
 ## 6. Easing Functions
@@ -448,6 +450,10 @@ Use these console commands during development:
 - `gcal_mute_sounds 1`: Mutes sounds emitted by GCAL animations.
 - `gcal_sound_pitch <pitch>`: Changes GCAL animation sound pitch. The menu uses `75`, `100`, and `140` presets.
 - `gcal_thirdperson 1`: Enables experimental projection of active GCAL arm tracks onto the local player model in thirdperson.
+- `gcal_tpik_offset_x/y/z <value>`: Changes global thirdperson TPIK source placement without affecting firstperson placement.
+- `gcal_tpik_angle_p/y/r <value>`: Changes global thirdperson TPIK source angle offsets.
+- `gcal_tpik_target_radius_add <value>`: Adds to the thirdperson hand-goal clamp radius. Negative values tighten it; positive values loosen it.
+- `gcal_tpik_pole_source_add <value>` / `gcal_tpik_pole_native_add <value>`: Adds to the TPIK elbow-pole blend weights, clamped to `0..1` after registration defaults are applied.
 - `gcal_list_anims`: Lists every animation currently registered in GCAL.
 - `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
 - `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.

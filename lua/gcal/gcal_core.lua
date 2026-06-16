@@ -49,6 +49,15 @@ if CLIENT then
     GCAL.AnimationAngleY = CreateClientConVar("gcal_anim_angle_y", "0", true, false, "Global GCAL animation yaw offset.")
     GCAL.AnimationAngleR = CreateClientConVar("gcal_anim_angle_r", "0", true, false, "Global GCAL animation roll offset.")
     GCAL.AnimationFOV = CreateClientConVar("gcal_anim_fov", "0", true, false, "Global GCAL animation FOV offset while GCAL tracks are active.")
+    GCAL.TPIKOffsetX = CreateClientConVar("gcal_tpik_offset_x", "0", true, false, "Global GCAL thirdperson TPIK forward/back offset.")
+    GCAL.TPIKOffsetY = CreateClientConVar("gcal_tpik_offset_y", "0", true, false, "Global GCAL thirdperson TPIK right/left offset.")
+    GCAL.TPIKOffsetZ = CreateClientConVar("gcal_tpik_offset_z", "0", true, false, "Global GCAL thirdperson TPIK up/down offset.")
+    GCAL.TPIKAngleP = CreateClientConVar("gcal_tpik_angle_p", "0", true, false, "Global GCAL thirdperson TPIK pitch offset.")
+    GCAL.TPIKAngleY = CreateClientConVar("gcal_tpik_angle_y", "0", true, false, "Global GCAL thirdperson TPIK yaw offset.")
+    GCAL.TPIKAngleR = CreateClientConVar("gcal_tpik_angle_r", "0", true, false, "Global GCAL thirdperson TPIK roll offset.")
+    GCAL.TPIKTargetRadiusAdd = CreateClientConVar("gcal_tpik_target_radius_add", "0", true, false, "Global GCAL thirdperson TPIK target radius adjustment.")
+    GCAL.TPIKPoleSourceAdd = CreateClientConVar("gcal_tpik_pole_source_add", "0", true, false, "Global GCAL thirdperson TPIK source pole blend adjustment.")
+    GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false, "Global GCAL thirdperson TPIK native pole blend adjustment.")
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
@@ -63,7 +72,16 @@ if CLIENT then
         ang_p = true,
         ang_y = true,
         ang_r = true,
-        fov = true
+        fov = true,
+        tpik_pos_x = true,
+        tpik_pos_y = true,
+        tpik_pos_z = true,
+        tpik_ang_p = true,
+        tpik_ang_y = true,
+        tpik_ang_r = true,
+        tpik_target_radius_add = true,
+        tpik_pole_source_add = true,
+        tpik_pole_native_add = true
     }
 
     function GCAL:AnimationAdjustmentCookieKey(name, field)
@@ -134,6 +152,42 @@ if CLIENT then
 
     function GCAL:GetAnimationFOVOffset(name)
         return self:GetAnimationAdjustment(name).fov
+    end
+
+    function GCAL:GetTPIKAdjustment(name)
+        return {
+            pos = Vector(
+                self.TPIKOffsetX:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pos_x"),
+                self.TPIKOffsetY:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pos_y"),
+                self.TPIKOffsetZ:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pos_z")
+            ),
+            ang = Angle(
+                self.TPIKAngleP:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_p"),
+                self.TPIKAngleY:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_y"),
+                self.TPIKAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_r")
+            ),
+            target_radius_add = self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add"),
+            pole_source_add = self.TPIKPoleSourceAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_source_add"),
+            pole_native_add = self.TPIKPoleNativeAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_native_add")
+        }
+    end
+
+    function GCAL:ApplyTPIKAdjustment(name, pos, ang)
+        local adjustment = self:GetTPIKAdjustment(name)
+        local offset = adjustment.pos
+        local adjustedPos = pos + ang:Forward() * offset.x + ang:Right() * offset.y + ang:Up() * offset.z
+        local angleOffset = adjustment.ang
+
+        return adjustedPos, Angle(ang.p + angleOffset.p, ang.y + angleOffset.y, ang.r + angleOffset.r)
+    end
+
+    function GCAL:GetTPIKOptionAdd(name, option)
+        local adjustment = self:GetTPIKAdjustment(name)
+        if option == "target_radius" then return adjustment.target_radius_add end
+        if option == "pole_source" then return adjustment.pole_source_add end
+        if option == "pole_native" then return adjustment.pole_native_add end
+
+        return 0
     end
 end
 
@@ -1081,6 +1135,12 @@ if CLIENT then
         track.model:SetPos(adjustedPos)
     end
 
+    local function PlaceTPIKTrackModel(track, pos, ang)
+        local adjustedPos, adjustedAng = GCAL:ApplyTPIKAdjustment(track.name, pos, ang)
+        track.model:SetAngles(adjustedAng)
+        track.model:SetPos(adjustedPos)
+    end
+
     local function DrawGShaderFriendlyModel(model, flags)
         if not IsValid(model) then return end
 
@@ -1107,6 +1167,7 @@ if CLIENT then
     local tpik = GCAL.InstallTPIK({
         BoneLocalMatrix = BoneLocalMatrix,
         PlaceTrackModel = PlaceTrackModel,
+        PlaceTPIKTrackModel = PlaceTPIKTrackModel,
         GetLegacyFlipState = GetLegacyFlipState,
         GetTrackTargetBones = GetTrackTargetBones,
         GetTrackModelScale = GetTrackModelScale

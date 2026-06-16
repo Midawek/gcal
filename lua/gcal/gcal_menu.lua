@@ -25,7 +25,16 @@ for _, adjustmentConVar in ipairs({
     {"gcal_anim_angle_p", "Global GCAL animation pitch offset."},
     {"gcal_anim_angle_y", "Global GCAL animation yaw offset."},
     {"gcal_anim_angle_r", "Global GCAL animation roll offset."},
-    {"gcal_anim_fov", "Global GCAL animation FOV offset while GCAL tracks are active."}
+    {"gcal_anim_fov", "Global GCAL animation FOV offset while GCAL tracks are active."},
+    {"gcal_tpik_offset_x", "Global GCAL thirdperson TPIK forward/back offset."},
+    {"gcal_tpik_offset_y", "Global GCAL thirdperson TPIK right/left offset."},
+    {"gcal_tpik_offset_z", "Global GCAL thirdperson TPIK up/down offset."},
+    {"gcal_tpik_angle_p", "Global GCAL thirdperson TPIK pitch offset."},
+    {"gcal_tpik_angle_y", "Global GCAL thirdperson TPIK yaw offset."},
+    {"gcal_tpik_angle_r", "Global GCAL thirdperson TPIK roll offset."},
+    {"gcal_tpik_target_radius_add", "Global GCAL thirdperson TPIK target radius adjustment."},
+    {"gcal_tpik_pole_source_add", "Global GCAL thirdperson TPIK source pole blend adjustment."},
+    {"gcal_tpik_pole_native_add", "Global GCAL thirdperson TPIK native pole blend adjustment."}
 }) do
     if not GetConVar(adjustmentConVar[1]) then
         CreateClientConVar(adjustmentConVar[1], "0", true, false, adjustmentConVar[2])
@@ -219,6 +228,31 @@ local adjustmentFields = {
     {key = "ang_r", convar = "gcal_anim_angle_r", label = "Roll", min = -45, max = 45, decimals = 1},
     {key = "fov", convar = "gcal_anim_fov", label = "FOV", min = -40, max = 40, decimals = 1}
 }
+
+local tpikAdjustmentFields = {
+    {key = "tpik_pos_x", convar = "gcal_tpik_offset_x", label = "TPIK Offset X", min = -20, max = 20, decimals = 2},
+    {key = "tpik_pos_y", convar = "gcal_tpik_offset_y", label = "TPIK Offset Y", min = -20, max = 20, decimals = 2},
+    {key = "tpik_pos_z", convar = "gcal_tpik_offset_z", label = "TPIK Offset Z", min = -20, max = 20, decimals = 2},
+    {key = "tpik_ang_p", convar = "gcal_tpik_angle_p", label = "TPIK Pitch", min = -45, max = 45, decimals = 1},
+    {key = "tpik_ang_y", convar = "gcal_tpik_angle_y", label = "TPIK Yaw", min = -45, max = 45, decimals = 1},
+    {key = "tpik_ang_r", convar = "gcal_tpik_angle_r", label = "TPIK Roll", min = -45, max = 45, decimals = 1},
+    {key = "tpik_target_radius_add", convar = "gcal_tpik_target_radius_add", label = "TPIK Target Radius +/-", min = -38, max = 80, decimals = 1},
+    {key = "tpik_pole_source_add", convar = "gcal_tpik_pole_source_add", label = "TPIK Source Pole +/-", min = -1, max = 1, decimals = 2},
+    {key = "tpik_pole_native_add", convar = "gcal_tpik_pole_native_add", label = "TPIK Native Pole +/-", min = -1, max = 1, decimals = 2}
+}
+
+local adjustmentFieldGroups = {
+    {title = "VIEWMODEL", fields = adjustmentFields, tooltip = "Global adjustment applied to every GCAL firstperson animation."},
+    {title = "THIRDPERSON TPIK", fields = tpikAdjustmentFields, tooltip = "Global adjustment applied to GCAL thirdperson TPIK solving."}
+}
+
+local function EachAdjustmentField(callback)
+    for _, group in ipairs(adjustmentFieldGroups) do
+        for _, field in ipairs(group.fields) do
+            callback(field, group)
+        end
+    end
+end
 
 local function AnimCookieKey(name)
     return "gcal_anim_enabled_" .. string.gsub(tostring(name), "[^%w_]", "_")
@@ -423,9 +457,9 @@ local function SetGlobalAdjustmentValue(field, value)
 end
 
 local function ResetGlobalAdjustments()
-    for _, field in ipairs(adjustmentFields) do
+    EachAdjustmentField(function(field)
         RunConsoleCommand(field.convar, "0")
-    end
+    end)
 end
 
 local function LocalAdjustmentValue(name, field)
@@ -435,11 +469,14 @@ local function LocalAdjustmentValue(name, field)
 end
 
 local function HasLocalAdjustments(name)
-    for _, field in ipairs(adjustmentFields) do
-        if math.abs(LocalAdjustmentValue(name, field)) > 0.001 then return true end
-    end
+    local hasAdjustments = false
+    EachAdjustmentField(function(field)
+        if math.abs(LocalAdjustmentValue(name, field)) > 0.001 then
+            hasAdjustments = true
+        end
+    end)
 
-    return false
+    return hasAdjustments
 end
 
 local function NextPresetIndex(values, current, key)
@@ -559,6 +596,16 @@ local function MakeSlider(parent, label, minValue, maxValue, decimals, value, ch
     return slider
 end
 
+local function MakeAdjustmentSliders(parent, fields, name)
+    for _, field in ipairs(fields) do
+        local slider = MakeSlider(parent, field.label, field.min, field.max, field.decimals, LocalAdjustmentValue(name, field), function(value)
+            GCAL:SetAnimationAdjustmentValue(name, field.key, math.Round(tonumber(value) or 0, field.decimals))
+        end)
+        slider:Dock(TOP)
+        slider:DockMargin(0, 0, 0, 8)
+    end
+end
+
 local function MakeSearchEntry(parent, focusID)
     local entry = vgui.Create("DTextEntry", parent)
     entry:SetTall(30)
@@ -615,7 +662,7 @@ local function OpenAnimationAdjustmentEditor(name, label)
 
     local frame = vgui.Create("DFrame")
     frame:SetTitle("GCAL Adjust: " .. label)
-    frame:SetSize(420, 430)
+    frame:SetSize(470, 620)
     frame:Center()
     frame:MakePopup()
 
@@ -623,13 +670,11 @@ local function OpenAnimationAdjustmentEditor(name, label)
     scroll:Dock(FILL)
     scroll:DockMargin(12, 12, 12, 12)
 
-    for _, field in ipairs(adjustmentFields) do
-        local slider = MakeSlider(scroll, field.label, field.min, field.max, field.decimals, LocalAdjustmentValue(name, field), function(value)
-            GCAL:SetAnimationAdjustmentValue(name, field.key, math.Round(tonumber(value) or 0, field.decimals))
-        end)
-        slider:Dock(TOP)
-        slider:DockMargin(0, 0, 0, 8)
-    end
+    MakeSection(scroll, "VIEWMODEL")
+    MakeAdjustmentSliders(scroll, adjustmentFields, name)
+
+    MakeSection(scroll, "THIRDPERSON TPIK")
+    MakeAdjustmentSliders(scroll, tpikAdjustmentFields, name)
 
     local resetButton = MakeButton(scroll, "Reset this animation", colWarn, function()
         if GCAL.ClearAnimationAdjustment then
@@ -706,19 +751,19 @@ local function BuildAnimList(scroll)
                 tooltip = tooltip .. "\nCustom sound: " .. soundOverride
             end
             if HasLocalAdjustments(name) then
-                tooltip = tooltip .. "\nCustom offsets/FOV active."
+                tooltip = tooltip .. "\nCustom offsets/TPIK active."
             end
             tooltip = tooltip .. "\nRight-click for sound and adjustment options."
             btn:SetTooltip(tooltip)
 
             btn.DoRightClick = function()
                 local menu = DermaMenu()
-                menu:AddOption("Edit offsets/FOV...", function()
+                menu:AddOption("Edit offsets/TPIK...", function()
                     OpenAnimationAdjustmentEditor(name, label)
                 end)
 
                 if HasLocalAdjustments(name) then
-                    menu:AddOption("Reset offsets/FOV", function()
+                    menu:AddOption("Reset offsets/TPIK", function()
                         if GCAL.ClearAnimationAdjustment then
                             GCAL:ClearAnimationAdjustment(name)
                         end
@@ -970,13 +1015,17 @@ function GCAL.Menu.Refresh()
 
     MakeSection(panel.ActionsScroll, "ANIMATION ADJUST")
 
-    for _, field in ipairs(adjustmentFields) do
-        local slider = MakeSlider(panel.ActionsScroll, field.label, field.min, field.max, field.decimals, GlobalAdjustmentValue(field), function(value)
-            SetGlobalAdjustmentValue(field, value)
-        end)
-        slider:Dock(TOP)
-        slider:DockMargin(0, 0, 0, 7)
-        slider:SetTooltip("Global adjustment applied to every GCAL animation.")
+    for _, group in ipairs(adjustmentFieldGroups) do
+        MakeSection(panel.ActionsScroll, group.title)
+
+        for _, field in ipairs(group.fields) do
+            local slider = MakeSlider(panel.ActionsScroll, field.label, field.min, field.max, field.decimals, GlobalAdjustmentValue(field), function(value)
+                SetGlobalAdjustmentValue(field, value)
+            end)
+            slider:Dock(TOP)
+            slider:DockMargin(0, 0, 0, 7)
+            slider:SetTooltip(group.tooltip or "Global adjustment applied to GCAL animations.")
+        end
     end
 
     local resetAdjustmentsButton = MakeButton(panel.ActionsScroll, "Reset global adjustments", colMuted, function()
