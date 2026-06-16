@@ -1,3 +1,21 @@
+--[[
+   █████████    █████████    █████████   █████      
+  ███▒▒▒▒▒███  ███▒▒▒▒▒███  ███▒▒▒▒▒███ ▒▒███       
+ ███     ▒▒▒  ███     ▒▒▒  ▒███    ▒███  ▒███       
+▒███         ▒███          ▒███████████  ▒███       
+▒███    █████▒███          ▒███▒▒▒▒▒███  ▒███       
+▒▒███  ▒▒███ ▒▒███     ███ ▒███    ▒███  ▒███      █
+ ▒▒█████████  ▒▒█████████  █████   █████ ███████████
+  ▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒▒ 
+                                                    
+                                                    
+                                                    
+    Garry's Mod Compliant Armature Layer
+Loking at the code? You can find it on github!
+https://github.com/Midawek/gcal
+]]
+
+
 if SERVER then
     AddCSLuaFile("gcal/gcal_lerp.lua")
     AddCSLuaFile("gcal/gcal_tpik.lua")
