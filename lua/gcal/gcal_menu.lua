@@ -34,7 +34,8 @@ for _, adjustmentConVar in ipairs({
     {"gcal_tpik_angle_r", "Global GCAL thirdperson TPIK roll offset."},
     {"gcal_tpik_target_radius_add", "Global GCAL thirdperson TPIK target radius adjustment."},
     {"gcal_tpik_pole_source_add", "Global GCAL thirdperson TPIK source pole blend adjustment."},
-    {"gcal_tpik_pole_native_add", "Global GCAL thirdperson TPIK native pole blend adjustment."}
+    {"gcal_tpik_pole_native_add", "Global GCAL thirdperson TPIK native pole blend adjustment."},
+    {"gcal_tpik_smoothing_add", "Global GCAL thirdperson TPIK smoothing adjustment."}
 }) do
     if not GetConVar(adjustmentConVar[1]) then
         CreateClientConVar(adjustmentConVar[1], "0", true, false, adjustmentConVar[2])
@@ -238,7 +239,8 @@ local tpikAdjustmentFields = {
     {key = "tpik_ang_r", convar = "gcal_tpik_angle_r", label = "TPIK Roll", min = -45, max = 45, decimals = 1},
     {key = "tpik_target_radius_add", convar = "gcal_tpik_target_radius_add", label = "TPIK Target Radius +/-", min = -38, max = 80, decimals = 1},
     {key = "tpik_pole_source_add", convar = "gcal_tpik_pole_source_add", label = "TPIK Source Pole +/-", min = -1, max = 1, decimals = 2},
-    {key = "tpik_pole_native_add", convar = "gcal_tpik_pole_native_add", label = "TPIK Native Pole +/-", min = -1, max = 1, decimals = 2}
+    {key = "tpik_pole_native_add", convar = "gcal_tpik_pole_native_add", label = "TPIK Native Pole +/-", min = -1, max = 1, decimals = 2},
+    {key = "tpik_smoothing_add", convar = "gcal_tpik_smoothing_add", label = "TPIK Smoothing +/-", min = -18, max = 42, decimals = 1}
 }
 
 local adjustmentFieldGroups = {

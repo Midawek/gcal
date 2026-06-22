@@ -11,6 +11,46 @@ function GCAL.InstallTPIK(deps)
     local GetTrackTargetBones = deps.GetTrackTargetBones
     local GetTrackModelScale = deps.GetTrackModelScale
 
+        local boneIndexCache = setmetatable({}, { __mode = "k" })
+        local childBoneCache = setmetatable({}, { __mode = "k" })
+
+        local function GetCachedBoneIndex(ent, boneName)
+            if not IsValid(ent) or not boneName then return nil end
+
+            local model = ent:GetModel() or ""
+            local cache = boneIndexCache[ent]
+            if not cache or cache.model ~= model then
+                cache = { model = model, bones = {} }
+                boneIndexCache[ent] = cache
+            end
+
+            local cached = cache.bones[boneName]
+            if cached ~= nil then return cached ~= false and cached or nil end
+
+            local bone = ent:LookupBone(boneName)
+            cache.bones[boneName] = bone ~= nil and bone or false
+            return bone
+        end
+
+        local function GetCachedChildBones(ent, bone)
+            if not IsValid(ent) or bone == nil or bone < 0 then return {} end
+
+            local model = ent:GetModel() or ""
+            local cache = childBoneCache[ent]
+            if not cache or cache.model ~= model then
+                cache = { model = model, children = {} }
+                childBoneCache[ent] = cache
+            end
+
+            local children = cache.children[bone]
+            if not children then
+                children = ent:GetChildBones(bone) or {}
+                cache.children[bone] = children
+            end
+
+            return children
+        end
+
         local function BlendBoneMatrix(animated, base, blendToBase)
             local matrix = Matrix(animated:ToTable())
             matrix:SetTranslation(LerpVector(blendToBase, animated:GetTranslation(), base:GetTranslation()))
@@ -101,9 +141,53 @@ function GCAL.InstallTPIK(deps)
         end
 
         local function GetTorsoClampOrigin(ply, baseMatrices)
-            local spine = IsValid(ply) and ply:LookupBone("ValveBiped.Bip01_Spine4")
+            local spine = GetCachedBoneIndex(ply, "ValveBiped.Bip01_Spine4")
             local matrix = spine and baseMatrices and baseMatrices[spine]
             return matrix and matrix:GetTranslation() or nil
+        end
+
+        local function SmoothArmTargets(track, ply, side, anchor, goal, pole)
+            local data = track.data or {}
+            local speed = tonumber(data.thirdperson_smoothing)
+            if speed == nil then speed = 18 end
+            if GCAL.GetTPIKOptionAdd then
+                speed = speed + GCAL:GetTPIKOptionAdd(track.name, "smoothing")
+            end
+            speed = math.Clamp(speed, 0, 60)
+            if speed <= 0 then
+                track.thirdpersonTPIKSmoothing = nil
+                return goal, pole
+            end
+
+            local anchorInverse = Matrix(anchor:ToTable())
+            anchorInverse:Invert()
+            local localGoal = anchorInverse * goal
+            local localPole = anchorInverse * pole
+            local model = IsValid(ply) and ply:GetModel() or ""
+            local cache = track.thirdpersonTPIKSmoothing
+            if not cache or cache.model ~= model then
+                cache = { model = model }
+                track.thirdpersonTPIKSmoothing = cache
+            end
+
+            local arm = cache[side]
+            if not arm then
+                arm = {
+                    goal = Vector(localGoal.x, localGoal.y, localGoal.z),
+                    pole = Vector(localPole.x, localPole.y, localPole.z)
+                }
+                cache[side] = arm
+            else
+                local alpha = math.Clamp(1 - math.exp(-speed * RealFrameTime()), 0, 1)
+                arm.goal.x = arm.goal.x + (localGoal.x - arm.goal.x) * alpha
+                arm.goal.y = arm.goal.y + (localGoal.y - arm.goal.y) * alpha
+                arm.goal.z = arm.goal.z + (localGoal.z - arm.goal.z) * alpha
+                arm.pole.x = arm.pole.x + (localPole.x - arm.pole.x) * alpha
+                arm.pole.y = arm.pole.y + (localPole.y - arm.pole.y) * alpha
+                arm.pole.z = arm.pole.z + (localPole.z - arm.pole.z) * alpha
+            end
+
+            return anchor * arm.goal, anchor * arm.pole
         end
 
         local function StabilizePole(ply, track, side, shoulder, goal, sourcePole, nativePole, renderAngles)
@@ -220,7 +304,9 @@ function GCAL.InstallTPIK(deps)
 
             model:SetPos(track.model:GetPos())
             model:SetAngles(track.model:GetAngles())
-            model:SetModelScale(track.model:GetModelScale())
+            -- Source bones already contain any legacy mirror. Mirroring the visible
+            -- clone again moves separately weighted props around the model origin.
+            model:SetModelScale(1)
             model:SetSkin(track.model:GetSkin())
             for _, bodygroup in ipairs(track.model:GetBodyGroups() or {}) do
                 model:SetBodygroup(bodygroup.id, track.model:GetBodygroup(bodygroup.id))
@@ -229,7 +315,7 @@ function GCAL.InstallTPIK(deps)
             model:SetupBones()
 
             for bone = 0, model:GetBoneCount() - 1 do
-                local matrix = model:GetBoneMatrix(bone)
+                local matrix = track.model:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
                 if matrix and sourceToTarget then
                     local transformed = sourceToTarget * matrix
                     model:SetBoneMatrix(bone, transformed)
@@ -283,10 +369,10 @@ function GCAL.InstallTPIK(deps)
             for k, boneName in ipairs(track.bones) do
                 local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
                 local targetBoneName = targetBones[k] or boneName
-                local targetBone = ply:LookupBone(targetBoneName)
+                local targetBone = GetCachedBoneIndex(ply, targetBoneName)
                 if not targetBone or targetBone < 0 then continue end
 
-                local sourceBone = track.model:LookupBone(sourceBoneName)
+                local sourceBone = GetCachedBoneIndex(track.model, sourceBoneName)
                 local sourceWorld = sourceBone and sourceBone >= 0
                     and track.model:GetBoneMatrix(sourceBone)
                 local targetWorld = baseMatrices[targetBone]
@@ -314,9 +400,9 @@ function GCAL.InstallTPIK(deps)
                 local upperName = "ValveBiped.Bip01_" .. side .. "_UpperArm"
                 local forearmName = "ValveBiped.Bip01_" .. side .. "_Forearm"
                 local handName = "ValveBiped.Bip01_" .. side .. "_Hand"
-                local upperBone = ply:LookupBone(upperName)
-                local forearmBone = ply:LookupBone(forearmName)
-                local handBone = ply:LookupBone(handName)
+                local upperBone = GetCachedBoneIndex(ply, upperName)
+                local forearmBone = GetCachedBoneIndex(ply, forearmName)
+                local handBone = GetCachedBoneIndex(ply, handName)
                 local upper = upperBone and mappingsByTarget[upperBone]
                 local forearm = forearmBone and mappingsByTarget[forearmBone]
                 local hand = handBone and mappingsByTarget[handBone]
@@ -373,6 +459,15 @@ function GCAL.InstallTPIK(deps)
                     targetForearm:GetTranslation(),
                     renderAngles
                 )
+                local mappedHandMatrix = sourceToTarget * sourceHand
+                goal, pole = SmoothArmTargets(
+                    track,
+                    ply,
+                    side,
+                    targetAnchor,
+                    goal,
+                    pole
+                )
                 local elbow, handGoal = SolveTwoBoneIK(
                     shoulder,
                     goal,
@@ -394,7 +489,7 @@ function GCAL.InstallTPIK(deps)
                     elbow,
                     handGoal
                 )
-                local solvedHand = sourceToTarget * sourceHand
+                local solvedHand = mappedHandMatrix
                 solvedHand:SetTranslation(handGoal)
 
                 finalMatrices[upperBone] = BlendBoneMatrix(solvedUpper, targetUpper, blendToTarget)
@@ -472,7 +567,7 @@ function GCAL.InstallTPIK(deps)
                 if carried[parentBone] then return end
                 carried[parentBone] = true
 
-                for _, childBone in ipairs(ply:GetChildBones(parentBone) or {}) do
+                for _, childBone in ipairs(GetCachedChildBones(ply, parentBone)) do
                     if not finalMatrices[childBone] then
                         local baseParent = baseMatrices[parentBone]
                         local baseChild = baseMatrices[childBone]
@@ -491,7 +586,7 @@ function GCAL.InstallTPIK(deps)
             end
 
             for _, side in ipairs({ "L", "R" }) do
-                local upperBone = ply:LookupBone("ValveBiped.Bip01_" .. side .. "_UpperArm")
+                local upperBone = GetCachedBoneIndex(ply, "ValveBiped.Bip01_" .. side .. "_UpperArm")
                 if upperBone and upperBone >= 0 and finalMatrices[upperBone] then
                     CarryArmChildren(upperBone)
                 end

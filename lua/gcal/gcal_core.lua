@@ -58,6 +58,7 @@ if CLIENT then
     GCAL.TPIKTargetRadiusAdd = CreateClientConVar("gcal_tpik_target_radius_add", "0", true, false, "Global GCAL thirdperson TPIK target radius adjustment.")
     GCAL.TPIKPoleSourceAdd = CreateClientConVar("gcal_tpik_pole_source_add", "0", true, false, "Global GCAL thirdperson TPIK source pole blend adjustment.")
     GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false, "Global GCAL thirdperson TPIK native pole blend adjustment.")
+    GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false, "Global GCAL thirdperson TPIK smoothing adjustment.")
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
@@ -81,7 +82,8 @@ if CLIENT then
         tpik_ang_r = true,
         tpik_target_radius_add = true,
         tpik_pole_source_add = true,
-        tpik_pole_native_add = true
+        tpik_pole_native_add = true,
+        tpik_smoothing_add = true
     }
 
     function GCAL:AnimationAdjustmentCookieKey(name, field)
@@ -168,7 +170,8 @@ if CLIENT then
             ),
             target_radius_add = self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add"),
             pole_source_add = self.TPIKPoleSourceAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_source_add"),
-            pole_native_add = self.TPIKPoleNativeAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_native_add")
+            pole_native_add = self.TPIKPoleNativeAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_native_add"),
+            smoothing_add = self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
         }
     end
 
@@ -182,10 +185,18 @@ if CLIENT then
     end
 
     function GCAL:GetTPIKOptionAdd(name, option)
-        local adjustment = self:GetTPIKAdjustment(name)
-        if option == "target_radius" then return adjustment.target_radius_add end
-        if option == "pole_source" then return adjustment.pole_source_add end
-        if option == "pole_native" then return adjustment.pole_native_add end
+        if option == "target_radius" then
+            return self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add")
+        end
+        if option == "pole_source" then
+            return self.TPIKPoleSourceAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_source_add")
+        end
+        if option == "pole_native" then
+            return self.TPIKPoleNativeAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_native_add")
+        end
+        if option == "smoothing" then
+            return self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
+        end
 
         return 0
     end
@@ -1606,12 +1617,6 @@ if CLIENT then
         local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
         if not strategy then return end
         if GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy) ~= "arc9_tpik" then return end
-
-        for _, track in pairs(GCAL.ActiveTracks) do
-            if track.thirdperson then
-                track.thirdpersonSolveFrame = nil
-            end
-        end
 
         RenderThirdPersonTracks(ply, "arc9_tpik", weapon)
     end)
