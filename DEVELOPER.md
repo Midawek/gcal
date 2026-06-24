@@ -291,7 +291,7 @@ Thirdperson rendering is selected by method: ARC9 weapons with active native TPI
 
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
 
-The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*`, `gcal_anim_angle_*`, and `gcal_anim_fov` affect the normal firstperson animation placement/FOV. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` affect only the thirdperson TPIK source placement. `gcal_tpik_target_radius_add`, `gcal_tpik_pole_source_add`, `gcal_tpik_pole_native_add`, and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values.
+The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*` and `gcal_anim_angle_*` affect normal firstperson placement. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` are applied after source-to-player retargeting, so they move only the final thirdperson TPIK pose. `gcal_tpik_target_radius_add`, `gcal_tpik_pole_source_add`, `gcal_tpik_pole_native_add`, and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values. GCAL no longer applies animation-specific FOV offsets.
 
 ---
 

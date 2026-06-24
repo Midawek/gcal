@@ -350,6 +350,9 @@ function GCAL.InstallTPIK(deps)
             local targetBones = GetTrackTargetBones(track, weapon, flip)
             local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
             PlaceTPIKTrackModel(track, ply:GetPos(), renderAngles)
+            local adjustmentTransform = GCAL.GetTPIKAdjustmentTransform
+                and GCAL:GetTPIKAdjustmentTransform(track.name, ply:GetPos(), renderAngles)
+                or Matrix()
             track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
             track.model:SetupBones()
 
@@ -459,7 +462,9 @@ function GCAL.InstallTPIK(deps)
                     targetForearm:GetTranslation(),
                     renderAngles
                 )
-                local mappedHandMatrix = sourceToTarget * sourceHand
+                goal = adjustmentTransform * goal
+                pole = adjustmentTransform * pole
+                local mappedHandMatrix = adjustmentTransform * sourceToTarget * sourceHand
                 goal, pole = SmoothArmTargets(
                     track,
                     ply,

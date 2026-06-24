@@ -48,7 +48,6 @@ if CLIENT then
     GCAL.AnimationAngleP = CreateClientConVar("gcal_anim_angle_p", "0", true, false, "Global GCAL animation pitch offset.")
     GCAL.AnimationAngleY = CreateClientConVar("gcal_anim_angle_y", "0", true, false, "Global GCAL animation yaw offset.")
     GCAL.AnimationAngleR = CreateClientConVar("gcal_anim_angle_r", "0", true, false, "Global GCAL animation roll offset.")
-    GCAL.AnimationFOV = CreateClientConVar("gcal_anim_fov", "0", true, false, "Global GCAL animation FOV offset while GCAL tracks are active.")
     GCAL.TPIKOffsetX = CreateClientConVar("gcal_tpik_offset_x", "0", true, false, "Global GCAL thirdperson TPIK forward/back offset.")
     GCAL.TPIKOffsetY = CreateClientConVar("gcal_tpik_offset_y", "0", true, false, "Global GCAL thirdperson TPIK right/left offset.")
     GCAL.TPIKOffsetZ = CreateClientConVar("gcal_tpik_offset_z", "0", true, false, "Global GCAL thirdperson TPIK up/down offset.")
@@ -73,7 +72,6 @@ if CLIENT then
         ang_p = true,
         ang_y = true,
         ang_r = true,
-        fov = true,
         tpik_pos_x = true,
         tpik_pos_y = true,
         tpik_pos_z = true,
@@ -138,8 +136,7 @@ if CLIENT then
                 self.AnimationAngleP:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_p"),
                 self.AnimationAngleY:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_y"),
                 self.AnimationAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_r")
-            ),
-            fov = self.AnimationFOV:GetFloat() + self:GetAnimationAdjustmentValue(name, "fov")
+            )
         }
     end
 
@@ -150,10 +147,6 @@ if CLIENT then
         local angleOffset = adjustment.ang
 
         return adjustedPos, Angle(ang.p + angleOffset.p, ang.y + angleOffset.y, ang.r + angleOffset.r)
-    end
-
-    function GCAL:GetAnimationFOVOffset(name)
-        return self:GetAnimationAdjustment(name).fov
     end
 
     function GCAL:GetTPIKAdjustment(name)
@@ -182,6 +175,21 @@ if CLIENT then
         local angleOffset = adjustment.ang
 
         return adjustedPos, Angle(ang.p + angleOffset.p, ang.y + angleOffset.y, ang.r + angleOffset.r)
+    end
+
+    function GCAL:GetTPIKAdjustmentTransform(name, pos, ang)
+        local adjustedPos, adjustedAng = self:ApplyTPIKAdjustment(name, pos, ang)
+        local base = Matrix()
+        base:SetTranslation(pos)
+        base:SetAngles(ang)
+
+        local baseInverse = Matrix(base:ToTable())
+        baseInverse:Invert()
+
+        local adjusted = Matrix()
+        adjusted:SetTranslation(adjustedPos)
+        adjusted:SetAngles(adjustedAng)
+        return adjusted * baseInverse
     end
 
     function GCAL:GetTPIKOptionAdd(name, option)
@@ -1147,9 +1155,8 @@ if CLIENT then
     end
 
     local function PlaceTPIKTrackModel(track, pos, ang)
-        local adjustedPos, adjustedAng = GCAL:ApplyTPIKAdjustment(track.name, pos, ang)
-        track.model:SetAngles(adjustedAng)
-        track.model:SetPos(adjustedPos)
+        track.model:SetAngles(ang)
+        track.model:SetPos(pos)
     end
 
     local function DrawGShaderFriendlyModel(model, flags)
@@ -1916,20 +1923,6 @@ if CLIENT then
             angles.x = angles.x + camang.x * (track.camAngInt[1] or 1)
             angles.y = angles.y + camang.y * (track.camAngInt[2] or 1)
             angles.z = angles.z + camang.z * (track.camAngInt[3] or 1)
-            viewChanged = true
-        end
-
-        local fovTrack = track
-        if not fovTrack then
-            for _, activeTrack in pairs(GCAL.ActiveTracks or {}) do
-                fovTrack = activeTrack
-                break
-            end
-        end
-
-        local fovOffset = fovTrack and GCAL:GetAnimationFOVOffset(fovTrack.name) or 0
-        if fovOffset ~= 0 then
-            fov = fov + fovOffset
             viewChanged = true
         end
 

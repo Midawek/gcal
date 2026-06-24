@@ -25,7 +25,6 @@ for _, adjustmentConVar in ipairs({
     {"gcal_anim_angle_p", "Global GCAL animation pitch offset."},
     {"gcal_anim_angle_y", "Global GCAL animation yaw offset."},
     {"gcal_anim_angle_r", "Global GCAL animation roll offset."},
-    {"gcal_anim_fov", "Global GCAL animation FOV offset while GCAL tracks are active."},
     {"gcal_tpik_offset_x", "Global GCAL thirdperson TPIK forward/back offset."},
     {"gcal_tpik_offset_y", "Global GCAL thirdperson TPIK right/left offset."},
     {"gcal_tpik_offset_z", "Global GCAL thirdperson TPIK up/down offset."},
@@ -226,8 +225,7 @@ local adjustmentFields = {
     {key = "pos_z", convar = "gcal_anim_offset_z", label = "Offset Z", min = -20, max = 20, decimals = 2},
     {key = "ang_p", convar = "gcal_anim_angle_p", label = "Pitch", min = -45, max = 45, decimals = 1},
     {key = "ang_y", convar = "gcal_anim_angle_y", label = "Yaw", min = -45, max = 45, decimals = 1},
-    {key = "ang_r", convar = "gcal_anim_angle_r", label = "Roll", min = -45, max = 45, decimals = 1},
-    {key = "fov", convar = "gcal_anim_fov", label = "FOV", min = -40, max = 40, decimals = 1}
+    {key = "ang_r", convar = "gcal_anim_angle_r", label = "Roll", min = -45, max = 45, decimals = 1}
 }
 
 local tpikAdjustmentFields = {
