@@ -6,6 +6,50 @@ GCAL is a modern, modular offhand animation library for Garry's Mod. It serves a
 
 ---
 
+## 0. How GCAL Works
+
+GCAL is built around a simple idea: an addon registers animation data once, then asks GCAL to play that animation on a named runtime track. GCAL owns the clientside animation model, advances its cycle once per rendered frame, reads the animated source bones from that model, and writes the resulting transforms onto the correct viewmodel, hands entity, or thirdperson player bones.
+
+The important pieces are:
+
+| Piece | What it does |
+| :---- | :----------- |
+| Animation registry | `GCAL.Anims[name]` stores static data from `GCAL:RegisterAnim`. |
+| Active tracks | `GCAL.ActiveTracks[trackID]` stores runtime playback state such as cycle, lerp, hold state, models, and sounds. |
+| Source model | A hidden clientside model created from the registered `model`; GCAL reads the animated bones from this. |
+| Target entity | The entity GCAL writes bones to. This is usually the viewmodel or player hands entity, but weapon-base strategies can choose another entity. |
+| Track ID | The slot an animation plays in. Different track IDs can run at the same time. Starting a new animation on the same track replaces the old one. |
+| TPIK options | `GCAL.TPIKOptions[name]` stores thirdperson-only solver and prop-rendering settings. |
+
+### Playback Lifecycle
+
+Most native animations follow this flow:
+
+1. Your addon calls `GCAL:RegisterAnim(name, data)` during clientside initialization.
+2. Your addon calls `GCAL:Play(name, trackID)` when gameplay wants the gesture.
+3. GCAL creates hidden clientside models, resolves the sequence, initializes cycle/lerp state, and stores the runtime track in `GCAL.ActiveTracks`.
+4. Every rendered frame, GCAL advances each track once, updates model cycles, plays scheduled sounds, and updates hold/segment state.
+5. During viewmodel/hands rendering, GCAL places the hidden source model, reads source bone matrices, and applies them to the selected target bones.
+6. When the animation finishes, is stopped, or is replaced on the same track, GCAL removes its clientside models and fires stop hooks.
+
+Thirdperson uses the same track timing. It does not run a second copy of the animation; it reuses the active track state and projects it onto the player model through TPIK when possible.
+
+### Firstperson vs Thirdperson
+
+Firstperson rendering is direct bone copying/blending from the hidden animation model into the active viewmodel or hands entity. It is the primary, most stable path.
+
+Thirdperson rendering is a retargeting problem. Player models have different proportions, weapon bases may already run their own thirdperson IK, and addon props may be weighted differently from arms. GCAL solves this with a TPIK pass: it reads shoulder, elbow, and hand goals from the animation model, solves a two-bone player arm, then carries fingers/helper bones and optional prop geometry along with that solved hand.
+
+This means firstperson and thirdperson may need different tuning. Keep regular animation data in `RegisterAnim`; put thirdperson-only adjustments in `GCAL.TPIKOptions`.
+
+### Native GCAL vs VManip Compatibility
+
+Native GCAL addons should use `GCAL:RegisterAnim`, `GCAL:Play`, track IDs, and GCAL hooks directly. The VManip shim exists so older addons continue to work, but new addons should avoid depending on global VManip state such as `VManip.VMGesture` or `VManip.Cycle`.
+
+The compatibility layer translates old VManip registrations and playback calls into GCAL tracks, adds tolerant sequence resolution, and handles known weapon-base quirks. Native code gets cleaner behavior by being explicit about hands, tracks, source bones, and TPIK options.
+
+---
+
 ## 1. Quick Start
 
 GCAL is globally accessible via the `GCAL` table. It also provides a shim for `VManip` and `VMLegs` for legacy support.
@@ -163,6 +207,37 @@ GCAL:RegisterHandAnim("right_hand_from_left_source", "right", {
 })
 ```
 
+### Model and Sequence Authoring Guidelines
+
+GCAL expects the registered model to be a clientside model under `models/` with a sequence GCAL can resolve. The model can be a regular c_arms-style model, a VManip-style animation model, or an addon-owned gesture model that includes the bones you want GCAL to read.
+
+For predictable results:
+
+- Use ValveBiped arm bone names when possible, such as `ValveBiped.Bip01_L_UpperArm`, `ValveBiped.Bip01_L_Forearm`, and `ValveBiped.Bip01_L_Hand`.
+- Make sure the source model actually contains the source bones listed by `source_bones` or implied by `source_hand`.
+- Put props that should appear in thirdperson inside the registered animation model when possible. GCAL's thirdperson prop clone is pulled from the registered addon model, not from GCAL-local models.
+- Use `sequence` when the registered animation name does not exactly match the model sequence.
+- If the firstperson sequence is not a good thirdperson pose, use `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` instead of changing the firstperson registration.
+- Keep one logical gesture per animation name. If the same model has several sequences, register several GCAL animations that share the same `model` but use different `sequence` values.
+
+Minimal shared-model pattern:
+
+```lua
+local MODEL = "myaddon/c_shared_tools.mdl"
+
+GCAL:RegisterSecondHandAnim("tool_raise", {
+    model = MODEL,
+    sequence = "tool_raise",
+    addon_name = "My Addon"
+})
+
+GCAL:RegisterSecondHandAnim("tool_press", {
+    model = MODEL,
+    sequence = "tool_press",
+    addon_name = "My Addon"
+})
+```
+
 ---
 
 ## 4. The Multi-Track System
@@ -182,6 +257,33 @@ GCAL:Play("watch_check", "left_arm")
 GCAL:PlayHand("hand_signal", "right")
 -- Both will play simultaneously without glitching!
 ```
+
+Track IDs are intentionally simple strings. GCAL does not require every addon to share the built-in names, but you should prefer the standard tracks unless you have a reason not to:
+
+- Use `left_arm`, `right_arm`, or `both_arms` for normal hand gestures.
+- Use a custom track when an animation is logically independent from the normal hand slot.
+- Use the same custom track for mutually exclusive animations in the same subsystem.
+- Avoid creating a new unique track every time you play an animation; tracks are runtime slots, not event IDs.
+
+Example custom track:
+
+```lua
+GCAL:RegisterSecondHandAnim("scanner_insert", {
+    model = "myaddon/c_scanner.mdl",
+    sequence = "scanner_insert",
+    group_name = "scanner_device"
+})
+
+GCAL:RegisterSecondHandAnim("scanner_remove", {
+    model = "myaddon/c_scanner.mdl",
+    sequence = "scanner_remove",
+    group_name = "scanner_device"
+})
+
+GCAL:Play("scanner_insert") -- Uses scanner_device by default.
+```
+
+If `scanner_remove` starts while `scanner_insert` is still active on `scanner_device`, GCAL stops the old track first. Other tracks keep playing.
 
 ### Native Track Control
 
@@ -454,9 +556,120 @@ Use `GCAL:IsDynaBaseAvailable()` if your addon wants to branch behavior when Dyn
 
 ---
 
-## 9. Debugging Tools
+## 9. Common Addon Patterns
+
+### Clientside Initialization
+
+Register animations clientside after GCAL exists. If your file is loaded by an addon autorun, a simple client guard is usually enough:
+
+```lua
+if not CLIENT then return end
+if not GCAL then return end
+
+GCAL:RegisterSecondHandAnim("myaddon_ping", {
+    model = "myaddon/c_ping.mdl",
+    sequence = "ping",
+    addon_name = "My Addon"
+})
+```
+
+If your addon can load before GCAL, defer registration until a safe hook or include order you control. Do not register the same animation every frame.
+
+### Play Without Spamming
+
+Before playing a long gesture, check the target track:
+
+```lua
+local track = "left_arm"
+
+if not GCAL:IsTrackActive(track) then
+    GCAL:Play("myaddon_ping", track)
+end
+```
+
+For actions that should replace themselves, just call `GCAL:Play` on the same track. GCAL will stop the previous runtime track cleanly.
+
+### Block Your Own Logic While a Gesture Runs
+
+Use `block_code` when your addon needs to wait for an animation before continuing an interaction:
+
+```lua
+GCAL:RegisterSecondHandAnim("myaddon_insert_battery", {
+    model = "myaddon/c_battery.mdl",
+    sequence = "insert",
+    block_code = true,
+    block_code_scope = "myaddon_battery"
+})
+
+hook.Add("Think", "MyAddonBatteryThink", function()
+    if GCAL:IsCodeBlocked("myaddon_battery") then return end
+
+    -- Regular battery logic.
+end)
+```
+
+### Add Thirdperson TPIK Only When Needed
+
+Start with normal firstperson registration. Add `GCAL.TPIKOptions` only when thirdperson needs a different sequence or solver tuning:
+
+```lua
+GCAL:RegisterSecondHandAnim("myaddon_spray", {
+    model = "myaddon/c_spray.mdl",
+    sequence = "spray_firstperson",
+    addon_name = "My Addon"
+})
+
+GCAL:RegisterTPIKOptions("myaddon_spray", {
+    sequence = "spray_thirdperson",
+    model_bone = "ValveBiped.Bip01_L_Hand",
+    model_max_distance = 24,
+    target_radius = 34,
+    smoothing = 14
+})
+```
+
+### Recommended Naming
+
+Use stable, namespaced animation names so other addons and users can understand debug output:
+
+```lua
+GCAL:RegisterSecondHandAnim("myaddon_tablet_open", { ... })
+GCAL:RegisterSecondHandAnim("myaddon_tablet_close", { ... })
+GCAL:RegisterSecondHandAnim("myaddon_tablet_press", { ... })
+```
+
+Avoid very generic names like `open`, `use`, or `idle` unless the animation is internal and cannot conflict.
+
+---
+
+## 10. Debugging Tools
 
 GCAL listens for unhandled Lua errors originating from its own files. Client errors produce one rate-limited notification while full details remain in the console; server errors receive the same concise GCAL console prefix.
+
+### Troubleshooting Checklist
+
+If an animation does not play:
+
+- Run `gcal_list_anims` and confirm the animation name is registered.
+- Run `gcal_debug_sequences <animation>` and confirm the model exposes the sequence you expect.
+- Check that `model` is relative to `models/`, for example `myaddon/c_tool.mdl`, not `models/myaddon/c_tool.mdl`.
+- Confirm the target track is not already occupied if your addon is intentionally avoiding replacement with `GCAL:IsTrackActive`.
+- Enable `gcal_debug 1` and watch the HUD for active track, cycle, lerp, and bone counts.
+
+If the hand does not move:
+
+- Confirm the source model contains the source bones GCAL is reading.
+- Confirm the target viewmodel or hands entity contains the target bones GCAL is writing.
+- Try explicit `hand`, `source_hand`, `bones`, or `source_bones` values instead of relying on defaults.
+- Use `gcal_debug_track [track]` to inspect the selected weapon-base strategy, arm target entity, and matched bones.
+
+If thirdperson looks wrong:
+
+- First verify firstperson works. TPIK depends on a valid source animation.
+- Add `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` if the firstperson sequence is not a good thirdperson pose.
+- Tune `target_radius`, `pole_source`, `pole_native`, and `smoothing` in `GCAL.TPIKOptions`.
+- Use `model = false` to isolate arm solving from prop rendering.
+- Use `model_bone` and `model_max_distance` when addon props drift away from the solved hand.
 
 Use these console commands during development:
 
