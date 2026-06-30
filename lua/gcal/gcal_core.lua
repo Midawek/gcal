@@ -1697,10 +1697,13 @@ if CLIENT then
 
         for _, track in pairs(GCAL.ActiveTracks) do
             local model = track.thirdpersonModel
+            local readyFrame = track.thirdpersonModelReadyFrame or -1
+            local readyTime = track.thirdpersonModelReadyTime or 0
             if track.thirdperson
-                and track.thirdpersonModelReadyFrame == FrameNumber()
+                and (readyFrame >= FrameNumber() - 1 or RealTime() - readyTime <= 0.1)
                 and IsValid(model)
             then
+                track.debugThirdPersonModelDrawFrame = FrameNumber()
                 model:DrawModel()
             end
         end
@@ -1862,6 +1865,11 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - thirdperson mode: " .. tostring(track.debugThirdPersonMode or "<not evaluated>") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson host: " .. tostring(track.debugThirdPersonHost or "gcal") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson model: " .. tostring(track.debugThirdPersonModel or "<not rendered>") .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson model valid: " .. tostring(IsValid(track.thirdpersonModel)) .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson model visible materials: " .. tostring(track.thirdpersonModelHasVisibleMaterials) .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson model ready frame: " .. tostring(track.thirdpersonModelReadyFrame or "<none>") .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson model draw frame: " .. tostring(track.debugThirdPersonModelDrawFrame or "<none>") .. "\n")
+        MsgC(Color(236, 242, 255), " - thirdperson model distance: " .. tostring(track.debugThirdPersonModelDistance or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
 

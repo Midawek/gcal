@@ -269,8 +269,6 @@ function GCAL.InstallTPIK(deps)
             "hand_",
             "glove",
             "sleeve",
-            "v_models",
-            "viewmodel",
             "player_shared"
         }
         local function ConfigureThirdPersonModelMaterials(track)
@@ -278,39 +276,57 @@ function GCAL.InstallTPIK(deps)
             if not IsValid(model) or track.thirdpersonMaterialsConfigured then return end
             track.thirdpersonMaterialsConfigured = true
 
-            local hideTokens = table.Copy(thirdPersonArmMaterialTokens)
             local extraHideTokens = GetTPIKOption(track, "hide_materials", "thirdperson_hide_materials")
             if isstring(extraHideTokens) then extraHideTokens = { extraHideTokens } end
-            for _, token in ipairs(extraHideTokens or {}) do
-                hideTokens[#hideTokens + 1] = string.lower(tostring(token))
-            end
 
             local keepTokens = GetTPIKOption(track, "keep_materials", "thirdperson_keep_materials")
             if isstring(keepTokens) then keepTokens = { keepTokens } end
 
             local visibleMaterialCount = 0
+            local autoHiddenMaterials = {}
             local materials = model:GetMaterials() or {}
             for index, materialName in ipairs(materials) do
                 local lowerName = string.lower(materialName)
                 local hide = false
-                for _, token in ipairs(hideTokens) do
+                local hiddenByAuto = false
+                for _, token in ipairs(thirdPersonArmMaterialTokens) do
                     if string.find(lowerName, token, 1, true) then
                         hide = true
+                        hiddenByAuto = true
+                        break
+                    end
+                end
+                for _, token in ipairs(extraHideTokens or {}) do
+                    if string.find(lowerName, string.lower(tostring(token)), 1, true) then
+                        hide = true
+                        hiddenByAuto = false
                         break
                     end
                 end
                 for _, token in ipairs(keepTokens or {}) do
                     if string.find(lowerName, string.lower(tostring(token)), 1, true) then
                         hide = false
+                        hiddenByAuto = false
                         break
                     end
                 end
 
                 if hide then
                     model:SetSubMaterial(index - 1, hiddenThirdPersonMaterialName)
+                    if hiddenByAuto then
+                        autoHiddenMaterials[#autoHiddenMaterials + 1] = index - 1
+                    end
                 else
                     visibleMaterialCount = visibleMaterialCount + 1
                 end
+            end
+
+            if #materials > 0 and visibleMaterialCount == 0 and #autoHiddenMaterials > 0 then
+                for _, materialIndex in ipairs(autoHiddenMaterials) do
+                    model:SetSubMaterial(materialIndex)
+                end
+                visibleMaterialCount = #autoHiddenMaterials
+                track.debugThirdPersonModel = "visible: material fallback"
             end
 
             track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visibleMaterialCount > 0
@@ -343,9 +359,9 @@ function GCAL.InstallTPIK(deps)
 
                 local distance = position:Distance(handPosition)
                 if useHitbox then
-                    hitboxDistance = hitboxDistance and math.max(hitboxDistance, distance) or distance
+                    hitboxDistance = hitboxDistance and math.min(hitboxDistance, distance) or distance
                 else
-                    boneDistance = boneDistance and math.max(boneDistance, distance) or distance
+                    boneDistance = boneDistance and math.min(boneDistance, distance) or distance
                 end
             end
 
@@ -389,7 +405,7 @@ function GCAL.InstallTPIK(deps)
             if handPosition and maxDistance > 0 then
                 local modelDistance
                 if hitboxDistance or boneDistance then
-                    modelDistance = math.max(hitboxDistance or 0, boneDistance or 0)
+                    modelDistance = math.min(hitboxDistance or math.huge, boneDistance or math.huge)
                 end
                 if not modelDistance and sourceToTarget then
                     modelDistance = (sourceToTarget * sourceModel:GetPos()):Distance(handPosition)
@@ -405,6 +421,7 @@ function GCAL.InstallTPIK(deps)
             end
 
             track.thirdpersonModelReadyFrame = FrameNumber()
+            track.thirdpersonModelReadyTime = RealTime()
             track.debugThirdPersonModel = model:GetModel()
         end
 
