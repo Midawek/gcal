@@ -974,7 +974,7 @@ function GCAL.Menu.Refresh()
     conflictPopupButton:SetTooltip("Toggle the startup conflict warning popup. Console: gcal_conflict_popup 0/1.")
 
     if GCAL.InternalThirdPersonEnabled then
-        local thirdPersonButton = MakeButton(panel.ActionsScroll, ThirdPersonEnabled() and "TPIK support: on" or "TPIK support: off", colAccent, function()
+        local thirdPersonButton = MakeButton(panel.ActionsScroll, ThirdPersonEnabled() and "TPIK enabled: on" or "TPIK enabled: off", colAccent, function()
             RunConsoleCommand("gcal_thirdperson", ThirdPersonEnabled() and "0" or "1")
             timer.Simple(0, GCAL.Menu.Refresh)
         end)
