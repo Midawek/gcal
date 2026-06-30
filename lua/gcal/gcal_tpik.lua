@@ -51,6 +51,30 @@ function GCAL.InstallTPIK(deps)
             return children
         end
 
+        local function GetTPIKSourceModel(track)
+            if track and IsValid(track.tpikModel) then return track.tpikModel end
+            return track and track.model or nil
+        end
+
+        local function GetTrackTPIKOptions(track)
+            if track and istable(track.tpikOptions) then return track.tpikOptions end
+            if track and GCAL.GetTPIKOptions then return GCAL:GetTPIKOptions(track.name) end
+            return nil
+        end
+
+        local function GetTPIKOption(track, key, ...)
+            local options = GetTrackTPIKOptions(track)
+            if options and options[key] ~= nil then return options[key] end
+
+            local data = track and track.data or nil
+            for i = 1, select("#", ...) do
+                local fallbackKey = select(i, ...)
+                if data and data[fallbackKey] ~= nil then return data[fallbackKey] end
+            end
+
+            return nil
+        end
+
         local function BlendBoneMatrix(animated, base, blendToBase)
             local matrix = Matrix(animated:ToTable())
             matrix:SetTranslation(LerpVector(blendToBase, animated:GetTranslation(), base:GetTranslation()))
@@ -147,8 +171,7 @@ function GCAL.InstallTPIK(deps)
         end
 
         local function SmoothArmTargets(track, ply, side, anchor, goal, pole)
-            local data = track.data or {}
-            local speed = tonumber(data.thirdperson_smoothing)
+            local speed = tonumber(GetTPIKOption(track, "smoothing", "thirdperson_smoothing"))
             if speed == nil then speed = 18 end
             if GCAL.GetTPIKOptionAdd then
                 speed = speed + GCAL:GetTPIKOptionAdd(track.name, "smoothing")
@@ -202,15 +225,14 @@ function GCAL.InstallTPIK(deps)
                 - renderAngles:Up() * 6
                 + direction * 4
 
-            local data = track.data or {}
-            local sourceWeight = tonumber(data.thirdperson_pole_source)
+            local sourceWeight = tonumber(GetTPIKOption(track, "pole_source", "thirdperson_pole_source"))
             if sourceWeight == nil then sourceWeight = 0.35 end
             if GCAL.GetTPIKOptionAdd then
                 sourceWeight = sourceWeight + GCAL:GetTPIKOptionAdd(track.name, "pole_source")
             end
             sourceWeight = math.Clamp(sourceWeight, 0, 1)
 
-            local nativeWeight = tonumber(data.thirdperson_pole_native)
+            local nativeWeight = tonumber(GetTPIKOption(track, "pole_native", "thirdperson_pole_native"))
             if nativeWeight == nil then nativeWeight = 0.35 end
             if GCAL.GetTPIKOptionAdd then
                 nativeWeight = nativeWeight + GCAL:GetTPIKOptionAdd(track.name, "pole_native")
@@ -251,20 +273,19 @@ function GCAL.InstallTPIK(deps)
             "viewmodel",
             "player_shared"
         }
-
         local function ConfigureThirdPersonModelMaterials(track)
             local model = track.thirdpersonModel
             if not IsValid(model) or track.thirdpersonMaterialsConfigured then return end
             track.thirdpersonMaterialsConfigured = true
 
             local hideTokens = table.Copy(thirdPersonArmMaterialTokens)
-            local extraHideTokens = track.data.thirdperson_hide_materials
+            local extraHideTokens = GetTPIKOption(track, "hide_materials", "thirdperson_hide_materials")
             if isstring(extraHideTokens) then extraHideTokens = { extraHideTokens } end
             for _, token in ipairs(extraHideTokens or {}) do
                 hideTokens[#hideTokens + 1] = string.lower(tostring(token))
             end
 
-            local keepTokens = track.data.thirdperson_keep_materials
+            local keepTokens = GetTPIKOption(track, "keep_materials", "thirdperson_keep_materials")
             if isstring(keepTokens) then keepTokens = { keepTokens } end
 
             local visibleMaterialCount = 0
@@ -295,32 +316,92 @@ function GCAL.InstallTPIK(deps)
             track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visibleMaterialCount > 0
         end
 
-        local function PrepareThirdPersonModel(track, sourceToTarget)
+        local function PrepareThirdPersonModel(track, sourceToTarget, handPosition)
             local model = track.thirdpersonModel
-            if not IsValid(model) or track.data.thirdperson_model == false then return end
+            local sourceModel = GetTPIKSourceModel(track)
+            if not IsValid(model) or GetTPIKOption(track, "model", "thirdperson_model") == false then return end
+            if not IsValid(sourceModel) then return end
+            track.thirdpersonModelReadyFrame = nil
+            track.debugThirdPersonModelDistance = nil
 
             ConfigureThirdPersonModelMaterials(track)
             if not track.thirdpersonModelHasVisibleMaterials then return end
 
-            model:SetPos(track.model:GetPos())
-            model:SetAngles(track.model:GetAngles())
+            local maxDistance = tonumber(GetTPIKOption(track, "model_max_distance", "thirdperson_model_max_distance"))
+            if maxDistance == nil then maxDistance = 32 end
+            local explicitBoneName = GetTPIKOption(track, "model_bone", "thirdperson_model_bone")
+            local explicitBone = isstring(explicitBoneName)
+                and GetCachedBoneIndex(sourceModel, explicitBoneName)
+                or nil
+            local boneDistance
+            local hitboxDistance
+            local transformedMatrices = {}
+
+            local function ConsiderModelPoint(bone, position, useHitbox)
+                if not handPosition or not position then return end
+                if explicitBone ~= nil and bone ~= explicitBone then return end
+
+                local distance = position:Distance(handPosition)
+                if useHitbox then
+                    hitboxDistance = hitboxDistance and math.max(hitboxDistance, distance) or distance
+                else
+                    boneDistance = boneDistance and math.max(boneDistance, distance) or distance
+                end
+            end
+
+            model:SetPos(sourceModel:GetPos())
+            model:SetAngles(sourceModel:GetAngles())
             -- Source bones already contain any legacy mirror. Mirroring the visible
             -- clone again moves separately weighted props around the model origin.
             model:SetModelScale(1)
-            model:SetSkin(track.model:GetSkin())
-            for _, bodygroup in ipairs(track.model:GetBodyGroups() or {}) do
-                model:SetBodygroup(bodygroup.id, track.model:GetBodygroup(bodygroup.id))
+            model:SetSkin(sourceModel:GetSkin())
+            for _, bodygroup in ipairs(sourceModel:GetBodyGroups() or {}) do
+                model:SetBodygroup(bodygroup.id, sourceModel:GetBodygroup(bodygroup.id))
             end
             model:SetCycle(track.cycle or 0)
             model:SetupBones()
 
             for bone = 0, model:GetBoneCount() - 1 do
-                local matrix = track.model:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
+                local matrix = sourceModel:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
                 if matrix and sourceToTarget then
                     local transformed = sourceToTarget * matrix
+                    transformedMatrices[bone] = transformed
                     model:SetBoneMatrix(bone, transformed)
                     model:SetBonePosition(bone, transformed:GetTranslation(), transformed:GetAngles())
+                    ConsiderModelPoint(bone, transformed:GetTranslation(), false)
                 end
+            end
+
+            if model.GetHitBoxCount and model.GetHitBoxBone and model.GetHitBoxBounds then
+                local hitboxCount = model:GetHitBoxCount(0) or 0
+                for hitbox = 0, hitboxCount - 1 do
+                    local bone = model:GetHitBoxBone(hitbox, 0)
+                    local matrix = bone and transformedMatrices[bone]
+                    if matrix then
+                        local mins, maxs = model:GetHitBoxBounds(hitbox, 0)
+                        if mins and maxs then
+                            ConsiderModelPoint(bone, matrix * ((mins + maxs) * 0.5), true)
+                        end
+                    end
+                end
+            end
+
+            if handPosition and maxDistance > 0 then
+                local modelDistance
+                if hitboxDistance or boneDistance then
+                    modelDistance = math.max(hitboxDistance or 0, boneDistance or 0)
+                end
+                if not modelDistance and sourceToTarget then
+                    modelDistance = (sourceToTarget * sourceModel:GetPos()):Distance(handPosition)
+                end
+
+                if modelDistance and modelDistance > maxDistance then
+                    track.debugThirdPersonModel = "hidden: too far"
+                    track.debugThirdPersonModelDistance = modelDistance
+                    return
+                end
+
+                track.debugThirdPersonModelDistance = modelDistance
             end
 
             track.thirdpersonModelReadyFrame = FrameNumber()
@@ -340,7 +421,8 @@ function GCAL.InstallTPIK(deps)
         end
 
         local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
-            if not IsValid(track.model) or not baseMatrices then return end
+            local sourceModel = GetTPIKSourceModel(track)
+            if not IsValid(sourceModel) or not baseMatrices then return end
             if track.thirdpersonSolveFrame == FrameNumber() then
                 ApplyCachedThirdPersonBones(track, ply)
                 return
@@ -353,8 +435,8 @@ function GCAL.InstallTPIK(deps)
             local adjustmentTransform = GCAL.GetTPIKAdjustmentTransform
                 and GCAL:GetTPIKAdjustmentTransform(track.name, ply:GetPos(), renderAngles)
                 or Matrix()
-            track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
-            track.model:SetupBones()
+            sourceModel:SetModelScale(GetTrackModelScale(track, weapon, flip))
+            sourceModel:SetupBones()
 
             local blendToTarget = math.Clamp(
                 (track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp)(
@@ -375,9 +457,9 @@ function GCAL.InstallTPIK(deps)
                 local targetBone = GetCachedBoneIndex(ply, targetBoneName)
                 if not targetBone or targetBone < 0 then continue end
 
-                local sourceBone = GetCachedBoneIndex(track.model, sourceBoneName)
+                local sourceBone = GetCachedBoneIndex(sourceModel, sourceBoneName)
                 local sourceWorld = sourceBone and sourceBone >= 0
-                    and track.model:GetBoneMatrix(sourceBone)
+                    and sourceModel:GetBoneMatrix(sourceBone)
                 local targetWorld = baseMatrices[targetBone]
                 if not targetWorld then continue end
 
@@ -399,6 +481,7 @@ function GCAL.InstallTPIK(deps)
 
             local finalMatrices = {}
             local thirdPersonModelTransform
+            local thirdPersonModelHandPosition
             local function SolveArm(side)
                 local upperName = "ValveBiped.Bip01_" .. side .. "_UpperArm"
                 local forearmName = "ValveBiped.Bip01_" .. side .. "_Forearm"
@@ -420,10 +503,10 @@ function GCAL.InstallTPIK(deps)
 
                 local sourceAnchor = sourceUpper
                 local targetAnchor = targetUpper
-                local sourceUpperParent = track.model:GetBoneParent(upper.sourceBone)
+                local sourceUpperParent = sourceModel:GetBoneParent(upper.sourceBone)
                 local targetUpperParent = ply:GetBoneParent(upperBone)
                 if sourceUpperParent and sourceUpperParent >= 0 then
-                    sourceAnchor = track.model:GetBoneMatrix(sourceUpperParent) or sourceAnchor
+                    sourceAnchor = sourceModel:GetBoneMatrix(sourceUpperParent) or sourceAnchor
                 end
                 if targetUpperParent and targetUpperParent >= 0 then
                     targetAnchor = baseMatrices[targetUpperParent] or targetAnchor
@@ -443,8 +526,7 @@ function GCAL.InstallTPIK(deps)
                 local mappedHand = sourceToTarget * sourceHand:GetTranslation()
                 local mappedElbow = sourceToTarget * sourceForearm:GetTranslation()
                 local goal = shoulder + (mappedHand - shoulder) * scale
-                local data = track.data or {}
-                local clampRadius = tonumber(data.thirdperson_target_radius)
+                local clampRadius = tonumber(GetTPIKOption(track, "target_radius", "thirdperson_target_radius"))
                 if clampRadius == nil then clampRadius = 38 end
                 if GCAL.GetTPIKOptionAdd then
                     clampRadius = clampRadius + GCAL:GetTPIKOptionAdd(track.name, "target_radius")
@@ -505,6 +587,7 @@ function GCAL.InstallTPIK(deps)
                     local sourceHandInverse = Matrix(sourceHand:ToTable())
                     sourceHandInverse:Invert()
                     thirdPersonModelTransform = Matrix(finalMatrices[handBone]:ToTable()) * sourceHandInverse
+                    thirdPersonModelHandPosition = finalMatrices[handBone]:GetTranslation()
                 end
             end
 
@@ -541,7 +624,7 @@ function GCAL.InstallTPIK(deps)
                     or string.EndsWith(mapping.name, "_Ulna")
                 if not isHelperBone and mapping.sourceBone and mapping.sourceWorld then
                     local sourceLocal = BoneLocalMatrix(
-                        track.model,
+                        sourceModel,
                         mapping.sourceBone,
                         mapping.sourceWorld
                     )
@@ -606,7 +689,7 @@ function GCAL.InstallTPIK(deps)
                 track.debugThirdPersonRootBone = mappings[1] and mappings[1].targetBone or nil
                 track.debugThirdPersonMode = "tpik"
                 track.debugThirdPersonPole = "stabilized"
-                PrepareThirdPersonModel(track, thirdPersonModelTransform)
+                PrepareThirdPersonModel(track, thirdPersonModelTransform, thirdPersonModelHandPosition)
             end
 
 

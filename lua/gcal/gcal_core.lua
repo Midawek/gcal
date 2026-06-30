@@ -6,6 +6,7 @@ GCAL.Anims = GCAL.Anims or {}
 GCAL.ActiveTracks = GCAL.ActiveTracks or {}
 GCAL.ImportedFiles = GCAL.ImportedFiles or {}
 GCAL.QueuedAnims = GCAL.QueuedAnims or {}
+GCAL.TPIKOptions = GCAL.TPIKOptions or {}
 
 -- Define Groups Early
 GCAL.GROUPS = {
@@ -265,6 +266,17 @@ function GCAL:GetHandTrack(hand)
     if hand == "both" then return "both_arms" end
 
     return "left_arm"
+end
+
+function GCAL:RegisterTPIKOptions(name, options)
+    if not name or not istable(options) then return false end
+
+    self.TPIKOptions[tostring(name)] = options
+    return true
+end
+
+function GCAL:GetTPIKOptions(name)
+    return self.TPIKOptions and self.TPIKOptions[tostring(name or "")] or nil
 end
 
 function GCAL:PrepareAnimData(data, hand)
@@ -580,6 +592,27 @@ if CLIENT then
         return -1, nil
     end
 
+    local function GetTPIKOptionsForAnim(animName)
+        return GCAL.GetTPIKOptions and GCAL:GetTPIKOptions(animName) or nil
+    end
+
+    local function GetTPIKSequenceName(animName)
+        local options = GetTPIKOptionsForAnim(animName)
+        if not options then return nil end
+
+        return options.sequence or options.anim or options.animation
+    end
+
+    local function ResolveTPIKSequence(track, animName, anim)
+        local sequenceName = GetTPIKSequenceName(animName)
+        sequenceName = sequenceName and tostring(sequenceName) or ""
+        if sequenceName == "" then return track.seqID, track.sequenceName end
+
+        local tpikAnim = table.Copy(anim)
+        tpikAnim.sequence = sequenceName
+        return ResolveSequence(track, sequenceName, tpikAnim)
+    end
+
     local function FindLegacySurrogateAnim(name, currentAnim)
         local target = GCAL_NormalizeLegacyCompatName(name)
         if target == "" then return nil end
@@ -711,6 +744,8 @@ if CLIENT then
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
             thirdperson = GCAL.InternalThirdPersonEnabled and anim.thirdperson ~= false,
+            tpikOptions = GetTPIKOptionsForAnim(name),
+            tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
             legacyStarted = false,
             poseOnlyLegacy = false
@@ -804,13 +839,31 @@ if CLIENT then
             end
         end
 
+        track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, name, anim)
+        if track.tpikSeqID == -1 then
+            GCAL_Log("TPIK sequence not found, falling back to firstperson sequence for:", name)
+            track.tpikSeqID = track.seqID
+            track.tpikSequenceName = track.sequenceName
+        end
+
         if track.thirdperson then
+            if track.tpikSeqID ~= track.seqID or track.tpikSequenceRequested then
+                track.tpikModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
+                if IsValid(track.tpikModel) then
+                    track.tpikModel:SetNoDraw(true)
+                    track.tpikModel:ResetSequenceInfo()
+                    track.tpikModel:SetPlaybackRate(1)
+                    track.tpikModel:ResetSequence(track.tpikSeqID)
+                    track.tpikModel:SetCycle(track.cycle)
+                end
+            end
+
             track.thirdpersonModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
             if IsValid(track.thirdpersonModel) then
                 track.thirdpersonModel:SetNoDraw(true)
                 track.thirdpersonModel:ResetSequenceInfo()
                 track.thirdpersonModel:SetPlaybackRate(1)
-                track.thirdpersonModel:ResetSequence(track.seqID)
+                track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
             end
         end
         
@@ -836,6 +889,7 @@ if CLIENT then
             GCAL_Log("Stopping track:", trackID)
             if IsValid(track.model) then track.model:Remove() end
             if IsValid(track.camModel) then track.camModel:Remove() end
+            if IsValid(track.tpikModel) then track.tpikModel:Remove() end
             if IsValid(track.thirdpersonModel) then track.thirdpersonModel:Remove() end
             if IsValid(track.legModel) then track.legModel:Remove() end
             if trackID == "legacy_left_arm" then
@@ -888,7 +942,11 @@ if CLIENT then
 
         track.model:ResetSequence(sequence)
         if IsValid(track.camModel) then track.camModel:ResetSequence(sequence) end
-        if IsValid(track.thirdpersonModel) then track.thirdpersonModel:ResetSequence(sequence) end
+        if IsValid(track.tpikModel) and track.tpikSeqID and track.tpikSeqID ~= -1 then
+            track.tpikModel:ResetSequence(track.tpikSeqID)
+        end
+        local thirdPersonSequence = track.tpikSequenceRequested and track.tpikSeqID or sequence
+        if IsValid(track.thirdpersonModel) then track.thirdpersonModel:ResetSequence(thirdPersonSequence) end
         track.curSegment = sequence
         track.cycle = 0
         track.segmentFinished = false
@@ -1068,6 +1126,10 @@ if CLIENT then
                 track.camModel:SetCycle(track.cycle)
                 track.camModel:InvalidateBoneCache()
             end
+            if IsValid(track.tpikModel) then
+                track.tpikModel:SetCycle(track.cycle)
+                track.tpikModel:InvalidateBoneCache()
+            end
             if IsValid(track.thirdpersonModel) then
                 track.thirdpersonModel:SetCycle(track.cycle)
                 track.thirdpersonModel:InvalidateBoneCache()
@@ -1155,8 +1217,10 @@ if CLIENT then
     end
 
     local function PlaceTPIKTrackModel(track, pos, ang)
-        track.model:SetAngles(ang)
-        track.model:SetPos(pos)
+        local sourceModel = IsValid(track.tpikModel) and track.tpikModel or track.model
+        if not IsValid(sourceModel) then return end
+        sourceModel:SetAngles(ang)
+        sourceModel:SetPos(pos)
     end
 
     local function DrawGShaderFriendlyModel(model, flags)

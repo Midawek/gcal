@@ -93,13 +93,6 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
-| `thirdperson_model`  | bool         | Draws prop geometry from the animation's registered `model` in thirdperson. Defaults to true; set false for arm-only animations.                       |
-| `thirdperson_hide_materials` | string/table | Additional material-name fragments to hide on the thirdperson model clone.                                                                  |
-| `thirdperson_keep_materials` | string/table | Material-name fragments that must remain visible even if they match an automatic arm-material rule.                                         |
-| `thirdperson_target_radius` | number | Optional thirdperson hand-goal clamp radius around the torso. Defaults to `38`; set `0` to disable. |
-| `thirdperson_pole_source` | number | Optional `0..1` weight for how much the source animation elbow controls the thirdperson elbow pole. Defaults to `0.35`. |
-| `thirdperson_pole_native` | number | Optional `0..1` weight for how much the player model's native forearm controls the thirdperson elbow pole. Defaults to `0.35`. |
-| `thirdperson_smoothing` | number | Optional shoulder-local TPIK target smoothing speed. Defaults to `18`; set `0` to disable. |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
@@ -286,6 +279,27 @@ GCAL:RegisterSecondHandAnim("radio_press", {
 ```
 
 GCAL uses one TPIK path for thirdperson. The animation model supplies shoulder, elbow, and hand goals; GCAL solves the player model's upper arm and forearm using the player's own limb lengths, applies the animated hand orientation, and carries helper bones and fingers through the solved hierarchy. A separate clone of the animation's registered model renders addon-owned props such as spray cans or tablets; obvious viewmodel arm materials are hidden automatically. Set `thirdperson = false` for animations that should remain firstperson-only.
+
+TPIK-specific per-animation settings live in `GCAL.TPIKOptions`, not the main `RegisterAnim` table:
+
+```lua
+GCAL:RegisterTPIKOptions("radio_hold", {
+    sequence = "radio_hold_thirdperson",
+    model = true,
+    model_bone = "ValveBiped.Bip01_L_Hand",
+    model_max_distance = 32,
+    hide_materials = { "extra_sleeve" },
+    keep_materials = { "tablet_screen" },
+    target_radius = 38,
+    pole_source = 0.35,
+    pole_native = 0.35,
+    smoothing = 18
+})
+```
+
+You can also assign directly with `GCAL.TPIKOptions.radio_hold = { ... }`. Use `sequence` when the firstperson sequence is not suitable for thirdperson posing. GCAL keeps the normal `model`/`camModel` on the firstperson sequence and creates a separate hidden TPIK source model on the requested sequence. The thirdperson prop clone follows the TPIK sequence too, so addon-owned props stay matched to the thirdperson arm pose.
+
+`model = false` disables the thirdperson prop clone. `model_bone` limits prop-distance validation to one source-model bone. `model_max_distance` controls how far transformed model hitboxes/bones may drift from the solved hand before the prop is hidden; the default is `32`, and `0` disables the guard. `hide_materials` and `keep_materials` refine automatic c-arm/glove material suppression. `target_radius`, `pole_source`, `pole_native`, and `smoothing` tune the TPIK solver; their defaults are `38`, `0.35`, `0.35`, and `18`.
 
 Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, ARC9 weapons without native TPIK use `arc9_no_tpik`, and other weapon bases use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. The `arc9_no_tpik` method updates track timing but intentionally avoids player-bone and prop-clone overrides to preserve ARC9/GShaders rendering when ARC9 has no native TPIK stage.
 
