@@ -974,13 +974,13 @@ function GCAL.Menu.Refresh()
     conflictPopupButton:SetTooltip("Toggle the startup conflict warning popup. Console: gcal_conflict_popup 0/1.")
 
     if GCAL.InternalThirdPersonEnabled then
-        local thirdPersonButton = MakeButton(panel.ActionsScroll, ThirdPersonEnabled() and "Thirdperson support: on" or "Thirdperson support: off", colAccent, function()
+        local thirdPersonButton = MakeButton(panel.ActionsScroll, ThirdPersonEnabled() and "TPIK support: on" or "TPIK support: off", colAccent, function()
             RunConsoleCommand("gcal_thirdperson", ThirdPersonEnabled() and "0" or "1")
             timer.Simple(0, GCAL.Menu.Refresh)
         end)
         thirdPersonButton:Dock(TOP)
         thirdPersonButton:DockMargin(0, 0, 0, 7)
-        thirdPersonButton:SetTooltip("Applies active GCAL arm tracks to the local player model in thirdperson.")
+        thirdPersonButton:SetTooltip("Applies active GCAL arm tracks to the local player model in thirdperson. This is still in beta and may not work as expected.")
     end
 
     local stopButton = MakeButton(panel.ActionsScroll, "Stop all animations", colBad, function()
