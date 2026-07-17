@@ -360,6 +360,10 @@ function GCAL:PrepareAnimData(data, hand)
     data.source_bones = data.source_bones or (data.source_hand and self:GetHandBones(data.source_hand)) or data.bones
     data.group_name = data.track or data.track_id or data.group_name or self:GetHandTrack(hand)
     data.block_code = data.block_code ~= nil and tobool(data.block_code) or false
+    -- Cambone toggle (per-animation). nil means default-on (use global convar).
+    if data.cambone ~= nil then
+        data.cambone = tobool(data.cambone)
+    end
 
     return data
 end
@@ -782,7 +786,8 @@ if CLIENT then
             cycle = anim.startcycle or 0,
             lerpVal = 1, -- Matches VMatrixlerp (1 = Weapon, 0 = Animation)
             model = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH),
-            camModel = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH),
+            camboneEnabled = (anim.cambone == nil) or tobool(anim.cambone),
+            camModel = nil,
             speed = anim.speed or 1,
             lerpSpeedIn = anim.lerp_speed_in or 1,
             lerpSpeedOut = anim.lerp_speed_out or 1,
@@ -828,6 +833,9 @@ if CLIENT then
         end
         
         track.model:SetNoDraw(true)
+        if track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
+            track.camModel = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH)
+        end
         if IsValid(track.camModel) then
             track.camModel:SetNoDraw(true)
             -- VManip places VMCam at origin with zero angles so the attachment
@@ -845,7 +853,10 @@ if CLIENT then
                 local surrogate = FindLegacySurrogateAnim(name, anim)
                 if surrogate then
                     local surrogateModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
-                    local surrogateCamModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
+                    local surrogateCamModel = nil
+                    if track.camboneEnabled and GCAL.CamBone:GetBool() then
+                        surrogateCamModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
+                    end
 
                     if IsValid(surrogateModel) then
                         surrogateModel:SetNoDraw(true)
