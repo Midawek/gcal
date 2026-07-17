@@ -983,6 +983,16 @@ function GCAL.Menu.Refresh()
         thirdPersonButton:SetTooltip("Applies active GCAL arm tracks to the local player model in thirdperson. This is still in beta and may not work as expected.")
     end
 
+    local camboneConVar = GCAL.CamBone or GetConVar("gcal_cambone")
+    local camboneEnabled = camboneConVar ~= nil and camboneConVar:GetBool() or false
+    local camboneButton = MakeButton(panel.ActionsScroll, camboneEnabled and "Cambone enabled: on" or "Cambone enabled: off", colAccent, function()
+        RunConsoleCommand("gcal_cambone", camboneEnabled and "0" or "1")
+        timer.Simple(0, GCAL.Menu.Refresh)
+    end)
+    camboneButton:Dock(TOP)
+    camboneButton:DockMargin(0, 0, 0, 7)
+    camboneButton:SetTooltip("Lets animation attachments drive the first-person view angles (VManip-style camera bone). Console: gcal_cambone 0/1.")
+
     local stopButton = MakeButton(panel.ActionsScroll, "Stop all animations", colBad, function()
         StopAllTracks()
         GCAL.Menu.Refresh()

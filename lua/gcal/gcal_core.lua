@@ -7,6 +7,8 @@ GCAL.ActiveTracks = GCAL.ActiveTracks or {}
 GCAL.ImportedFiles = GCAL.ImportedFiles or {}
 GCAL.QueuedAnims = GCAL.QueuedAnims or {}
 GCAL.TPIKOptions = GCAL.TPIKOptions or {}
+GCAL.CamBoneHandlers = GCAL.CamBoneHandlers or {}
+GCAL.CamBoneHandlerOrder = GCAL.CamBoneHandlerOrder or {}
 
 -- Define Groups Early
 GCAL.GROUPS = {
@@ -59,6 +61,7 @@ if CLIENT then
     GCAL.TPIKPoleSourceAdd = CreateClientConVar("gcal_tpik_pole_source_add", "0", true, false, "Global GCAL thirdperson TPIK source pole blend adjustment.")
     GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false, "Global GCAL thirdperson TPIK native pole blend adjustment.")
     GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false, "Global GCAL thirdperson TPIK smoothing adjustment.")
+    GCAL.CamBone = CreateClientConVar("gcal_cambone", "1", true, false, "Enable GCAL camera bone (view angle driving from animation attachments) for all tracks.")
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
@@ -278,6 +281,73 @@ end
 function GCAL:GetTPIKOptions(name)
     return self.TPIKOptions and self.TPIKOptions[tostring(name or "")] or nil
 end
+
+-- Cambone (camera bone) handler API.
+-- A handler is called once per CalcView for each legacy_left_arm track that has an attachment.
+-- It receives (id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
+-- and must return (origin, angles, fov). Handlers run in priority order; later handlers receive
+-- the output of earlier ones. The default handler ("vmanip") replicates original VManip behaviour.
+
+local default_properang = Angle(-79.75, 0, -90)
+local default_intensity = { 1, 1, 1 }
+
+local function DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+    if not attachment or not attachment.Ang then return origin, angles, fov end
+    local intensity = camAngInt or default_intensity
+    -- VManip applies the full attachment delta scaled by intensity, no lerp fading
+    local camang = attachment.Ang - (camAng or default_properang)
+    angles = Angle(
+        angles.p + camang.p * (intensity[1] or 1),
+        angles.y + camang.y * (intensity[2] or 1),
+        angles.r + camang.r * (intensity[3] or 1)
+    )
+    return origin, angles, fov
+end
+
+function GCAL:RegisterCamBoneHandler(id, priority, fn)
+    if not id or not isfunction(fn) then return false end
+    priority = tonumber(priority) or 0
+    self.CamBoneHandlers[id] = { id = id, priority = priority, fn = fn }
+    -- Rebuild ordered list
+    local order = {}
+    for _, handler in pairs(self.CamBoneHandlers) do order[#order + 1] = handler end
+    table.sort(order, function(a, b) return a.priority < b.priority end)
+    self.CamBoneHandlerOrder = order
+    return true
+end
+
+function GCAL:RemoveCamBoneHandler(id)
+    if not id or not self.CamBoneHandlers[id] then return false end
+    self.CamBoneHandlers[id] = nil
+    local order = {}
+    for _, handler in pairs(self.CamBoneHandlers) do order[#order + 1] = handler end
+    table.sort(order, function(a, b) return a.priority < b.priority end)
+    self.CamBoneHandlerOrder = order
+    return true
+end
+
+-- Compute final view by running all registered cambone handlers in priority order.
+function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
+    if not track then return origin, angles, fov end
+    local attachment = track.attachment
+    if not attachment or not attachment.Ang then return origin, angles, fov end
+    local camAng = track.camAng or default_properang
+    local camAngInt = track.camAngInt or default_intensity
+    local lerpVal = track.lerpVal or 1
+    local handlers = self.CamBoneHandlerOrder
+    if #handlers == 0 then
+        return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+    end
+    for _, handler in ipairs(handlers) do
+        origin, angles, fov = handler.fn(handler.id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
+    end
+    return origin, angles, fov
+end
+
+-- Register the default VManip-compatible cambone handler at priority 0.
+GCAL:RegisterCamBoneHandler("vmanip", 0, function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+    return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+end)
 
 function GCAL:PrepareAnimData(data, hand)
     if not data then return data end
@@ -760,6 +830,11 @@ if CLIENT then
         track.model:SetNoDraw(true)
         if IsValid(track.camModel) then
             track.camModel:SetNoDraw(true)
+            -- VManip places VMCam at origin with zero angles so the attachment
+            -- angle is read in the model's local (rest-pose) space. CalcView then
+            -- subtracts the reference angle (properang) to get the animated delta.
+            track.camModel:SetPos(vector_origin)
+            track.camModel:SetAngles(angle_zero)
         end
 
         local sequenceList = track.model.GetSequenceList and (track.model:GetSequenceList() or {}) or {}
@@ -777,6 +852,8 @@ if CLIENT then
                     end
                     if IsValid(surrogateCamModel) then
                         surrogateCamModel:SetNoDraw(true)
+                        surrogateCamModel:SetPos(vector_origin)
+                        surrogateCamModel:SetAngles(angle_zero)
                     end
 
                     if IsValid(surrogateModel) then
@@ -1968,15 +2045,19 @@ if CLIENT then
     end, nil, "Stop one GCAL track, or every active track when no track is provided. Usage: gcal_stop [track]")
 
     hook.Add("NeedsDepthPass", "GCAL_VManipCamAttachment", function()
-        local track = GCAL.ActiveTracks["legacy_left_arm"]
-        if not track then return end
+        if not GCAL.CamBone:GetBool() then return end
         local ply = LocalPlayer()
-        if not IsValid(ply) or not ply:Alive() then
-            GCAL:StopTrack("legacy_left_arm")
-            return
-        end
+        if not IsValid(ply) or not ply:Alive() then return end
 
-        if IsValid(track.camModel) then
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if not IsValid(track.camModel) then continue end
+
+            if trackID == "legacy_left_arm" and not ply:Alive() then
+                GCAL:StopTrack(trackID)
+                continue
+            end
+
             track.camModel:SetupBones()
             local attachments = track.camModel:GetAttachments()
             if #attachments > 0 then
@@ -1985,26 +2066,23 @@ if CLIENT then
         end
     end)
 
-    hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
+hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if self == true then return end
-        local track = GCAL.ActiveTracks["legacy_left_arm"]
-        local viewChanged = false
+        if not GCAL.CamBone:GetBool() then return end
+        if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
 
-        if track and track.attachment and ply:GetViewEntity() == ply and not ply:ShouldDrawLocalPlayer() then
-            local camang = track.attachment.Ang - (track.camAng or properang)
-            angles.x = angles.x + camang.x * (track.camAngInt[1] or 1)
-            angles.y = angles.y + camang.y * (track.camAngInt[2] or 1)
-            angles.z = angles.z + camang.z * (track.camAngInt[3] or 1)
-            viewChanged = true
+        local newOrigin, newAngles, newFov = origin, angles, fov
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if not track.attachment then continue end
+            newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
         end
 
-        if viewChanged then
-            return {
-                origin = origin,
-                angles = angles,
-                fov = fov
-            }
-        end
+        return {
+            origin = newOrigin,
+            angles = newAngles,
+            fov = newFov
+        }
     end)
 
     hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)
