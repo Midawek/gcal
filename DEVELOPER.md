@@ -137,6 +137,7 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
+| `cambone`             | bool         | When `true`, drives the player's first-person view angles from this track's animation attachments (VManip-style camera bone). When `false`, disables cambone for this animation. When `nil` (default), follows the global `gcal_cambone` convar. See section 11. |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
@@ -380,7 +381,7 @@ GCAL:RegisterSecondHandAnim("radio_press", {
 })
 ```
 
-GCAL uses one TPIK path for thirdperson. The animation model supplies shoulder, elbow, and hand goals; GCAL solves the player model's upper arm and forearm using the player's own limb lengths, applies the animated hand orientation, and carries helper bones and fingers through the solved hierarchy. A separate clone of the animation's registered model renders addon-owned props such as spray cans or tablets; obvious viewmodel arm materials are hidden automatically. Set `thirdperson = false` for animations that should remain firstperson-only.
+GCAL's TPIK is a **direct bone copy** solver (ARC9-style): it reads each mapped bone's animated matrix from the source viewmodel, offsets the entire arm into player body-space using the upper arm (shoulder) as a reference, clamps the position to `Spine4 ± target_radius` to prevent stretching, blends the result with the player model's rest pose, and writes the final matrices to the player model. There is no IK solver and no anchor transform, so the system works with **any** armature — standard ValveBiped, QCI-included, or fully custom. A separate clone of the animation's registered model renders addon-owned props such as spray cans or tablets; obvious viewmodel arm materials are hidden automatically.
 
 TPIK-specific per-animation settings live in `GCAL.TPIKOptions`, not the main `RegisterAnim` table:
 
@@ -393,21 +394,19 @@ GCAL:RegisterTPIKOptions("radio_hold", {
     hide_materials = { "extra_sleeve" },
     keep_materials = { "tablet_screen" },
     target_radius = 38,
-    pole_source = 0.35,
-    pole_native = 0.35,
     smoothing = 18
 })
 ```
 
 You can also assign directly with `GCAL.TPIKOptions.radio_hold = { ... }`. Use `sequence` when the firstperson sequence is not suitable for thirdperson posing. GCAL keeps the normal `model`/`camModel` on the firstperson sequence and creates a separate hidden TPIK source model on the requested sequence. The thirdperson prop clone follows the TPIK sequence too, so addon-owned props stay matched to the thirdperson arm pose.
 
-`model = false` disables the thirdperson prop clone. `model_bone` limits prop-distance validation to one source-model bone. `model_max_distance` hides the prop only when the nearest transformed hitbox or bone is still too far from the solved hand; the default is `32`, and `0` disables the guard. `hide_materials` and `keep_materials` refine automatic c-arm/glove material suppression. `target_radius`, `pole_source`, `pole_native`, and `smoothing` tune the TPIK solver; their defaults are `38`, `0.35`, `0.35`, and `18`.
+`model = false` disables the thirdperson prop clone. `model_bone` limits prop-distance validation to one source-model bone. `model_max_distance` hides the prop only when the nearest transformed hitbox or bone is still too far from the solved hand; the default is `32`, and `0` disables the guard. `hide_materials` and `keep_materials` refine automatic c-arm/glove material suppression. `target_radius` (default `38`) is the spine-relative clamp radius and `smoothing` (default `18`) is the per-bone exponential smoothing speed. The legacy `pole_source` and `pole_native` options are no longer used (the IK solver was removed) — existing values are ignored.
 
 Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, ARC9 weapons without native TPIK use `arc9_no_tpik`, and other weapon bases use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. The `arc9_no_tpik` method updates track timing but intentionally avoids player-bone and prop-clone overrides to preserve ARC9/GShaders rendering when ARC9 has no native TPIK stage.
 
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
 
-The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*` and `gcal_anim_angle_*` affect normal firstperson placement. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` are applied after source-to-player retargeting, so they move only the final thirdperson TPIK pose. `gcal_tpik_target_radius_add`, `gcal_tpik_pole_source_add`, `gcal_tpik_pole_native_add`, and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values. GCAL no longer applies animation-specific FOV offsets.
+The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*` and `gcal_anim_angle_*` affect normal firstperson placement. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` are applied after the source-to-player offset and clamping, so they nudge the final thirdperson pose. `gcal_tpik_target_radius_add` and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values.
 
 ---
 
@@ -696,6 +695,105 @@ Use these console commands during development:
 - `gcal_debug_unhandled_error`: Throws a deliberate clientside GCAL error through the normal engine error pipeline. Add `conflict` to simulate engine attribution to a known conflict and test correlation output.
 - `gcal_show_now`: Opens and refreshes the current GCAL menu window immediately.
 - `gcal_rebuild_menu`: Removes and rebuilds the current GCAL menu window.
+- `gcal_cambone <0|1>`: Toggles the global camera bone (view-angle driving) feature. The menu also exposes this as a "Cambone enabled: on/off" button.
+
+---
+
+## 11. Camera Bone (Cambone)
+
+GCAL can drive the local player's first-person view angles from an animation's attachment, replicating the original VManip camera-bone feel. The feature is on by default and works for every registered animation that has an attachment on its model — no extra setup is required.
+
+### How It Works
+
+When a track is active and the player is in first person, GCAL reads the first attachment's world angle from a hidden clone of the gesture model (the `camModel`). Each frame, the difference between this animated angle and a reference angle (`Angle(-79.75, 0, -90)` by default) is computed, scaled per-axis by `cam_angint`, and added to the player's view angles. The result: as the gesture's camera bone swings, the player's view rotates to match.
+
+Animations can declare their own reference/intensity via the registration table:
+
+```lua
+GCAL:RegisterAnim("my_recoil", {
+    model = "myaddon/c_recoil.mdl",
+    cam_ang = Angle(-79.75, 0, -90), -- reference (rest) angle for the camera attachment
+    cam_angint = { 1, 1, 1 },        -- per-axis intensity multipliers (pitch, yaw, roll)
+    cambone = true                   -- explicitly enable cambone for this animation
+})
+```
+
+| Field        | Type          | Description                                                                                                                |
+| :----------- | :------------ | :------------------------------------------------------------------------------------------------------------------------ |
+| `cam_ang`    | Angle         | Reference (rest) angle of the camera attachment. Default is `Angle(-79.75, 0, -90)`.                                       |
+| `cam_angint` | table         | 3-component per-axis intensity multiplier `{ pitch, yaw, roll }`. Default is `{1, 1, 1}`.                                  |
+| `cambone`    | bool          | Per-animation toggle. `true` always enables cambone for this animation, `false` always disables it, `nil` follows the global convar. |
+
+### Per-Animation Toggle
+
+Set `cambone = false` in the registration table to disable cambone for a specific animation:
+
+```lua
+GCAL:RegisterSecondHandAnim("calm_ping", {
+    model = "myaddon/c_ping.mdl",
+    cambone = false                   -- never drive view angles from this animation
+})
+```
+
+When `cambone = true`, GCAL will create a `camModel` for the animation regardless of the global convar. When `cambone = nil` (not set), the animation follows `gcal_cambone`. When `cambone = false`, no `camModel` is created for the animation — saving the cost of an extra clientside model.
+
+### Global Toggle
+
+The global convar `gcal_cambone` (default `1`) controls cambone for all tracks whose registration does not explicitly set `cambone`. Disable it with:
+
+```
+gcal_cambone 0
+```
+
+The GCAL menu exposes a "Cambone enabled: on/off" button in the Actions section that toggles this convar.
+
+### Custom Cambone Handlers
+
+Addons can override or augment the default VManip-style behavior by registering their own cambone handler:
+
+```lua
+GCAL:RegisterCamBoneHandler("my_recoil_dampener", 10, function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
+    -- Dampen pitch, amplify yaw
+    local delta = attachment.Ang - camAng
+    angles = Angle(
+        angles.p + delta.p * 0.5 * camAngInt[1],
+        angles.y + delta.y * 2.0 * camAngInt[2],
+        angles.r + delta.r * 1.0 * camAngInt[3]
+    )
+    return origin, angles, fov
+end)
+```
+
+Handlers are called in **priority order** (lower first), and each handler receives the output of the previous one. The default `"vmanip"` handler is registered at priority 0 and replicates the original VManip formula. To replace it entirely, register a handler at priority 0 with the same id (it overrides the default) or call `GCAL:RemoveCamBoneHandler("vmanip")`.
+
+Handler function signature:
+
+```
+fn(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
+  -> origin, angles, fov
+```
+
+| Argument      | Description                                                                |
+| :------------ | :------------------------------------------------------------------------- |
+| `id`          | The handler's registered id string.                                        |
+| `track`       | The runtime track table (has `camModel`, `attachment`, `camAng`, `camAngInt`, `lerpVal`). |
+| `ply`         | The local player.                                                          |
+| `origin`      | Current view origin (usually unchanged).                                  |
+| `angles`      | Current view angles — modify and return these.                            |
+| `fov`         | Current field of view.                                                     |
+| `attachment`  | The animated attachment table with `.Pos` and `.Ang`. May be `nil`.        |
+| `camAng`      | The reference (rest) angle.                                                |
+| `camAngInt`   | The 3-element per-axis intensity table.                                    |
+| `lerpVal`     | The track's current lerp value (`1` = weapon pose, `0` = full animation). |
+| `handler`     | The handler's own registered table.                                       |
+
+API:
+
+| Function                             | Purpose                                                                    |
+| :----------------------------------- | :------------------------------------------------------------------------- |
+| `GCAL:RegisterCamBoneHandler(id, priority, fn)` | Registers a new handler with the given priority.                 |
+| `GCAL:RemoveCamBoneHandler(id)`      | Removes a handler by id.                                                  |
+| `GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)` | Internal: runs all handlers in order. Used by the `CalcView` hook. |
 
 ---
 
