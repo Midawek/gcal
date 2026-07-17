@@ -2,717 +2,416 @@ if not CLIENT then return end
 
 GCAL = GCAL or {}
 
+-- Simple TPIK: copies animated bone matrices from the source viewmodel onto the
+-- player model directly (ARC9-style). No IK solver, no anchor transforms.
+-- Works with any armature (standard ValveBiped, QCI-included, custom).
+
 function GCAL.InstallTPIK(deps)
     deps = deps or {}
-    local BoneLocalMatrix = deps.BoneLocalMatrix
-    local PlaceTrackModel = deps.PlaceTrackModel
-    local PlaceTPIKTrackModel = deps.PlaceTPIKTrackModel or PlaceTrackModel
+    local PlaceTPIKTrackModel = deps.PlaceTPIKTrackModel or deps.PlaceTrackModel
     local GetLegacyFlipState = deps.GetLegacyFlipState
     local GetTrackTargetBones = deps.GetTrackTargetBones
     local GetTrackModelScale = deps.GetTrackModelScale
 
-        local boneIndexCache = setmetatable({}, { __mode = "k" })
-        local childBoneCache = setmetatable({}, { __mode = "k" })
+    -- Bone lookup cache (keyed by entity, invalidated on model change)
+    local boneIndexCache = setmetatable({}, { __mode = "k" })
+    local childBoneCache = setmetatable({}, { __mode = "k" })
 
-        local function GetCachedBoneIndex(ent, boneName)
-            if not IsValid(ent) or not boneName then return nil end
+    local function GetBone(ent, name)
+        if not IsValid(ent) or not name then return nil end
+        local model = ent:GetModel() or ""
+        local cache = boneIndexCache[ent]
+        if not cache or cache.model ~= model then
+            cache = { model = model, bones = {} }
+            boneIndexCache[ent] = cache
+        end
+        local cached = cache.bones[name]
+        if cached ~= nil then return cached ~= false and cached or nil end
+        local idx = ent:LookupBone(name)
+        cache.bones[name] = idx or false
+        return idx
+    end
 
-            local model = ent:GetModel() or ""
-            local cache = boneIndexCache[ent]
-            if not cache or cache.model ~= model then
-                cache = { model = model, bones = {} }
-                boneIndexCache[ent] = cache
+    local function GetChildren(ent, bone)
+        if not IsValid(ent) or not bone or bone < 0 then return {} end
+        local model = ent:GetModel() or ""
+        local cache = childBoneCache[ent]
+        if not cache or cache.model ~= model then
+            cache = { model = model, children = {} }
+            childBoneCache[ent] = cache
+        end
+        local children = cache.children[bone]
+        if not children then
+            children = ent:GetChildBones(bone) or {}
+            cache.children[bone] = children
+        end
+        return children
+    end
+
+    local function GetSourceModel(track)
+        if track and IsValid(track.tpikModel) then return track.tpikModel end
+        return track and track.model or nil
+    end
+
+    local function GetOptions(track)
+        if track and istable(track.tpikOptions) then return track.tpikOptions end
+        if track and GCAL.GetTPIKOptions then return GCAL:GetTPIKOptions(track.name) end
+        return nil
+    end
+
+    local function Opt(track, key, ...)
+        local options = GetOptions(track)
+        if options and options[key] ~= nil then return options[key] end
+        local data = track and track.data or nil
+        for i = 1, select("#", ...) do
+            local fallback = select(i, ...)
+            if data and data[fallback] ~= nil then return data[fallback] end
+        end
+        return nil
+    end
+
+    local function OptAdd(track, key)
+        if not GCAL.GetTPIKOptionAdd then return 0 end
+        return GCAL:GetTPIKOptionAdd(track.name, key) or 0
+    end
+
+    -- Hidden material for the third-person model clone (arms/hands auto-hidden)
+    local hiddenMat = CreateMaterial("gcal_tpik_hidden", "UnlitGeneric", {
+        ["$basetexture"] = "color/white",
+        ["$translucent"] = "1",
+        ["$alpha"] = "0",
+        ["$vertexalpha"] = "1"
+    })
+    local hiddenMatName = hiddenMat:GetName()
+    local armTokens = {
+        "c_arm", "/arms", "_arms", "arm_", "forearm",
+        "/hands", "_hands", "hand_", "glove", "sleeve", "player_shared"
+    }
+
+    local function ConfigureCloneMaterials(track)
+        local model = track.thirdpersonModel
+        if not IsValid(model) or track.thirdpersonMaterialsConfigured then return end
+        track.thirdpersonMaterialsConfigured = true
+
+        local extraHide = Opt(track, "hide_materials", "thirdperson_hide_materials")
+        if isstring(extraHide) then extraHide = { extraHide } end
+        local keep = Opt(track, "keep_materials", "thirdperson_keep_materials")
+        if isstring(keep) then keep = { keep } end
+
+        local visible = 0
+        local autoHidden = {}
+        local materials = model:GetMaterials() or {}
+
+        for index, name in ipairs(materials) do
+            local lower = string.lower(name)
+            local hide = false
+            local byAuto = false
+            for _, token in ipairs(armTokens) do
+                if string.find(lower, token, 1, true) then hide = true; byAuto = true; break end
             end
-
-            local cached = cache.bones[boneName]
-            if cached ~= nil then return cached ~= false and cached or nil end
-
-            local bone = ent:LookupBone(boneName)
-            cache.bones[boneName] = bone ~= nil and bone or false
-            return bone
-        end
-
-        local function GetCachedChildBones(ent, bone)
-            if not IsValid(ent) or bone == nil or bone < 0 then return {} end
-
-            local model = ent:GetModel() or ""
-            local cache = childBoneCache[ent]
-            if not cache or cache.model ~= model then
-                cache = { model = model, children = {} }
-                childBoneCache[ent] = cache
+            for _, token in ipairs(extraHide or {}) do
+                if string.find(lower, string.lower(tostring(token)), 1, true) then hide = true; byAuto = false; break end
             end
-
-            local children = cache.children[bone]
-            if not children then
-                children = ent:GetChildBones(bone) or {}
-                cache.children[bone] = children
+            for _, token in ipairs(keep or {}) do
+                if string.find(lower, string.lower(tostring(token)), 1, true) then hide = false; byAuto = false; break end
             end
-
-            return children
-        end
-
-        local function GetTPIKSourceModel(track)
-            if track and IsValid(track.tpikModel) then return track.tpikModel end
-            return track and track.model or nil
-        end
-
-        local function GetTrackTPIKOptions(track)
-            if track and istable(track.tpikOptions) then return track.tpikOptions end
-            if track and GCAL.GetTPIKOptions then return GCAL:GetTPIKOptions(track.name) end
-            return nil
-        end
-
-        local function GetTPIKOption(track, key, ...)
-            local options = GetTrackTPIKOptions(track)
-            if options and options[key] ~= nil then return options[key] end
-
-            local data = track and track.data or nil
-            for i = 1, select("#", ...) do
-                local fallbackKey = select(i, ...)
-                if data and data[fallbackKey] ~= nil then return data[fallbackKey] end
-            end
-
-            return nil
-        end
-
-        local function BlendBoneMatrix(animated, base, blendToBase)
-            local matrix = Matrix(animated:ToTable())
-            matrix:SetTranslation(LerpVector(blendToBase, animated:GetTranslation(), base:GetTranslation()))
-            matrix:SetAngles(LerpAngle(blendToBase, animated:GetAngles(), base:GetAngles()))
-            return matrix
-        end
-
-        local function RotateVectorBetween(vector, fromDirection, toDirection)
-            local from = Vector(fromDirection.x, fromDirection.y, fromDirection.z)
-            local to = Vector(toDirection.x, toDirection.y, toDirection.z)
-            if from:LengthSqr() <= 0.0001 or to:LengthSqr() <= 0.0001 then return vector end
-            from:Normalize()
-            to:Normalize()
-
-            local dot = math.Clamp(from:Dot(to), -1, 1)
-            if dot > 0.9999 then return Vector(vector.x, vector.y, vector.z) end
-
-            local axis = from:Cross(to)
-            if axis:LengthSqr() <= 0.0001 then
-                axis = from:Cross(Vector(0, 0, 1))
-                if axis:LengthSqr() <= 0.0001 then
-                    axis = from:Cross(Vector(0, 1, 0))
-                end
-            end
-            axis:Normalize()
-
-            local angle = math.acos(dot)
-            local cosine = math.cos(angle)
-            local sine = math.sin(angle)
-            return vector * cosine
-                + axis:Cross(vector) * sine
-                + axis * axis:Dot(vector) * (1 - cosine)
-        end
-
-        local function AimBoneMatrix(base, baseChildPosition, origin, target)
-            local baseDirection = baseChildPosition - origin
-            local targetDirection = target - origin
-            local matrix = Matrix(base:ToTable())
-            matrix:SetTranslation(origin)
-            if baseDirection:LengthSqr() <= 0.0001 or targetDirection:LengthSqr() <= 0.0001 then return matrix end
-
-            local forward = RotateVectorBetween(base:GetForward(), baseDirection, targetDirection)
-            local up = RotateVectorBetween(base:GetUp(), baseDirection, targetDirection)
-            matrix:SetAngles(forward:AngleEx(up))
-            return matrix
-        end
-
-        local function SolveTwoBoneIK(shoulder, target, pole, upperLength, forearmLength)
-            local direction = target - shoulder
-            local distance = direction:Length()
-            if distance <= 0.0001 then return nil end
-            direction:Normalize()
-
-            local minimumReach = math.abs(upperLength - forearmLength) + 0.001
-            local maximumReach = math.max(upperLength + forearmLength - 0.001, minimumReach)
-            distance = math.Clamp(distance, minimumReach, maximumReach)
-            target = shoulder + direction * distance
-
-            local poleDirection = pole - shoulder
-            poleDirection = poleDirection - direction * poleDirection:Dot(direction)
-            if poleDirection:LengthSqr() <= 0.0001 then
-                poleDirection = direction:Cross(Vector(0, 0, 1))
-                if poleDirection:LengthSqr() <= 0.0001 then
-                    poleDirection = direction:Cross(Vector(0, 1, 0))
-                end
-            end
-            poleDirection:Normalize()
-
-            local along = (
-                upperLength * upperLength
-                - forearmLength * forearmLength
-                + distance * distance
-            ) / (2 * distance)
-            local height = math.sqrt(math.max(upperLength * upperLength - along * along, 0))
-            local elbow = shoulder + direction * along + poleDirection * height
-
-            return elbow, target
-        end
-
-        local function ClampVectorAround(origin, value, radius)
-            if not origin or not value or not radius or radius <= 0 then return value end
-
-            return Vector(
-                math.Clamp(value.x, origin.x - radius, origin.x + radius),
-                math.Clamp(value.y, origin.y - radius, origin.y + radius),
-                math.Clamp(value.z, origin.z - radius, origin.z + radius)
-            )
-        end
-
-        local function GetTorsoClampOrigin(ply, baseMatrices)
-            local spine = GetCachedBoneIndex(ply, "ValveBiped.Bip01_Spine4")
-            local matrix = spine and baseMatrices and baseMatrices[spine]
-            return matrix and matrix:GetTranslation() or nil
-        end
-
-        local function SmoothArmTargets(track, ply, side, anchor, goal, pole)
-            local speed = tonumber(GetTPIKOption(track, "smoothing", "thirdperson_smoothing"))
-            if speed == nil then speed = 18 end
-            if GCAL.GetTPIKOptionAdd then
-                speed = speed + GCAL:GetTPIKOptionAdd(track.name, "smoothing")
-            end
-            speed = math.Clamp(speed, 0, 60)
-            if speed <= 0 then
-                track.thirdpersonTPIKSmoothing = nil
-                return goal, pole
-            end
-
-            local anchorInverse = Matrix(anchor:ToTable())
-            anchorInverse:Invert()
-            local localGoal = anchorInverse * goal
-            local localPole = anchorInverse * pole
-            local model = IsValid(ply) and ply:GetModel() or ""
-            local cache = track.thirdpersonTPIKSmoothing
-            if not cache or cache.model ~= model then
-                cache = { model = model }
-                track.thirdpersonTPIKSmoothing = cache
-            end
-
-            local arm = cache[side]
-            if not arm then
-                arm = {
-                    goal = Vector(localGoal.x, localGoal.y, localGoal.z),
-                    pole = Vector(localPole.x, localPole.y, localPole.z)
-                }
-                cache[side] = arm
+            if hide then
+                model:SetSubMaterial(index - 1, hiddenMatName)
+                if byAuto then autoHidden[#autoHidden + 1] = index - 1 end
             else
-                local alpha = math.Clamp(1 - math.exp(-speed * RealFrameTime()), 0, 1)
-                arm.goal.x = arm.goal.x + (localGoal.x - arm.goal.x) * alpha
-                arm.goal.y = arm.goal.y + (localGoal.y - arm.goal.y) * alpha
-                arm.goal.z = arm.goal.z + (localGoal.z - arm.goal.z) * alpha
-                arm.pole.x = arm.pole.x + (localPole.x - arm.pole.x) * alpha
-                arm.pole.y = arm.pole.y + (localPole.y - arm.pole.y) * alpha
-                arm.pole.z = arm.pole.z + (localPole.z - arm.pole.z) * alpha
+                visible = visible + 1
             end
-
-            return anchor * arm.goal, anchor * arm.pole
         end
 
-        local function StabilizePole(ply, track, side, shoulder, goal, sourcePole, nativePole, renderAngles)
-            local direction = goal - shoulder
-            if direction:LengthSqr() <= 0.0001 then return sourcePole end
-            direction:Normalize()
+        -- If everything got hidden, restore auto-hidden ones so the clone isn't invisible
+        if #materials > 0 and visible == 0 and #autoHidden > 0 then
+            for _, idx in ipairs(autoHidden) do model:SetSubMaterial(idx) end
+            visible = #autoHidden
+            track.debugThirdPersonModel = "visible: material fallback"
+        end
+        track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visible > 0
+    end
 
-            renderAngles = renderAngles or (IsValid(ply) and ply.GetRenderAngles and ply:GetRenderAngles()) or Angle(0, 0, 0)
-            local sideSign = side == "L" and -1 or 1
-            local sidePole = shoulder
-                + renderAngles:Right() * (sideSign * 12)
-                - renderAngles:Up() * 6
-                + direction * 4
+    -- Render the third-person model clone (a visual copy of the source viewmodel,
+    -- placed on the player so attached props like weapon magazines show up in TP).
+    local function PrepareClone(track, handPos)
+        local model = track.thirdpersonModel
+        local source = GetSourceModel(track)
+        if not IsValid(model) or Opt(track, "model", "thirdperson_model") == false then return end
+        if not IsValid(source) then return end
 
-            local sourceWeight = tonumber(GetTPIKOption(track, "pole_source", "thirdperson_pole_source"))
-            if sourceWeight == nil then sourceWeight = 0.35 end
-            if GCAL.GetTPIKOptionAdd then
-                sourceWeight = sourceWeight + GCAL:GetTPIKOptionAdd(track.name, "pole_source")
+        track.thirdpersonModelReadyFrame = nil
+        track.debugThirdPersonModelDistance = nil
+
+        ConfigureCloneMaterials(track)
+        if not track.thirdpersonModelHasVisibleMaterials then return end
+
+        local maxDist = tonumber(Opt(track, "model_max_distance", "thirdperson_model_max_distance")) or 32
+        local explicitBoneName = Opt(track, "model_bone", "thirdperson_model_bone")
+        local explicitBone = isstring(explicitBoneName) and GetBone(source, explicitBoneName) or nil
+
+        local boneDist, hitboxDist
+        local function Consider(bone, pos, isHitbox)
+            if not handPos or not pos then return end
+            if explicitBone ~= nil and bone ~= explicitBone then return end
+            local d = pos:Distance(handPos)
+            if isHitbox then
+                hitboxDist = hitboxDist and math.min(hitboxDist, d) or d
+            else
+                boneDist = boneDist and math.min(boneDist, d) or d
             end
-            sourceWeight = math.Clamp(sourceWeight, 0, 1)
-
-            local nativeWeight = tonumber(GetTPIKOption(track, "pole_native", "thirdperson_pole_native"))
-            if nativeWeight == nil then nativeWeight = 0.35 end
-            if GCAL.GetTPIKOptionAdd then
-                nativeWeight = nativeWeight + GCAL:GetTPIKOptionAdd(track.name, "pole_native")
-            end
-            nativeWeight = math.Clamp(nativeWeight, 0, 1)
-
-            local pole = LerpVector(nativeWeight, sidePole, nativePole or sidePole)
-            pole = LerpVector(sourceWeight, pole, sourcePole or pole)
-
-            local poleDelta = pole - shoulder
-            local upward = poleDelta:Dot(renderAngles:Up())
-            if upward > 0 then
-                pole = pole - renderAngles:Up() * upward * 0.85
-            end
-
-            return pole
         end
 
-        local hiddenThirdPersonMaterial = CreateMaterial("gcal_thirdperson_hidden", "UnlitGeneric", {
-            ["$basetexture"] = "color/white",
-            ["$translucent"] = "1",
-            ["$alpha"] = "0",
-            ["$vertexalpha"] = "1"
-        })
-        local hiddenThirdPersonMaterialName = hiddenThirdPersonMaterial:GetName()
-        local thirdPersonArmMaterialTokens = {
-            "c_arm",
-            "/arms",
-            "_arms",
-            "arm_",
-            "forearm",
-            "/hands",
-            "_hands",
-            "hand_",
-            "glove",
-            "sleeve",
-            "player_shared"
-        }
-        local function ConfigureThirdPersonModelMaterials(track)
-            local model = track.thirdpersonModel
-            if not IsValid(model) or track.thirdpersonMaterialsConfigured then return end
-            track.thirdpersonMaterialsConfigured = true
+        model:SetPos(source:GetPos())
+        model:SetAngles(source:GetAngles())
+        model:SetModelScale(1)
+        model:SetSkin(source:GetSkin())
+        for _, bg in ipairs(source:GetBodyGroups() or {}) do
+            model:SetBodygroup(bg.id, source:GetBodygroup(bg.id))
+        end
+        model:SetCycle(track.cycle or 0)
+        model:SetupBones()
 
-            local extraHideTokens = GetTPIKOption(track, "hide_materials", "thirdperson_hide_materials")
-            if isstring(extraHideTokens) then extraHideTokens = { extraHideTokens } end
-
-            local keepTokens = GetTPIKOption(track, "keep_materials", "thirdperson_keep_materials")
-            if isstring(keepTokens) then keepTokens = { keepTokens } end
-
-            local visibleMaterialCount = 0
-            local autoHiddenMaterials = {}
-            local materials = model:GetMaterials() or {}
-            for index, materialName in ipairs(materials) do
-                local lowerName = string.lower(materialName)
-                local hide = false
-                local hiddenByAuto = false
-                for _, token in ipairs(thirdPersonArmMaterialTokens) do
-                    if string.find(lowerName, token, 1, true) then
-                        hide = true
-                        hiddenByAuto = true
-                        break
-                    end
-                end
-                for _, token in ipairs(extraHideTokens or {}) do
-                    if string.find(lowerName, string.lower(tostring(token)), 1, true) then
-                        hide = true
-                        hiddenByAuto = false
-                        break
-                    end
-                end
-                for _, token in ipairs(keepTokens or {}) do
-                    if string.find(lowerName, string.lower(tostring(token)), 1, true) then
-                        hide = false
-                        hiddenByAuto = false
-                        break
-                    end
-                end
-
-                if hide then
-                    model:SetSubMaterial(index - 1, hiddenThirdPersonMaterialName)
-                    if hiddenByAuto then
-                        autoHiddenMaterials[#autoHiddenMaterials + 1] = index - 1
-                    end
-                else
-                    visibleMaterialCount = visibleMaterialCount + 1
-                end
+        local copies = {}
+        for bone = 0, model:GetBoneCount() - 1 do
+            local src = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
+            if src then
+                copies[bone] = Matrix(src:ToTable())
+                model:SetBoneMatrix(bone, copies[bone])
+                model:SetBonePosition(bone, copies[bone]:GetTranslation(), copies[bone]:GetAngles())
+                Consider(bone, src:GetTranslation(), false)
             end
-
-            if #materials > 0 and visibleMaterialCount == 0 and #autoHiddenMaterials > 0 then
-                for _, materialIndex in ipairs(autoHiddenMaterials) do
-                    model:SetSubMaterial(materialIndex)
-                end
-                visibleMaterialCount = #autoHiddenMaterials
-                track.debugThirdPersonModel = "visible: material fallback"
-            end
-
-            track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visibleMaterialCount > 0
         end
 
-        local function PrepareThirdPersonModel(track, sourceToTarget, handPosition)
-            local model = track.thirdpersonModel
-            local sourceModel = GetTPIKSourceModel(track)
-            if not IsValid(model) or GetTPIKOption(track, "model", "thirdperson_model") == false then return end
-            if not IsValid(sourceModel) then return end
-            track.thirdpersonModelReadyFrame = nil
-            track.debugThirdPersonModelDistance = nil
-
-            ConfigureThirdPersonModelMaterials(track)
-            if not track.thirdpersonModelHasVisibleMaterials then return end
-
-            local maxDistance = tonumber(GetTPIKOption(track, "model_max_distance", "thirdperson_model_max_distance"))
-            if maxDistance == nil then maxDistance = 32 end
-            local explicitBoneName = GetTPIKOption(track, "model_bone", "thirdperson_model_bone")
-            local explicitBone = isstring(explicitBoneName)
-                and GetCachedBoneIndex(sourceModel, explicitBoneName)
-                or nil
-            local boneDistance
-            local hitboxDistance
-            local transformedMatrices = {}
-
-            local function ConsiderModelPoint(bone, position, useHitbox)
-                if not handPosition or not position then return end
-                if explicitBone ~= nil and bone ~= explicitBone then return end
-
-                local distance = position:Distance(handPosition)
-                if useHitbox then
-                    hitboxDistance = hitboxDistance and math.min(hitboxDistance, distance) or distance
-                else
-                    boneDistance = boneDistance and math.min(boneDistance, distance) or distance
+        if model.GetHitBoxCount and model.GetHitBoxBone and model.GetHitBoxBounds then
+            for hb = 0, (model:GetHitBoxCount(0) or 0) - 1 do
+                local bone = model:GetHitBoxBone(hb, 0)
+                local mat = bone and copies[bone]
+                if mat then
+                    local mins, maxs = model:GetHitBoxBounds(hb, 0)
+                    if mins and maxs then Consider(bone, mat * ((mins + maxs) * 0.5), true) end
                 end
             end
-
-            model:SetPos(sourceModel:GetPos())
-            model:SetAngles(sourceModel:GetAngles())
-            -- Source bones already contain any legacy mirror. Mirroring the visible
-            -- clone again moves separately weighted props around the model origin.
-            model:SetModelScale(1)
-            model:SetSkin(sourceModel:GetSkin())
-            for _, bodygroup in ipairs(sourceModel:GetBodyGroups() or {}) do
-                model:SetBodygroup(bodygroup.id, sourceModel:GetBodygroup(bodygroup.id))
-            end
-            model:SetCycle(track.cycle or 0)
-            model:SetupBones()
-
-            for bone = 0, model:GetBoneCount() - 1 do
-                local matrix = sourceModel:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
-                if matrix and sourceToTarget then
-                    local transformed = sourceToTarget * matrix
-                    transformedMatrices[bone] = transformed
-                    model:SetBoneMatrix(bone, transformed)
-                    model:SetBonePosition(bone, transformed:GetTranslation(), transformed:GetAngles())
-                    ConsiderModelPoint(bone, transformed:GetTranslation(), false)
-                end
-            end
-
-            if model.GetHitBoxCount and model.GetHitBoxBone and model.GetHitBoxBounds then
-                local hitboxCount = model:GetHitBoxCount(0) or 0
-                for hitbox = 0, hitboxCount - 1 do
-                    local bone = model:GetHitBoxBone(hitbox, 0)
-                    local matrix = bone and transformedMatrices[bone]
-                    if matrix then
-                        local mins, maxs = model:GetHitBoxBounds(hitbox, 0)
-                        if mins and maxs then
-                            ConsiderModelPoint(bone, matrix * ((mins + maxs) * 0.5), true)
-                        end
-                    end
-                end
-            end
-
-            if handPosition and maxDistance > 0 then
-                local modelDistance
-                if hitboxDistance or boneDistance then
-                    modelDistance = math.min(hitboxDistance or math.huge, boneDistance or math.huge)
-                end
-                if not modelDistance and sourceToTarget then
-                    modelDistance = (sourceToTarget * sourceModel:GetPos()):Distance(handPosition)
-                end
-
-                if modelDistance and modelDistance > maxDistance then
-                    track.debugThirdPersonModel = "hidden: too far"
-                    track.debugThirdPersonModelDistance = modelDistance
-                    return
-                end
-
-                track.debugThirdPersonModelDistance = modelDistance
-            end
-
-            track.thirdpersonModelReadyFrame = FrameNumber()
-            track.thirdpersonModelReadyTime = RealTime()
-            track.debugThirdPersonModel = model:GetModel()
         end
 
-        local function ApplyCachedThirdPersonBones(track, ply)
-            local matrices = track.thirdpersonBoneMatrices
-            if not matrices then return false end
-
-            for targetBone, matrix in pairs(matrices) do
-                ply:SetBoneMatrix(targetBone, matrix)
-                ply:SetBonePosition(targetBone, matrix:GetTranslation(), matrix:GetAngles())
-            end
-
-            return true
-        end
-
-        local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
-            local sourceModel = GetTPIKSourceModel(track)
-            if not IsValid(sourceModel) or not baseMatrices then return end
-            if track.thirdpersonSolveFrame == FrameNumber() then
-                ApplyCachedThirdPersonBones(track, ply)
+        if handPos and maxDist > 0 then
+            local dist = (hitboxDist or boneDist) and math.min(hitboxDist or math.huge, boneDist or math.huge)
+            if not dist then dist = source:GetPos():Distance(handPos) end
+            if dist and dist > maxDist then
+                track.debugThirdPersonModel = "hidden: too far"
+                track.debugThirdPersonModelDistance = dist
                 return
             end
+            track.debugThirdPersonModelDistance = dist
+        end
 
-            local flip = GetLegacyFlipState(weapon)
-            local targetBones = GetTrackTargetBones(track, weapon, flip)
-            local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
-            PlaceTPIKTrackModel(track, ply:GetPos(), renderAngles)
-            local adjustmentTransform = GCAL.GetTPIKAdjustmentTransform
-                and GCAL:GetTPIKAdjustmentTransform(track.name, ply:GetPos(), renderAngles)
-                or Matrix()
-            sourceModel:SetModelScale(GetTrackModelScale(track, weapon, flip))
-            sourceModel:SetupBones()
+        track.thirdpersonModelReadyFrame = FrameNumber()
+        track.thirdpersonModelReadyTime = RealTime()
+        track.debugThirdPersonModel = model:GetModel()
+    end
 
-            local blendToTarget = math.Clamp(
-                (track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp)(
-                    track.lerpVal or 1,
-                    0,
-                    1,
-                    track.lerpCurve or (track.data and track.data.lerp_curve) or 1
-                ),
-                0,
-                1
+    local function ApplyCached(track, ply)
+        local matrices = track.thirdpersonBoneMatrices
+        if not matrices then return false end
+        for bone, matrix in pairs(matrices) do
+            ply:SetBoneMatrix(bone, matrix)
+            ply:SetBonePosition(bone, matrix:GetTranslation(), matrix:GetAngles())
+        end
+        return true
+    end
+
+    -- Main TPIK solve: copy source model bones to player model with offset + clamping + smoothing + blend
+    local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
+        local source = GetSourceModel(track)
+        if not IsValid(source) or not baseMatrices then return end
+
+        -- Reuse cached solve if already done this frame
+        if track.thirdpersonSolveFrame == FrameNumber() then
+            ApplyCached(track, ply)
+            return
+        end
+
+        local flip = GetLegacyFlipState(weapon)
+        local targetBones = GetTrackTargetBones(track, weapon, flip)
+        local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
+
+        -- Place source model at eye position (viewmodel bones are camera-relative)
+        PlaceTPIKTrackModel(track, ply:EyePos(), renderAngles)
+        source:SetModelScale(GetTrackModelScale(track, weapon, flip))
+        source:SetupBones()
+
+        -- Blend factor: 0 = full animation, 1 = full rest pose
+        local blend = math.Clamp(
+            (track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp)(
+                track.lerpVal or 1, 0, 1,
+                track.lerpCurve or (track.data and track.data.lerp_curve) or 1
+            ),
+            0, 1
+        )
+
+        -- Spine position for clamping
+        local spineIdx = GetBone(ply, "ValveBiped.Bip01_Spine4")
+        local spinePos = nil
+        if spineIdx then
+            local m = baseMatrices[spineIdx]
+            if m then spinePos = m:GetTranslation() end
+        end
+
+        -- Compute world-space offset: aligns source upper arm to player's upper arm.
+        -- Without this, viewmodel bones (camera space) land at the player's feet.
+        local offset = Vector(0, 0, 0)
+        for _, side in ipairs({ "L", "R" }) do
+            local name = "ValveBiped.Bip01_" .. side .. "_UpperArm"
+            local srcIdx = GetBone(source, name)
+            local tgtIdx = GetBone(ply, name)
+            if srcIdx and srcIdx >= 0 and tgtIdx and tgtIdx >= 0 then
+                local srcM = source:GetBoneMatrix(srcIdx)
+                local tgtM = baseMatrices[tgtIdx]
+                if srcM and tgtM then
+                    offset = tgtM:GetTranslation() - srcM:GetTranslation()
+                    break
+                end
+            end
+        end
+
+        -- Options
+        local clampRadius = tonumber(Opt(track, "target_radius", "thirdperson_target_radius")) or 38
+        clampRadius = clampRadius + OptAdd(track, "target_radius")
+        local smoothing = tonumber(Opt(track, "smoothing", "thirdperson_smoothing")) or 18
+        smoothing = math.Clamp(smoothing + OptAdd(track, "smoothing"), 0, 60)
+
+        -- TPIK position/angle adjustments (from menu sliders + per-animation cookies).
+        -- Applied after clamping so the user can push the arm beyond the clamp range.
+        local tpikAdjustPos = Vector(0, 0, 0)
+        local tpikAdjustAng = Angle(0, 0, 0)
+        if GCAL.GetTPIKAdjustment then
+            local adj = GCAL:GetTPIKAdjustment(track.name)
+            if adj then
+                tpikAdjustPos = adj.pos or tpikAdjustPos
+                tpikAdjustAng = adj.ang or tpikAdjustAng
+            end
+        end
+        local tpikForward = renderAngles:Forward()
+        local tpikRight = renderAngles:Right()
+        local tpikUp = renderAngles:Up()
+        local tpikPosDelta = tpikForward * tpikAdjustPos.x + tpikRight * tpikAdjustPos.y + tpikUp * tpikAdjustPos.z
+
+        local finalMatrices = {}
+        local carried = {}
+        local boneCount = 0
+
+        -- Copy each mapped bone from source to player
+        for k, boneName in ipairs(track.bones) do
+            local srcBoneName = track.sourceBones and track.sourceBones[k] or boneName
+            local tgtBoneName = targetBones[k] or boneName
+            local tgtBone = GetBone(ply, tgtBoneName)
+            if not tgtBone or tgtBone < 0 then continue end
+
+            local srcBone = GetBone(source, srcBoneName)
+            local isHelper = string.EndsWith(tgtBoneName, "_Wrist") or string.EndsWith(tgtBoneName, "_Ulna")
+            if not srcBone or srcBone < 0 then continue end
+
+            local srcMatrix = source:GetBoneMatrix(srcBone)
+            local tgtMatrix = baseMatrices[tgtBone]
+            if not srcMatrix or not tgtMatrix then continue end
+
+            -- Position: offset from viewmodel space to player space, clamp, then apply user adjustment
+            local pos = srcMatrix:GetTranslation() + offset
+            if spinePos then
+                pos = Vector(
+                    math.Clamp(pos.x, spinePos.x - clampRadius, spinePos.x + clampRadius),
+                    math.Clamp(pos.y, spinePos.y - clampRadius, spinePos.y + clampRadius),
+                    math.Clamp(pos.z, spinePos.z - clampRadius, spinePos.z + clampRadius)
+                )
+            end
+            pos = pos + tpikPosDelta
+            local ang = Angle(
+                srcMatrix:GetAngles().p + tpikAdjustAng.p,
+                srcMatrix:GetAngles().y + tpikAdjustAng.y,
+                srcMatrix:GetAngles().r + tpikAdjustAng.r
             )
-            local mappings = {}
-            local mappingsByTarget = {}
 
-            for k, boneName in ipairs(track.bones) do
-                local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-                local targetBoneName = targetBones[k] or boneName
-                local targetBone = GetCachedBoneIndex(ply, targetBoneName)
-                if not targetBone or targetBone < 0 then continue end
-
-                local sourceBone = GetCachedBoneIndex(sourceModel, sourceBoneName)
-                local sourceWorld = sourceBone and sourceBone >= 0
-                    and sourceModel:GetBoneMatrix(sourceBone)
-                local targetWorld = baseMatrices[targetBone]
-                if not targetWorld then continue end
-
-                local isHelperBone = string.EndsWith(targetBoneName, "_Wrist")
-                    or string.EndsWith(targetBoneName, "_Ulna")
-                if not sourceWorld and not isHelperBone then continue end
-
-                local mapping = {
-                    name = targetBoneName,
-                    sourceBone = sourceBone,
-                    sourceWorld = sourceWorld,
-                    targetBone = targetBone,
-                    targetWorld = targetWorld
-                }
-
-                mappings[#mappings + 1] = mapping
-                mappingsByTarget[targetBone] = mapping
-            end
-
-            local finalMatrices = {}
-            local thirdPersonModelTransform
-            local thirdPersonModelHandPosition
-            local function SolveArm(side)
-                local upperName = "ValveBiped.Bip01_" .. side .. "_UpperArm"
-                local forearmName = "ValveBiped.Bip01_" .. side .. "_Forearm"
-                local handName = "ValveBiped.Bip01_" .. side .. "_Hand"
-                local upperBone = GetCachedBoneIndex(ply, upperName)
-                local forearmBone = GetCachedBoneIndex(ply, forearmName)
-                local handBone = GetCachedBoneIndex(ply, handName)
-                local upper = upperBone and mappingsByTarget[upperBone]
-                local forearm = forearmBone and mappingsByTarget[forearmBone]
-                local hand = handBone and mappingsByTarget[handBone]
-                if not upper or not forearm or not hand then return end
-
-                local sourceUpper = upper.sourceWorld
-                local sourceForearm = forearm.sourceWorld
-                local sourceHand = hand.sourceWorld
-                local targetUpper = upper.targetWorld
-                local targetForearm = forearm.targetWorld
-                local targetHand = hand.targetWorld
-
-                local sourceAnchor = sourceUpper
-                local targetAnchor = targetUpper
-                local sourceUpperParent = sourceModel:GetBoneParent(upper.sourceBone)
-                local targetUpperParent = ply:GetBoneParent(upperBone)
-                if sourceUpperParent and sourceUpperParent >= 0 then
-                    sourceAnchor = sourceModel:GetBoneMatrix(sourceUpperParent) or sourceAnchor
-                end
-                if targetUpperParent and targetUpperParent >= 0 then
-                    targetAnchor = baseMatrices[targetUpperParent] or targetAnchor
-                end
-
-                local sourceAnchorInverse = Matrix(sourceAnchor:ToTable())
-                sourceAnchorInverse:Invert()
-                local sourceToTarget = Matrix(targetAnchor:ToTable()) * sourceAnchorInverse
-                local shoulder = targetUpper:GetTranslation()
-                local upperLength = shoulder:Distance(targetForearm:GetTranslation())
-                local forearmLength = targetForearm:GetTranslation():Distance(targetHand:GetTranslation())
-                local sourceLength = sourceUpper:GetTranslation():Distance(sourceForearm:GetTranslation())
-                    + sourceForearm:GetTranslation():Distance(sourceHand:GetTranslation())
-                if upperLength <= 0.001 or forearmLength <= 0.001 or sourceLength <= 0.001 then return end
-
-                local scale = (upperLength + forearmLength) / sourceLength
-                local mappedHand = sourceToTarget * sourceHand:GetTranslation()
-                local mappedElbow = sourceToTarget * sourceForearm:GetTranslation()
-                local goal = shoulder + (mappedHand - shoulder) * scale
-                local clampRadius = tonumber(GetTPIKOption(track, "target_radius", "thirdperson_target_radius"))
-                if clampRadius == nil then clampRadius = 38 end
-                if GCAL.GetTPIKOptionAdd then
-                    clampRadius = clampRadius + GCAL:GetTPIKOptionAdd(track.name, "target_radius")
-                end
-                goal = ClampVectorAround(GetTorsoClampOrigin(ply, baseMatrices), goal, clampRadius)
-
-                local sourcePole = shoulder + (mappedElbow - shoulder) * scale
-                local pole = StabilizePole(
-                    ply,
-                    track,
-                    side,
-                    shoulder,
-                    goal,
-                    sourcePole,
-                    targetForearm:GetTranslation(),
-                    renderAngles
-                )
-                goal = adjustmentTransform * goal
-                pole = adjustmentTransform * pole
-                local mappedHandMatrix = adjustmentTransform * sourceToTarget * sourceHand
-                goal, pole = SmoothArmTargets(
-                    track,
-                    ply,
-                    side,
-                    targetAnchor,
-                    goal,
-                    pole
-                )
-                local elbow, handGoal = SolveTwoBoneIK(
-                    shoulder,
-                    goal,
-                    pole,
-                    upperLength,
-                    forearmLength
-                )
-                if not elbow then return end
-
-                local solvedUpper = AimBoneMatrix(
-                    targetUpper,
-                    targetForearm:GetTranslation(),
-                    shoulder,
-                    elbow
-                )
-                local solvedForearm = AimBoneMatrix(
-                    targetForearm,
-                    targetHand:GetTranslation(),
-                    elbow,
-                    handGoal
-                )
-                local solvedHand = mappedHandMatrix
-                solvedHand:SetTranslation(handGoal)
-
-                finalMatrices[upperBone] = BlendBoneMatrix(solvedUpper, targetUpper, blendToTarget)
-                finalMatrices[forearmBone] = BlendBoneMatrix(solvedForearm, targetForearm, blendToTarget)
-                finalMatrices[handBone] = BlendBoneMatrix(solvedHand, targetHand, blendToTarget)
-
-                if not thirdPersonModelTransform then
-                    local sourceHandInverse = Matrix(sourceHand:ToTable())
-                    sourceHandInverse:Invert()
-                    thirdPersonModelTransform = Matrix(finalMatrices[handBone]:ToTable()) * sourceHandInverse
-                    thirdPersonModelHandPosition = finalMatrices[handBone]:GetTranslation()
-                end
-            end
-
-            SolveArm("L")
-            SolveArm("R")
-
-            local solving = {}
-            local function SolveChild(mapping)
-                if finalMatrices[mapping.targetBone] then return finalMatrices[mapping.targetBone] end
-                if solving[mapping.targetBone] then return mapping.targetWorld end
-                solving[mapping.targetBone] = true
-
-                local targetLocal, targetParent = BoneLocalMatrix(
-                    ply,
-                    mapping.targetBone,
-                    mapping.targetWorld,
-                    baseMatrices
-                )
-                local parentMapping = mappingsByTarget[targetParent]
-                local parentWorld
-                if parentMapping then
-                    parentWorld = SolveChild(parentMapping)
+            -- Optional per-bone smoothing
+            if smoothing > 0 then
+                track.thirdpersonTPIKSmoothing = track.thirdpersonTPIKSmoothing or {}
+                local cache = track.thirdpersonTPIKSmoothing
+                local entry = cache[tgtBone]
+                if not entry then
+                    entry = { pos = Vector(pos.x, pos.y, pos.z), ang = Angle(ang.p, ang.y, ang.r) }
+                    cache[tgtBone] = entry
                 else
-                    parentWorld = finalMatrices[targetParent] or baseMatrices[targetParent]
+                    local a = math.Clamp(1 - math.exp(-smoothing * RealFrameTime()), 0, 1)
+                    entry.pos.x = entry.pos.x + (pos.x - entry.pos.x) * a
+                    entry.pos.y = entry.pos.y + (pos.y - entry.pos.y) * a
+                    entry.pos.z = entry.pos.z + (pos.z - entry.pos.z) * a
+                    entry.ang.p = entry.ang.p + math.AngleDifference(ang.p, entry.ang.p) * a
+                    entry.ang.y = entry.ang.y + math.AngleDifference(ang.y, entry.ang.y) * a
+                    entry.ang.r = entry.ang.r + math.AngleDifference(ang.r, entry.ang.r) * a
+                    pos = entry.pos
+                    ang = entry.ang
                 end
-
-                if not parentWorld then
-                    solving[mapping.targetBone] = nil
-                    return mapping.targetWorld
-                end
-
-                local localMatrix = Matrix(targetLocal:ToTable())
-                local isHelperBone = string.EndsWith(mapping.name, "_Wrist")
-                    or string.EndsWith(mapping.name, "_Ulna")
-                if not isHelperBone and mapping.sourceBone and mapping.sourceWorld then
-                    local sourceLocal = BoneLocalMatrix(
-                        sourceModel,
-                        mapping.sourceBone,
-                        mapping.sourceWorld
-                    )
-                    localMatrix:SetAngles(sourceLocal:GetAngles())
-                end
-
-                local animated = parentWorld * localMatrix
-                finalMatrices[mapping.targetBone] = BlendBoneMatrix(
-                    animated,
-                    mapping.targetWorld,
-                    blendToTarget
-                )
-                solving[mapping.targetBone] = nil
-                return finalMatrices[mapping.targetBone]
             end
 
-            for _, mapping in ipairs(mappings) do
-                SolveChild(mapping)
-            end
-            if not thirdPersonModelTransform and mappings[1] and mappings[1].sourceWorld then
-                local sourceInverse = Matrix(mappings[1].sourceWorld:ToTable())
-                sourceInverse:Invert()
-                thirdPersonModelTransform = Matrix(mappings[1].targetWorld:ToTable()) * sourceInverse
-            end
+            -- Blend between animation pose and rest pose
+            local blendedPos = LerpVector(blend, pos, tgtMatrix:GetTranslation())
+            local blendedAng = LerpAngle(blend, ang, tgtMatrix:GetAngles())
 
-            local carried = {}
-            local function CarryArmChildren(parentBone)
-                if carried[parentBone] then return end
-                carried[parentBone] = true
+            local final = Matrix()
+            final:SetTranslation(blendedPos)
+            final:SetAngles(blendedAng)
+            finalMatrices[tgtBone] = final
+            boneCount = boneCount + 1
+        end
 
-                for _, childBone in ipairs(GetCachedChildBones(ply, parentBone)) do
-                    if not finalMatrices[childBone] then
-                        local baseParent = baseMatrices[parentBone]
-                        local baseChild = baseMatrices[childBone]
-                        local solvedParent = finalMatrices[parentBone]
-                        if baseParent and baseChild and solvedParent then
-                            local baseParentInverse = Matrix(baseParent:ToTable())
-                            baseParentInverse:Invert()
-                            finalMatrices[childBone] = solvedParent * baseParentInverse * baseChild
-                        end
-                    end
-
-                    if finalMatrices[childBone] then
-                        CarryArmChildren(childBone)
+        -- Carry unmapped children of arm bones (custom bones from other addons)
+        local function CarryChildren(parentBone)
+            if carried[parentBone] then return end
+            carried[parentBone] = true
+            for _, childBone in ipairs(GetChildren(ply, parentBone)) do
+                if not finalMatrices[childBone] then
+                    local baseParent = baseMatrices[parentBone]
+                    local baseChild = baseMatrices[childBone]
+                    local solvedParent = finalMatrices[parentBone]
+                    if baseParent and baseChild and solvedParent then
+                        local inv = Matrix(baseParent:ToTable())
+                        inv:Invert()
+                        finalMatrices[childBone] = solvedParent * inv * baseChild
                     end
                 end
+                if finalMatrices[childBone] then CarryChildren(childBone) end
             end
+        end
 
-            for _, side in ipairs({ "L", "R" }) do
-                local upperBone = GetCachedBoneIndex(ply, "ValveBiped.Bip01_" .. side .. "_UpperArm")
-                if upperBone and upperBone >= 0 and finalMatrices[upperBone] then
-                    CarryArmChildren(upperBone)
-                end
+        for _, side in ipairs({ "L", "R" }) do
+            local upper = GetBone(ply, "ValveBiped.Bip01_" .. side .. "_UpperArm")
+            if upper and upper >= 0 and finalMatrices[upper] then CarryChildren(upper) end
+        end
+
+        -- Apply and cache
+        track.thirdpersonBoneMatrices = finalMatrices
+        track.thirdpersonSolveFrame = FrameNumber()
+        ApplyCached(track, ply)
+
+        track.debugTargetEntity = tostring(ply)
+        track.debugBoneCount = boneCount
+        track.debugThirdPersonMode = "direct"
+        track.debugThirdPersonPole = "none"
+        track.debugThirdPersonRootBone = track.bones[1] or nil
+
+        -- Find hand position for the clone model
+        local handPos = nil
+        for _, side in ipairs({ "L", "R" }) do
+            local handBone = GetBone(ply, "ValveBiped.Bip01_" .. side .. "_Hand")
+            if handBone and finalMatrices[handBone] then
+                handPos = finalMatrices[handBone]:GetTranslation()
+                break
             end
-
-            track.thirdpersonBoneMatrices = finalMatrices
-            track.thirdpersonSolveFrame = FrameNumber()
-            ApplyCachedThirdPersonBones(track, ply)
-
-            track.debugTargetEntity = tostring(ply)
-            track.debugBoneCount = table.Count(finalMatrices)
-                track.debugThirdPersonRootBone = mappings[1] and mappings[1].targetBone or nil
-                track.debugThirdPersonMode = "tpik"
-                track.debugThirdPersonPole = "stabilized"
-                PrepareThirdPersonModel(track, thirdPersonModelTransform, thirdPersonModelHandPosition)
-            end
-
-
+        end
+        PrepareClone(track, handPos)
+    end
 
     return {
-        ApplyCachedThirdPersonBones = ApplyCachedThirdPersonBones,
+        ApplyCachedThirdPersonBones = ApplyCached,
         ApplyThirdPersonBones = ApplyThirdPersonBones
     }
 end
