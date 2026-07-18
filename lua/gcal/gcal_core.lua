@@ -2082,19 +2082,31 @@ hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
 
-        -- Only return a modified view when at least one track has an attachment,
-        -- otherwise we'd suppress every other CalcView hook (e.g. weapon-base
-        -- camera hooks like MWBase's) by returning an unchanged view table.
+        -- Only run when at least one track has an active attachment; otherwise
+        -- we'd suppress every other CalcView hook (e.g. MWBase's camera) by
+        -- returning an unchanged view table.
         local hasAttachment = false
-        local newOrigin, newAngles, newFov = origin, angles, fov
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if track.attachment then hasAttachment = true; break end
+        end
+        if not hasAttachment then return end
+
+        -- Re-run CalcView with a sentinel so other mods' CalcView hooks run first
+        -- and return their composed view. We then layer the cambone delta on top.
+        -- Hooks that respect the `self == true` sentinel (including GCAL itself
+        -- and the Chen-patched VManip) skip themselves; others run normally.
+        local composed = hook.Run("CalcView", ply, origin, angles, fov, true) or {}
+        local baseOrigin = composed.origin or origin
+        local baseAngles = composed.angles or angles
+        local baseFov = composed.fov or fov
+
+        local newOrigin, newAngles, newFov = baseOrigin, baseAngles, baseFov
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
             if not track.attachment then continue end
-            hasAttachment = true
             newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
         end
-
-        if not hasAttachment then return end
 
         return {
             origin = newOrigin,
