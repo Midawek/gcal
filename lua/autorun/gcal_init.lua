@@ -13,6 +13,8 @@
         Garry's Mod Compliant Armature Layer
     Loking at the code? You can find it on github!
     https://github.com/Midawek/gcal
+    Looking on how to make a gcal addon? Please use the wiki!
+    https://midawek.xyz/gcal/wiki
 ]]
 
 
