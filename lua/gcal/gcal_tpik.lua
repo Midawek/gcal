@@ -277,8 +277,12 @@ function GCAL.InstallTPIK(deps)
         local smoothing = tonumber(Opt(track, "smoothing", "thirdperson_smoothing")) or 18
         smoothing = math.Clamp(smoothing + OptAdd(track, "smoothing"), 0, 60)
 
-        -- Applied after clamping
-        -- so the user can push the arm beyond the clamp range.
+        -- Per-animation offsets from RegisterTPIKOptions
+        local animOffsetX = tonumber(Opt(track, "offset_x")) or 0
+        local animOffsetY = tonumber(Opt(track, "offset_y")) or 0
+        local animOffsetZ = tonumber(Opt(track, "offset_z")) or 0
+
+        -- Global adjustments from convars + per-animation cookies
         local tpikAdjustPos = Vector(0, 0, 0)
         local tpikAdjustAng = Angle(0, 0, 0)
         if GCAL.GetTPIKAdjustment then
@@ -291,7 +295,10 @@ function GCAL.InstallTPIK(deps)
         local tpikForward = renderAngles:Forward()
         local tpikRight = renderAngles:Right()
         local tpikUp = renderAngles:Up()
-        local tpikPosDelta = tpikForward * tpikAdjustPos.x + tpikRight * tpikAdjustPos.y + tpikUp * tpikAdjustPos.z
+        local totalOffsetX = tpikAdjustPos.x + animOffsetX
+        local totalOffsetY = tpikAdjustPos.y + animOffsetY
+        local totalOffsetZ = tpikAdjustPos.z + animOffsetZ
+        local tpikPosDelta = tpikForward * totalOffsetX + tpikRight * totalOffsetY + tpikUp * totalOffsetZ
 
         local finalMatrices = {}
         local carried = {}

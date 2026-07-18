@@ -166,8 +166,6 @@ if CLIENT then
                 self.TPIKAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_r")
             ),
             target_radius_add = self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add"),
-            pole_source_add = self.TPIKPoleSourceAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_source_add"),
-            pole_native_add = self.TPIKPoleNativeAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_native_add"),
             smoothing_add = self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
         }
     end
@@ -200,17 +198,12 @@ if CLIENT then
         if option == "target_radius" then
             return self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add")
         end
-        if option == "pole_source" then
-            return self.TPIKPoleSourceAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_source_add")
-        end
-        if option == "pole_native" then
-            return self.TPIKPoleNativeAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pole_native_add")
-        end
         if option == "smoothing" then
             return self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
         end
 
         return 0
+    end
     end
 end
 
@@ -271,10 +264,63 @@ function GCAL:GetHandTrack(hand)
     return "left_arm"
 end
 
+-- Valid TPIK option keys
+local TPIK_VALID_OPTIONS = {
+    sequence = "string",
+    anim = "string",
+    animation = "string",
+    model = "bool",
+    model_bone = "string",
+    model_max_distance = "number",
+    hide_materials = "table",
+    keep_materials = "table",
+    target_radius = "number",
+    smoothing = "number",
+    offset_x = "number",
+    offset_y = "number",
+    offset_z = "number",
+    -- Deprecated (IK solver removed, these are ignored)
+    pole_source = "number",
+    pole_native = "number",
+    thirdperson_model = "bool",
+    thirdperson_model_bone = "string",
+    thirdperson_model_max_distance = "number",
+    thirdperson_hide_materials = "table",
+    thirdperson_keep_materials = "table",
+    thirdperson_target_radius = "number",
+    thirdperson_smoothing = "number",
+}
+
+local TPIK_DEPRECATED_OPTIONS = {
+    pole_source = "IK solver removed, option ignored",
+    pole_native = "IK solver removed, option ignored",
+}
+
 function GCAL:RegisterTPIKOptions(name, options)
     if not name or not istable(options) then return false end
 
-    self.TPIKOptions[tostring(name)] = options
+    local clean = {}
+    for key, value in pairs(options) do
+        local expected = TPIK_VALID_OPTIONS[key]
+        if not expected then
+            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: unknown option '" .. tostring(key) .. "' for '" .. tostring(name) .. "'\n")
+            continue
+        end
+        if TPIK_DEPRECATED_OPTIONS[key] then
+            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: '" .. tostring(key) .. "' is deprecated (" .. TPIK_DEPRECATED_OPTIONS[key] .. ")\n")
+        end
+        if expected == "number" then
+            clean[key] = tonumber(value) or 0
+        elseif expected == "bool" then
+            clean[key] = tobool(value)
+        elseif expected == "string" then
+            clean[key] = tostring(value)
+        else
+            clean[key] = value
+        end
+    end
+
+    self.TPIKOptions[tostring(name)] = clean
     return true
 end
 
