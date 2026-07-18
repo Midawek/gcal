@@ -394,13 +394,36 @@ GCAL:RegisterTPIKOptions("radio_hold", {
     hide_materials = { "extra_sleeve" },
     keep_materials = { "tablet_screen" },
     target_radius = 38,
-    smoothing = 18
+    smoothing = 18,
+    offset_x = 0,   -- forward/back
+    offset_y = 0,   -- right/left
+    offset_z = 0,   -- up/down
 })
 ```
 
 You can also assign directly with `GCAL.TPIKOptions.radio_hold = { ... }`. Use `sequence` when the firstperson sequence is not suitable for thirdperson posing. GCAL keeps the normal `model`/`camModel` on the firstperson sequence and creates a separate hidden TPIK source model on the requested sequence. The thirdperson prop clone follows the TPIK sequence too, so addon-owned props stay matched to the thirdperson arm pose.
 
-`model = false` disables the thirdperson prop clone. `model_bone` limits prop-distance validation to one source-model bone. `model_max_distance` hides the prop only when the nearest transformed hitbox or bone is still too far from the solved hand; the default is `32`, and `0` disables the guard. `hide_materials` and `keep_materials` refine automatic c-arm/glove material suppression. `target_radius` (default `38`) is the spine-relative clamp radius and `smoothing` (default `18`) is the per-bone exponential smoothing speed. The legacy `pole_source` and `pole_native` options are no longer used (the IK solver was removed) — existing values are ignored.
+`RegisterTPIKOptions` validates option keys against a whitelist — unknown keys print a console warning. Deprecated keys (`pole_source`, `pole_native`) also warn. Option types are normalized (`number` via `tonumber`, `bool` via `tobool`, `string` via `tostring`).
+
+Valid TPIK option keys:
+
+| Key | Type | Default | Description |
+| :-- | :-- | :-- | :-- |
+| `sequence` | string | — | TPIK-specific sequence name (falls back to firstperson sequence). Aliases: `anim`, `animation`. |
+| `model` | bool | true | Enables the thirdperson prop clone. `false` disables it. |
+| `model_bone` | string | — | Limits prop-distance validation to one source-model bone. |
+| `model_max_distance` | string | 32 | Hides the prop if the nearest hitbox/bone is farther than this. `0` disables the check. |
+| `hide_materials` | table | — | Additional material name tokens to hide on the prop clone. |
+| `keep_materials` | table | — | Material name tokens to preserve (overrides auto-hide). |
+| `target_radius` | number | 38 | Spine-relative clamp radius for bone positions. Prevents stretching. |
+| `smoothing` | number | 18 | Per-bone exponential smoothing speed. `0` disables smoothing. |
+| `offset_x` | number | 0 | Forward/back position offset in render-angle space. |
+| `offset_y` | number | 0 | Right/left position offset. |
+| `offset_z` | number | 0 | Up/down position offset. |
+| `pole_source` | number | — | **Deprecated.** Ignored (IK solver removed). |
+| `pole_native` | number | — | **Deprecated.** Ignored (IK solver removed). |
+
+The per-animation `offset_x/y/z` values are added on top of the global convar adjustments (`gcal_tpik_offset_x/y/z`) and per-animation cookie adjustments. They are applied after clamping, so they can push the arm beyond the clamp range.
 
 Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, and all other weapons (including ARC9 weapons without native TPIK) use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. When ARC9's native TPIK is disabled, GCAL falls back to its own direct-bone-copy TPIK instead of disabling thirdperson entirely. This works because GCAL's TPIK is now a simple bone copy (ARC9-style) rather than the old IK solver that could interfere with ARC9's rendering.
 
@@ -666,7 +689,7 @@ If thirdperson looks wrong:
 
 - First verify firstperson works. TPIK depends on a valid source animation.
 - Add `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` if the firstperson sequence is not a good thirdperson pose.
-- Tune `target_radius`, `pole_source`, `pole_native`, and `smoothing` in `GCAL.TPIKOptions`.
+- Tune `target_radius`, `smoothing`, and `offset_x/y/z` in `GCAL.TPIKOptions`.
 - Use `model = false` to isolate arm solving from prop rendering.
 - Use `model_bone` and `model_max_distance` when addon props drift away from the solved hand.
 
