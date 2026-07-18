@@ -1696,21 +1696,6 @@ if CLIENT then
         UpdateTracksForFrame()
         if next(GCAL.ActiveTracks) == nil then return end
 
-        if method == "arc9_no_tpik" then
-            for id, track in pairs(GCAL.ActiveTracks) do
-                if id == "legs" or not track.thirdperson then continue end
-
-                track.thirdpersonSolveFrame = nil
-                track.thirdpersonBoneMatrices = nil
-                track.thirdpersonModelReadyFrame = nil
-                track.debugThirdPersonHost = method
-                track.debugThirdPersonMode = "disabled"
-                track.debugBoneCount = 0
-            end
-
-            return
-        end
-
         local needsSolve = false
         for id, track in pairs(GCAL.ActiveTracks) do
             if id ~= "legs"
