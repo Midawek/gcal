@@ -402,7 +402,7 @@ You can also assign directly with `GCAL.TPIKOptions.radio_hold = { ... }`. Use `
 
 `model = false` disables the thirdperson prop clone. `model_bone` limits prop-distance validation to one source-model bone. `model_max_distance` hides the prop only when the nearest transformed hitbox or bone is still too far from the solved hand; the default is `32`, and `0` disables the guard. `hide_materials` and `keep_materials` refine automatic c-arm/glove material suppression. `target_radius` (default `38`) is the spine-relative clamp radius and `smoothing` (default `18`) is the per-bone exponential smoothing speed. The legacy `pole_source` and `pole_native` options are no longer used (the IK solver was removed) — existing values are ignored.
 
-Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, ARC9 weapons without native TPIK use `arc9_no_tpik`, and other weapon bases use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. The `arc9_no_tpik` method updates track timing but intentionally avoids player-bone and prop-clone overrides to preserve ARC9/GShaders rendering when ARC9 has no native TPIK stage.
+Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, and all other weapons (including ARC9 weapons without native TPIK) use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. When ARC9's native TPIK is disabled, GCAL falls back to its own direct-bone-copy TPIK instead of disabling thirdperson entirely. This works because GCAL's TPIK is now a simple bone copy (ARC9-style) rather than the old IK solver that could interfere with ARC9's rendering.
 
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
 
@@ -454,7 +454,7 @@ Current built-in behavior:
 | :------- | :-------- | :----------------- | :---- |
 | `tfa` | `weapon.IsTFAWeapon` | Uses the owner's normal viewmodel. | Matches Chen's patch: no TFA-specific VM hook and no forced hands-first target. TFA still uses the shared `PreDrawPlayerHands` path for `UseHands` weapons, falls back to the player hands entity when the VM has no arm bones, and uses `TFA_PreReload` reload blocking. |
 | `arccw` | `weapon.ArcCW` | Uses the owner's normal viewmodel. | Matches Chen's patch: `UseHands` weapons render through `PreDrawPlayerHands`, skip the generic `PostDrawViewModel` pass, and keep VM-first arm targeting. Reload playback is blocked while ArcCW reports `reloading`. |
-| `arc9` | ARC9 markers or TPIK methods | Uses the owner's normal viewmodel. | Thirdperson uses explicit methods: `arc9_tpik` for ARC9's native post-solve hook, or `arc9_no_tpik` for ARC9 weapons with inactive/native-disabled TPIK. `arc9_no_tpik` does not alter the thirdperson player skeleton. |
+| `arc9` | ARC9 markers or TPIK methods | Uses the owner's normal viewmodel. | Thirdperson: `arc9_tpik` layers on top of ARC9's native post-solve hook when available; otherwise falls back to `normal` (GCAL's own direct-bone-copy TPIK). |
 | `mwbase` | valid `weapon.m_ViewModel` | Uses `weapon.m_ViewModel`. | Custom VM entity is used for arms and legs when present. |
 
 To add another special weapon base, register a strategy clientside:

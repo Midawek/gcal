@@ -493,7 +493,10 @@ if CLIENT then
                 and (not arc9TPIK or arc9TPIK:GetBool())
 
             if canUseARC9TPIK and not noTPIK then return "arc9_tpik" end
-            return "arc9_no_tpik"
+            -- Fall back to GCAL's own TPIK (normal method) instead of disabling entirely.
+            -- The old arc9_no_tpik path was needed when GCAL's IK solver could interfere
+            -- with ARC9's rendering, but the new direct-bone-copy approach is safe.
+            return "normal"
         end,
         prePlayAnim = function(_, weapon)
             if weapon.GetReloading and weapon:GetReloading() then return false end
