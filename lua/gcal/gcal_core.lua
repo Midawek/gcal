@@ -2082,12 +2082,19 @@ hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
 
+        -- Only return a modified view when at least one track has an attachment,
+        -- otherwise we'd suppress every other CalcView hook (e.g. weapon-base
+        -- camera hooks like MWBase's) by returning an unchanged view table.
+        local hasAttachment = false
         local newOrigin, newAngles, newFov = origin, angles, fov
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
             if not track.attachment then continue end
+            hasAttachment = true
             newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
         end
+
+        if not hasAttachment then return end
 
         return {
             origin = newOrigin,
