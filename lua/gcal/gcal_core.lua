@@ -282,11 +282,9 @@ function GCAL:GetTPIKOptions(name)
     return self.TPIKOptions and self.TPIKOptions[tostring(name or "")] or nil
 end
 
--- Cambone (camera bone) handler API.
--- A handler is called once per CalcView for each legacy_left_arm track that has an attachment.
--- It receives (id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
--- and must return (origin, angles, fov). Handlers run in priority order; later handlers receive
--- the output of earlier ones. The default handler ("vmanip") replicates original VManip behaviour.
+-- Cambone handler API. Handlers run in priority order; later ones receive
+-- earlier outputs. Signature: fn(id, track, ply, origin, angles, fov,
+-- attachment, camAng, camAngInt, lerpVal, handler) -> origin, angles, fov
 
 local default_properang = Angle(-79.75, 0, -90)
 local default_intensity = { 1, 1, 1 }
@@ -294,7 +292,7 @@ local default_intensity = { 1, 1, 1 }
 local function DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     if not attachment or not attachment.Ang then return origin, angles, fov end
     local intensity = camAngInt or default_intensity
-    -- VManip applies the full attachment delta scaled by intensity, no lerp fading
+    -- VManip-style: full attachment delta scaled by intensity
     local camang = attachment.Ang - (camAng or default_properang)
     angles = Angle(
         angles.p + camang.p * (intensity[1] or 1),
@@ -326,7 +324,7 @@ function GCAL:RemoveCamBoneHandler(id)
     return true
 end
 
--- Compute final view by running all registered cambone handlers in priority order.
+-- Runs all registered cambone handlers in priority order
 function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
     if not track then return origin, angles, fov end
     local attachment = track.attachment
@@ -344,7 +342,7 @@ function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
     return origin, angles, fov
 end
 
--- Register the default VManip-compatible cambone handler at priority 0.
+-- Default VManip-compatible cambone handler at priority 0
 GCAL:RegisterCamBoneHandler("vmanip", 0, function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
 end)
@@ -360,7 +358,7 @@ function GCAL:PrepareAnimData(data, hand)
     data.source_bones = data.source_bones or (data.source_hand and self:GetHandBones(data.source_hand)) or data.bones
     data.group_name = data.track or data.track_id or data.group_name or self:GetHandTrack(hand)
     data.block_code = data.block_code ~= nil and tobool(data.block_code) or false
-    -- Cambone toggle (per-animation). nil means default-on (use global convar).
+    -- Per-animation cambone toggle. nil = use global convar.
     if data.cambone ~= nil then
         data.cambone = tobool(data.cambone)
     end
@@ -838,9 +836,7 @@ if CLIENT then
         end
         if IsValid(track.camModel) then
             track.camModel:SetNoDraw(true)
-            -- VManip places VMCam at origin with zero angles so the attachment
-            -- angle is read in the model's local (rest-pose) space. CalcView then
-            -- subtracts the reference angle (properang) to get the animated delta.
+            -- VMcam at origin so attachment reads in model-local space
             track.camModel:SetPos(vector_origin)
             track.camModel:SetAngles(angle_zero)
         end
@@ -2067,9 +2063,7 @@ hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
 
-        -- Only run when at least one track has an active attachment; otherwise
-        -- we'd suppress every other CalcView hook (e.g. MWBase's camera) by
-        -- returning an unchanged view table.
+        -- Skip if no attachment to avoid suppressing other CalcView hooks
         local hasAttachment = false
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
@@ -2077,10 +2071,7 @@ hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         end
         if not hasAttachment then return end
 
-        -- Re-run CalcView with a sentinel so other mods' CalcView hooks run first
-        -- and return their composed view. We then layer the cambone delta on top.
-        -- Hooks that respect the `self == true` sentinel (including GCAL itself
-        -- and the Chen-patched VManip) skip themselves; others run normally.
+        -- Compose with other mods' CalcView first, then layer cambone on top
         local composed = hook.Run("CalcView", ply, origin, angles, fov, true) or {}
         local baseOrigin = composed.origin or origin
         local baseAngles = composed.angles or angles

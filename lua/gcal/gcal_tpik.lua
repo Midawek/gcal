@@ -2,9 +2,7 @@ if not CLIENT then return end
 
 GCAL = GCAL or {}
 
--- Simple TPIK: copies animated bone matrices from the source viewmodel onto the
--- player model directly (ARC9-style). No IK solver, no anchor transforms.
--- Works with any armature (standard ValveBiped, QCI-included, custom).
+-- Simple TPIK: direct bone copy (ARC9-style). No IK solver or anchor transforms.
 
 function GCAL.InstallTPIK(deps)
     deps = deps or {}
@@ -132,8 +130,7 @@ function GCAL.InstallTPIK(deps)
         track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visible > 0
     end
 
-    -- Render the third-person model clone (a visual copy of the source viewmodel,
-    -- placed on the player so attached props like weapon magazines show up in TP).
+    -- Third-person model clone: visual copy of the source viewmodel for props
     local function PrepareClone(track, handPos)
         local model = track.thirdpersonModel
         local source = GetSourceModel(track)
@@ -220,7 +217,7 @@ function GCAL.InstallTPIK(deps)
         return true
     end
 
-    -- Main TPIK solve: copy source model bones to player model with offset + clamping + smoothing + blend
+    -- Main TPIK solve
     local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
         local source = GetSourceModel(track)
         if not IsValid(source) or not baseMatrices then return end
@@ -257,8 +254,8 @@ function GCAL.InstallTPIK(deps)
             if m then spinePos = m:GetTranslation() end
         end
 
-        -- Compute world-space offset: aligns source upper arm to player's upper arm.
-        -- Without this, viewmodel bones (camera space) land at the player's feet.
+        -- Offset viewmodel bones (camera space) to player body space via shoulder
+        -- Without this, viewmodel bones land at the player's feet.
         local offset = Vector(0, 0, 0)
         for _, side in ipairs({ "L", "R" }) do
             local name = "ValveBiped.Bip01_" .. side .. "_UpperArm"
@@ -280,8 +277,8 @@ function GCAL.InstallTPIK(deps)
         local smoothing = tonumber(Opt(track, "smoothing", "thirdperson_smoothing")) or 18
         smoothing = math.Clamp(smoothing + OptAdd(track, "smoothing"), 0, 60)
 
-        -- TPIK position/angle adjustments (from menu sliders + per-animation cookies).
-        -- Applied after clamping so the user can push the arm beyond the clamp range.
+        -- Applied after clamping
+        -- so the user can push the arm beyond the clamp range.
         local tpikAdjustPos = Vector(0, 0, 0)
         local tpikAdjustAng = Angle(0, 0, 0)
         if GCAL.GetTPIKAdjustment then
@@ -315,7 +312,7 @@ function GCAL.InstallTPIK(deps)
             local tgtMatrix = baseMatrices[tgtBone]
             if not srcMatrix or not tgtMatrix then continue end
 
-            -- Position: offset from viewmodel space to player space, clamp, then apply user adjustment
+            -- Offset, clamp, then apply user adjustment
             local pos = srcMatrix:GetTranslation() + offset
             if spinePos then
                 pos = Vector(
@@ -363,7 +360,7 @@ function GCAL.InstallTPIK(deps)
             boneCount = boneCount + 1
         end
 
-        -- Carry unmapped children of arm bones (custom bones from other addons)
+        -- Carry unmapped children of arm bones
         local function CarryChildren(parentBone)
             if carried[parentBone] then return end
             carried[parentBone] = true
