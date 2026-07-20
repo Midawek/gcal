@@ -204,7 +204,6 @@ if CLIENT then
 
         return 0
     end
-    end
 end
 
 local function GCAL_NormalizeLegacyCompatName(value)
