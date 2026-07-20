@@ -703,7 +703,7 @@ Use these console commands during development:
 - `gcal_tpik_offset_x/y/z <value>`: Changes global thirdperson TPIK source placement without affecting firstperson placement.
 - `gcal_tpik_angle_p/y/r <value>`: Changes global thirdperson TPIK source angle offsets.
 - `gcal_tpik_target_radius_add <value>`: Adds to the thirdperson hand-goal clamp radius. Negative values tighten it; positive values loosen it.
-- `gcal_tpik_pole_source_add <value>` / `gcal_tpik_pole_native_add <value>`: Adds to the TPIK elbow-pole blend weights, clamped to `0..1` after registration defaults are applied.
+- `gcal_tpik_pole_source_add <value>` / `gcal_tpik_pole_native_add <value>`: No longer used (IK solver removed). The convars still exist for backward compat but have no effect.
 - `gcal_tpik_smoothing_add <value>`: Adds to the shoulder-local TPIK smoothing speed. The effective value is clamped to `0..60`.
 - `gcal_list_anims`: Lists every animation currently registered in GCAL.
 - `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
