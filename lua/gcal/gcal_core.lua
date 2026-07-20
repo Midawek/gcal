@@ -1478,7 +1478,7 @@ if CLIENT then
     end
 
     local posparentcache
-    local function ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext)
+    local function ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext, skipVMSetup)
         if not IsValid(track.model) or not IsValid(vm) then return end
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
 
@@ -1509,9 +1509,11 @@ if CLIENT then
             PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
         end
 
-        vm:SetupBones()
-        if IsValid(handsEnt) then
-            handsEnt:SetupBones()
+        if not skipVMSetup then
+            vm:SetupBones()
+            if IsValid(handsEnt) then
+                handsEnt:SetupBones()
+            end
         end
 
         track.model:SetupBones()
@@ -1566,7 +1568,7 @@ if CLIENT then
         track.debugBoneCount = boneCount
     end
 
-    local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext)
+    local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext, skipVMSetup)
         if not IsValid(vm) or not track.bones then return end
 
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
@@ -1576,9 +1578,11 @@ if CLIENT then
             return
         end
 
-        vm:SetupBones()
-        if IsValid(handsEnt) and handsEnt ~= vm then
-            handsEnt:SetupBones()
+        if not skipVMSetup then
+            vm:SetupBones()
+            if IsValid(handsEnt) and handsEnt ~= vm then
+                handsEnt:SetupBones()
+            end
         end
 
         local flip = GetLegacyFlipState(weapon)
@@ -1589,7 +1593,9 @@ if CLIENT then
         local targetBones = GetTrackTargetBones(track, weapon, flip)
         local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then return end
-        targetEnt:SetupBones()
+        if not skipVMSetup then
+            targetEnt:SetupBones()
+        end
         
         if track.data.legacy then
             PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
@@ -1701,20 +1707,24 @@ if CLIENT then
         local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
         vm = renderContext.vm
 
+        if IsValid(vm) then vm:SetupBones() end
+        if IsValid(handsEnt) and handsEnt ~= vm then handsEnt:SetupBones() end
+        local skipVMSetup = true
+
         for id, track in pairs(GCAL.ActiveTracks) do
             if id == "legacy_left_arm" and IsValid(ply) and not ply:Alive() then
                 GCAL:StopTrack(id)
                 continue
             end
 
-            if id == "legs" then 
-                continue 
+            if id == "legs" then
+                continue
             end
-            
+
             if id == "legacy_left_arm" then
-                ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext)
+                ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext, skipVMSetup)
             else
-                ApplyBones(track, vm, handsEnt, ply, weapon, false, false, flags, renderContext)
+                ApplyBones(track, vm, handsEnt, ply, weapon, false, false, flags, renderContext, skipVMSetup)
             end
         end
 
