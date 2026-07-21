@@ -248,6 +248,54 @@ GCAL:RegisterSecondHandAnim("tool_press", {
 
 ---
 
+## 3.5. Native API Equivalents to Legacy VManip Functions
+
+GCAL provides a clean `GCAL:`-prefixed API for addons that want to inspect runtime state without depending on the `VManip` compatibility shim. These are the preferred natives for new addons:
+
+| Legacy VManip pattern | Native GCAL equivalent | Description |
+| :-- | :-- | :-- |
+| `VManip:GetVMGesture()` | `GCAL:GetGestureModel(trackID)` | Returns the gesture model entity for a track, or `nil`. |
+| `VManip:GetVMGestures()` / similar multi-gesture queries | `GCAL:GetAllGestureModels()` | Returns `{ trackID = model, ... }` for every active non-legs track. |
+| `VManip.VMCam` (global) | `GCAL:GetCamModel(trackID)` | Returns the cambone model entity (camera-bone attachment source). |
+| `VManip.VMGesture` (global) | `GCAL:GetGestureModel(trackID)` | Single-gesture query per track. |
+| Inspecting the world-model entity | `GCAL:GetTPIKModel(trackID)` | Returns the TPIK source model (third-person world-model clone source). |
+| Iterating registered anim names | `GCAL:GetAnimationNames()` | Returns a list of all names in `GCAL.Anims`. |
+| `VManip.IsActive` for any non-legacy track | `GCAL:IsTrackActive(trackID)` | Standard per-track query. |
+| Enumerating active tracks | `GCAL:GetActiveTrackIDs()` | Returns a list of all track IDs currently active. |
+| `VManip:Remove()` (single) | `GCAL:StopTrack(trackID)` | Standard per-track stop. |
+| Stopping everything at once | `GCAL:StopAllTracks()` | Iterates and stops every active track. |
+| `VManip:GetCycle()` | `GCAL:GetCycle(trackID)` | Returns the current animation cycle (0..1). |
+| `VManip:SetCycle(newcycle)` | `GCAL:SetCycle(trackID, cycle)` | Sets the current cycle and continues from there. |
+| `VManip:GetLerp()` | `GCAL:GetLerp(trackID)` | Returns the current weapon/anim blend value. |
+| `VManip:GetCurrentAnim()` | `GCAL:GetCurrentAnim(trackID)` | Returns the active animation name. |
+| `VManip:IsSegmented()` | `GCAL:IsSegmented(trackID)` | Returns whether the active track is segmented. |
+| `VManip:GetCurrentSegment()` | `GCAL:GetCurrentSegment(trackID)` | Returns the current segment name. |
+| `VManip:GetSegmentCount()` | `GCAL:GetSegmentCount(trackID)` | Returns how many segments have played. |
+| `VManip:IsPreventQuit()` | `GCAL:IsPreventQuit(trackID)` | Returns whether the track resists hold release. |
+| `VManip:QueueAnim(name)` | `GCAL:QueueAnim(name, trackID)` | Queues an animation to play when the track becomes free. |
+| `VManip:QuitHolding(anim)` | `GCAL:QuitHolding(trackID, animToStop)` | Standard hold release. |
+| `VManip:PlaySegment(seq, last, sounds)` | `GCAL:PlaySegment(trackID, sequence, lastSegment, soundTable)` | Standard segmented play. |
+| `VManip:IsValid()` | `GCAL:IsTrackActive(trackID)` | Equivalent. |
+| Querying `VManip.VMatrixlerp` (read) | `GCAL:GetLerp(trackID)` | Returns the current blend (1 = weapon, 0 = full anim). |
+| Checking if the active anim loops | `GCAL:IsLooping(trackID)` | Returns `true`/`false`. |
+| Querying anim duration | `GCAL:GetTrackDuration(trackID)` | Returns the track's effective duration in seconds. |
+
+Example — porting an old VManip addon to natives:
+
+```lua
+-- Legacy
+local gesture = VManip.VMGesture
+if IsValid(gesture) then gesture:SetPos(...) end
+
+-- Native
+local gesture = GCAL:GetGestureModel("left_arm")
+if IsValid(gesture) then gesture:SetPos(...) end
+```
+
+All native functions are safe to call when the track is not active (they return `nil`/`false` instead of erroring), so you can poll them from `Think` without guards.
+
+---
+
 ## 4. The Multi-Track System
 
 Unlike legacy systems, GCAL can play multiple animations at once by using different `trackID`s.
@@ -464,6 +512,119 @@ If your addon already uses VManip, you don't need to change anything!
 - If a legacy model reports zero sequences, GCAL can fall back to a compatible surrogate animation or a pose-only compatibility mode instead of hard-failing immediately.
 - Chen patch behavior for flipped viewmodels, player legs, and MWBase/TFA/ArcCW special handling is built into the compatibility layer.
 - Legacy flipped-viewmodel handling follows the weapon's current `ViewModelFlip` value for the target arm side, while `ViewModelFlipDefault != ViewModelFlip` controls source-model mirroring. Native GCAL tracks keep their registered hand/bone targets instead of being globally remapped by legacy flip state.
+
+### Migrating From VManip To Natives
+
+If you maintain a VManip-style addon and want to switch to GCAL natives, the shim keeps everything working — no rush. When you're ready, replace the legacy patterns with the natives from section 3.5. Here are the most common migrations:
+
+**Reading the gesture model**
+
+```lua
+-- VManip
+local vm = VManip.VMGesture
+if IsValid(vm) then vm:SetPos(...) end
+
+-- GCAL
+local vm = GCAL:GetGestureModel("left_arm")
+if IsValid(vm) then vm:SetPos(...) end
+```
+
+Note: GCAL uses per-track lookups. If your addon supports multiple tracks, pick the right one (`"left_arm"`, `"right_arm"`, `"both_arms"`, or your custom track ID).
+
+**Polling the lerp / cycle / current anim**
+
+```lua
+-- VManip
+local cycle = VManip.Cycle
+local lerp = VManip.VMatrixlerp
+local anim = VManip.CurGesture
+
+-- GCAL
+local cycle = GCAL:GetCycle("left_arm")
+local lerp = GCAL:GetLerp("left_arm")
+local anim = GCAL:GetCurrentAnim("left_arm")
+```
+
+All GCAL getters take the track ID and return `nil`/`0` if the track is not active. They are safe to call from `Think` without `IsValid` checks.
+
+**Playing and queuing**
+
+```lua
+-- VManip
+VManip:PlayAnim("foo")
+VManip:QueueAnim("bar")
+VManip:QuitHolding()
+VManip:Remove()
+
+-- GCAL
+GCAL:Play("foo")
+GCAL:QueueAnim("bar", "left_arm")
+GCAL:QuitHolding("left_arm")
+GCAL:StopTrack("left_arm")
+```
+
+Note: `QuitHolding` and `StopTrack` take the track ID. The VManip shim's `QuitHolding()` without an arg still works for backward compat, but new code should pass the track ID.
+
+**State guards**
+
+```lua
+-- VManip
+if VManip:IsActive() and VManip:GetLerp() < 0.1 then
+    -- full animation playing
+end
+
+-- GCAL
+local track = GCAL:GetTrack("left_arm")
+if track and track.lerpVal < 0.1 then
+    -- full animation playing
+end
+
+-- or use the dedicated helper:
+if GCAL:IsTrackActive("left_arm") and GCAL:GetLerp("left_arm") < 0.1 then
+    -- ...
+end
+```
+
+**Querying leg / foot animations**
+
+```lua
+-- VMLegs
+VMLegs:PlayAnim("forward")
+VMLegs:GetCurrentAnim()
+
+-- GCAL
+GCAL:Play("legs_forward", "legs")
+GCAL:GetCurrentAnim("legs")
+```
+
+GCAL's legs track uses a `"legs_"` prefix when registered via `GCAL:Play` directly. The VMLegs shim still works, and registering via `VMLegs:RegisterAnim(name, data)` is equivalent to `GCAL:RegisterAnim("legs_" .. name, data)`.
+
+**Camera-bone attachment**
+
+```lua
+-- VManip (Chen patch)
+VManip.Cam_Ang = Angle(-79.75, 0, -90)
+VManip.Cam_AngInt = { 1, 1, 1 }
+VManip.Attachment = VManip:GetVMGesture():GetAttachment(0)
+
+-- GCAL (per animation, via RegisterAnim)
+GCAL:RegisterAnim("my_anim", {
+    model = "...",
+    cam_ang = Angle(-79.75, 0, -90),
+    cam_angint = { 1, 1, 1 },
+    cambone = true,
+})
+```
+
+GCAL reads `cam_ang` / `cam_angint` from the registration data and handles the attachment lookup per frame. The `cambone` field lets you opt out per-animation, and the global convar `gcal_cambone` controls the default.
+
+**Removing the VManip dependency**
+
+Once all your code uses natives, you can drop the VManip shim calls. The shim itself stays in GCAL, so you can migrate one file at a time without breaking the others. After migration, consider:
+
+- Removing the `legacy = true` flag from your registrations so GCAL uses the modern bone-copy path instead of the legacy VManip-style lerp.
+- Setting explicit `bones` / `source_bones` tables on your registrations (use `GCAL.GROUPS.LEFT_ARM` / `RIGHT_ARM` / `BOTH_ARMS`) instead of relying on the `hand` field defaulting to a specific arm.
+- Using `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` instead of mutating `VManip.VMCam` or `VManip.Cam_Ang` directly.
 
 ### Weapon Base Strategies
 

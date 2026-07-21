@@ -510,6 +510,67 @@ function GCAL:GetCodeBlockers(scope)
     return blockers
 end
 
+-- Native equivalents to legacy VManip globals/functions.
+-- These provide a clean GCAL-prefixed API for addons that need to inspect
+-- runtime state without going through the VManip compat shim.
+
+function GCAL:GetGestureModel(trackID)
+    local track = self:GetTrack(trackID)
+    return track and track.model or nil
+end
+
+function GCAL:GetCamModel(trackID)
+    local track = self:GetTrack(trackID)
+    return track and track.camModel or nil
+end
+
+function GCAL:GetTPIKModel(trackID)
+    local track = self:GetTrack(trackID)
+    return track and track.tpikModel or nil
+end
+
+function GCAL:GetAllGestureModels()
+    local out = {}
+    for trackID, track in pairs(self.ActiveTracks or {}) do
+        if trackID ~= "legs" and IsValid(track.model) then
+            out[trackID] = track.model
+        end
+    end
+    return out
+end
+
+function GCAL:GetAnimationNames()
+    local out = {}
+    for name in pairs(self.Anims or {}) do
+        out[#out + 1] = name
+    end
+    return out
+end
+
+function GCAL:GetActiveTrackIDs()
+    local out = {}
+    for trackID in pairs(self.ActiveTracks or {}) do
+        out[#out + 1] = trackID
+    end
+    return out
+end
+
+function GCAL:IsLooping(trackID)
+    local track = self:GetTrack(trackID)
+    return track ~= nil and track.loop == true
+end
+
+function GCAL:GetTrackDuration(trackID)
+    local track = self:GetTrack(trackID)
+    return track and track.duration or nil
+end
+
+function GCAL:StopAllTracks()
+    for trackID in pairs(self.ActiveTracks or {}) do
+        self:StopTrack(trackID)
+    end
+end
+
 if CLIENT then
     local EyeAngles = EyeAngles
     local EyePos = EyePos
