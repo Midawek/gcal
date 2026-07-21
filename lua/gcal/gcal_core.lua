@@ -170,30 +170,6 @@ if CLIENT then
         }
     end
 
-    function GCAL:ApplyTPIKAdjustment(name, pos, ang)
-        local adjustment = self:GetTPIKAdjustment(name)
-        local offset = adjustment.pos
-        local adjustedPos = pos + ang:Forward() * offset.x + ang:Right() * offset.y + ang:Up() * offset.z
-        local angleOffset = adjustment.ang
-
-        return adjustedPos, Angle(ang.p + angleOffset.p, ang.y + angleOffset.y, ang.r + angleOffset.r)
-    end
-
-    function GCAL:GetTPIKAdjustmentTransform(name, pos, ang)
-        local adjustedPos, adjustedAng = self:ApplyTPIKAdjustment(name, pos, ang)
-        local base = Matrix()
-        base:SetTranslation(pos)
-        base:SetAngles(ang)
-
-        local baseInverse = Matrix(base:ToTable())
-        baseInverse:Invert()
-
-        local adjusted = Matrix()
-        adjusted:SetTranslation(adjustedPos)
-        adjusted:SetAngles(adjustedAng)
-        return adjusted * baseInverse
-    end
-
     function GCAL:GetTPIKOptionAdd(name, option)
         if option == "target_radius" then
             return self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add")

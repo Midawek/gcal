@@ -122,28 +122,35 @@ The data table passed to `RegisterAnim` supports the following fields:
 | Field                | Type         | Description                                                                                                                                           |
 | :------------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `model`              | string       | **REQUIRED.** The model containing the sequence.                                                                                                      |
+| `sequence`           | string       | Explicit model sequence name. When omitted, GCAL falls back to the registered animation name and a few legacy name-resolution strategies.     |
 | `lerp_peak`          | number       | Cycle at which the animation begins transitioning back (default: 0.5).                                                                                |
+| `lerp_speed_in`      | number       | Lerp speed for the entry transition (default: 1).                                                                                                      |
+| `lerp_speed_out`     | number       | Lerp speed for the exit transition (default: 1).                                                                                                       |
+| `lerp_curve`         | number       | Easing curve exponent for the lerp (default: 1).                                                                                                       |
 | `speed`              | number       | Playback rate multiplier (default: 1.0).                                                                                                              |
 | `startcycle`         | number       | Cycle to start the animation at (0.0 to 1.0).                                                                                                         |
+| `duration`           | number       | Manual override for the track duration (seconds). When omitted, GCAL uses the sequence duration, then `holdtime`, then `lerp_peak`, defaulting to 1. |
 | `loop`               | bool         | If true, the animation repeats and never lerps out.                                                                                                   |
 | `segmented`          | bool         | Segment mode. Use `GCAL:PlaySegment(trackID, sequence, lastSegment, sounds)` after `GCALSegmentFinish`.                                               |
 | `holdtime`           | number       | Time in seconds after which the animation freezes (useful for interactions).                                                                          |
 | `sounds`             | table        | A dictionary of `[path] = time` to play audio during playback.                                                                                        |
-| `hand`               | string       | Friendly hand selector: `left`, `second`, `offhand`, `right`, or `both`. Sets default `bones` and `group_name`.                                       |
+| `hand`               | string       | Friendly hand selector: `left`, `second`, `offhand`, `right`, or `both`. Sets default `bones` and `group_name`. Aliases: `arm`, `bone_group`, `bonegroup`. |
 | `bones`              | table/string | Target bone names to manipulate, or a hand alias such as `"right"` / `"both"`. Defaults from `hand`.                                                  |
-| `source_hand`        | string       | Optional source hand to read from in the animation model. Useful when the target hand is right but the model sequence is authored on left-hand bones. |
+| `source_hand`        | string       | Optional source hand to read from in the animation model. Useful when the target hand is right but the model sequence is authored on left-hand bones. Aliases: `source_arm`. |
 | `source_bones`       | table/string | Optional source bone names to read from. Defaults to `bones`, or from `source_hand` when provided.                                                    |
 | `addon_name`         | string       | Optional display name used by GCAL's Toggle Anims tree to group animations by addon.                                                                  |
 | `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
 | `cambone`             | bool         | When `true`, drives the player's first-person view angles from this track's animation attachments (VManip-style camera bone). When `false`, disables cambone for this animation. When `nil` (default), follows the global `gcal_cambone` convar. See section 11. |
+| `legacy`             | bool         | Marks this as a VManip legacy animation. Enables tolerant name matching and disables arc9-style bone copies. Most VManip addons set this automatically. |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
+| `preventquit`        | bool         | If true, `GCAL:QuitHolding` will not release this hold state.                                                                                          |
 | `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
 | `easing_out`         | string       | Easing function for the exit transition.                                                                                                              |
-| `locktoply`          | bool         | If true, pins the animation to the player's view (ignores weapon bob).                                                                                |
-| `assurepos`          | bool         | Similar to locktoply; ensures perfect alignment.                                                                                                      |
+| `locktoply`          | bool         | If true, pins the animation to the player's view. The model is placed at `EyePos()` with a 25% blend between view and viewmodel angles.              |
+| `assurepos`          | bool         | If true, parents the gesture model to the viewmodel each frame. The strictest lock — guarantees perfect alignment but costs a reparent per weapon swap.  |
 
 ---
 
