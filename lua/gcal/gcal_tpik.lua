@@ -2,7 +2,7 @@ if not CLIENT then return end
 
 GCAL = GCAL or {}
 
--- Simple TPIK: direct bone copy (ARC9-style). No IK solver or anchor transforms.
+-- Simple TPIK: direct bone copy (ARC9-style)
 
 function GCAL.InstallTPIK(deps)
     deps = deps or {}
@@ -73,7 +73,7 @@ function GCAL.InstallTPIK(deps)
         return GCAL:GetTPIKOptionAdd(track.name, key) or 0
     end
 
-    -- Hidden material for the third-person model clone (arms/hands auto-hidden)
+    -- Hidden material for the third-person model clone
     local hiddenMat = CreateMaterial("gcal_tpik_hidden", "UnlitGeneric", {
         ["$basetexture"] = "color/white",
         ["$translucent"] = "1",
@@ -121,7 +121,7 @@ function GCAL.InstallTPIK(deps)
             end
         end
 
-        -- If everything got hidden, restore auto-hidden ones so the clone isn't invisible
+        -- If everything got hidden, restore auto-hidden ones
         if #materials > 0 and visible == 0 and #autoHidden > 0 then
             for _, idx in ipairs(autoHidden) do model:SetSubMaterial(idx) end
             visible = #autoHidden
@@ -252,7 +252,7 @@ function GCAL.InstallTPIK(deps)
         local targetBones = GetTrackTargetBones(track, weapon, flip)
         local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
 
-        -- Place source model at eye position (viewmodel bones are camera-relative)
+        -- Place source model at eye position
         PlaceTPIKTrackModel(track, ply:EyePos(), renderAngles)
         source:SetModelScale(GetTrackModelScale(track, weapon, flip))
         source:SetupBones()
@@ -274,8 +274,7 @@ function GCAL.InstallTPIK(deps)
             if m then spinePos = m:GetTranslation() end
         end
 
-        -- Offset viewmodel bones (camera space) to player body space via shoulder
-        -- Without this, viewmodel bones land at the player's feet.
+-- Offset viewmodel bones (camera space) to player body space via shoulder
         local offset = Vector(0, 0, 0)
         for _, side in ipairs({ "L", "R" }) do
             local name = "ValveBiped.Bip01_" .. side .. "_UpperArm"

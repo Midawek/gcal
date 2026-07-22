@@ -347,8 +347,7 @@ function GCAL:GetTPIKOptions(name)
     return self.TPIKOptions and self.TPIKOptions[tostring(name or "")] or nil
 end
 
--- Cambone handler API. Handlers run in priority order; later ones receive
--- earlier outputs. Signature: fn(id, track, ply, origin, angles, fov,
+-- Cambone handler API. Signature: fn(id, track, ply, origin, angles, fov,
 -- attachment, camAng, camAngInt, lerpVal, handler) -> origin, angles, fov
 
 local default_properang = Angle(-79.75, 0, -90)
@@ -433,7 +432,32 @@ function GCAL:PrepareAnimData(data, hand)
     return data
 end
 
--- Robust Registration
+-- Push live-edited fields from a re-registered anim onto the active track
+local function RefreshActiveTrack(track, data)
+    if not IsValid(track.model) then return end
+    track.data = data
+    track.bones = data.bones or GCAL.GROUPS.LEFT_ARM
+    track.sourceBones = data.source_bones or data.bones or GCAL.GROUPS.LEFT_ARM
+    track.speed = data.speed or 1
+    track.thirdperson = GCAL.InternalThirdPersonEnabled and data.thirdperson ~= false
+    track.lerpCurve = data.lerp_curve or 1
+    if data.locktoply ~= nil then
+        track.lockZ = data.locktoply and EyePos().z or 0
+    end
+    if data.loop ~= nil then track.loop = data.loop end
+    if data.holdtime ~= nil then
+        track.holdTimeData = data.holdtime
+        if data.holdtime and not track.holdTime then
+            track.holdTime = track.startTime + data.holdtime
+        end
+    end
+    track.thirdpersonMaterialsConfigured = nil
+    track.thirdpersonBoneMatrices = nil
+    track.thirdpersonSolveFrame = nil
+    track.thirdpersonModelReadyFrame = nil
+end
+
+-- Register or re-register an animation. Accepts GCAL:RegisterAnim(name, data) or GCAL:RegisterAnim(self, name, data)
 function GCAL:RegisterAnim(arg1, arg2, arg3)
     local name, data
     if isstring(arg1) then
@@ -441,37 +465,16 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
     else
         name, data = arg2, arg3
     end
-
     if not name or not data then return end
+
     self:PrepareAnimData(data)
     data.addon_name = data.addon_name or data.addon or data.source_addon or GCAL.CurrentRegistrationSource or "GCAL"
-
     GCAL_Log("Registering animation:", name)
     self.Anims[name] = data
 
     for trackID, track in pairs(self.ActiveTracks or {}) do
-        if track.name == name and IsValid(track.model) then
-            track.data = data
-            track.bones = data.bones or self.GROUPS.LEFT_ARM
-            track.sourceBones = data.source_bones or data.bones or self.GROUPS.LEFT_ARM
-            track.speed = data.speed or 1
-            track.thirdperson = self.InternalThirdPersonEnabled and data.thirdperson ~= false
-            track.lerpCurve = data.lerp_curve or 1
-            if data.locktoply ~= nil then
-                track.lockZ = data.locktoply and EyePos().z or 0
-            end
-            if data.loop ~= nil then track.loop = data.loop end
-            if data.holdtime ~= nil then
-                track.holdTimeData = data.holdtime
-                if data.holdtime and not track.holdTime then
-                    track.holdTime = track.startTime + data.holdtime
-                end
-            end
-            -- TPIK model/materials cache invalidation so the clone picks up new options
-            track.thirdpersonMaterialsConfigured = nil
-            track.thirdpersonBoneMatrices = nil
-            track.thirdpersonSolveFrame = nil
-            track.thirdpersonModelReadyFrame = nil
+        if track.name == name then
+            RefreshActiveTrack(track, data)
             break
         end
     end
@@ -584,9 +587,7 @@ function GCAL:GetCodeBlockers(scope)
     return blockers
 end
 
--- Native equivalents to legacy VManip globals/functions.
--- These provide a clean GCAL-prefixed API for addons that need to inspect
--- runtime state without going through the VManip compat shim.
+-- Native equivalents to legacy VManip globals/functions
 
 function GCAL:GetGestureModel(trackID)
     local track = self:GetTrack(trackID)
@@ -878,69 +879,17 @@ if CLIENT then
         return exactMatch or partialMatch
     end
 
-    function GCAL:Play(arg1, arg2)
-        local name, trackID
-        if isstring(arg1) then
-            name, trackID = arg1, arg2
-        else
-            -- Probably GCAL:Play("name")
-            name, trackID = arg2, nil
-        end
-
-        GCAL_Log("Attempting to play:", name)
-        if GCAL.IsAnimEnabled and not GCAL:IsAnimEnabled(name) then
-            GCAL_Log("Suppressed: Animation '" .. tostring(name) .. "' is disabled in the GCAL menu.")
-            hook.Run("GCALAnimSuppressed", name, trackID)
-            return true
-        end
-
-        local anim = GCAL.Anims[name]
-        if not anim then
-            GCAL_Log("Failed: Animation '" .. tostring(name) .. "' not found in registry!")
-            return false
-        end
-
-        if not anim.model then
-            GCAL_Log("Failed: Animation '" .. tostring(name) .. "' has no model set!")
-            return false
-        end
-
-        trackID = trackID or anim.group_name or "default"
-        if anim.legacy then
-            vmatrixpeakinfo = anim.lerp_peak or 0.5
-            VManip_modelname = anim.model
-            vmanipholdtime = anim.holdtime or 0
-
-            local ply = LocalPlayer()
-            if not IsValid(ply) or ply:InVehicle() or not ply:Alive() then return false end
-            if ply:GetViewEntity() ~= ply and not GCAL.ActiveTracks[trackID] then return false end
-
-            local weapon = ply:GetActiveWeapon()
-            if not IsValid(weapon) then return false end
-            if weapon:GetHoldType() == "duel" then return false end
-            if GCAL.ActiveTracks[trackID] then return false end
-
-            local vm = ply:GetViewModel()
-            local bypass = hook.Run("VManipPreActCheck", name, vm)
-            if not bypass and IsValid(vm) then
-                if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return false end
-                local cycle = math.Round(vm:GetCycle(), 2)
-                if vm:GetSequenceActivity(vm:GetSequence()) == ACT_VM_RELOAD and (cycle < 0.99 and cycle > 0) then return false end
-            end
-        end
-
-        if hook.Run("VManipPrePlayAnim", name) == false then return false end
-
+    -- Build the runtime track table from a registered anim.
+    local function CreateTrack(name, anim)
         local easingInName = anim.easing_in or "OutQuad"
         local easingOutName = anim.easing_out or "OutQuad"
         local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
-
-        local track = {
+        return {
             name = name,
             data = anim,
             startTime = CurTime(),
             cycle = anim.startcycle or 0,
-            lerpVal = 1, -- Matches VMatrixlerp (1 = Weapon, 0 = Animation)
+            lerpVal = 1, -- 1 = weapon pose, 0 = full animation
             model = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH),
             camboneEnabled = (anim.cambone == nil) or tobool(anim.cambone),
             camModel = nil,
@@ -979,111 +928,114 @@ if CLIENT then
             tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
             legacyStarted = false,
-            poseOnlyLegacy = false
+            poseOnlyLegacy = false,
         }
+    end
 
+    -- Make a ClientsideModel for the source viewmodel and its cambone clone.
+    local function SetupSourceModels(track, anim)
         if not IsValid(track.model) then
             GCAL_Log("Failed: Invalid model path: models/" .. tostring(anim.model))
-            if IsValid(track.camModel) then track.camModel:Remove() end
             return false
         end
-
         track.model:SetNoDraw(true)
         if track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
             track.camModel = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH)
         end
         if IsValid(track.camModel) then
             track.camModel:SetNoDraw(true)
-            -- VMcam at origin so attachment reads in model-local space
+            -- Place at origin so the attachment is read in the model's local space
             track.camModel:SetPos(vector_origin)
             track.camModel:SetAngles(angle_zero)
         end
+        return true
+    end
 
+    -- Find a legacy surrogate animation and swap the track's model/camModel to it.
+    local function TryLegacySurrogate(track, name, anim, sequenceList)
+        local surrogate = FindLegacySurrogateAnim(name, anim)
+        if not surrogate then return false end
+
+        local surrogateModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
+        local surrogateCamModel = nil
+        if track.camboneEnabled and GCAL.CamBone:GetBool() then
+            surrogateCamModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
+        end
+
+        if IsValid(surrogateModel) then surrogateModel:SetNoDraw(true) end
+        if IsValid(surrogateCamModel) then
+            surrogateCamModel:SetNoDraw(true)
+            surrogateCamModel:SetPos(vector_origin)
+            surrogateCamModel:SetAngles(angle_zero)
+        end
+
+        local surrogateTrack = { model = surrogateModel, data = surrogate.data }
+        local seqID, _ = ResolveSequence(surrogateTrack, surrogate.name, surrogate.data)
+        if seqID == -1 then
+            if IsValid(surrogateModel) then surrogateModel:Remove() end
+            if IsValid(surrogateCamModel) then surrogateCamModel:Remove() end
+            return false
+        end
+
+        if IsValid(track.model) then track.model:Remove() end
+        if IsValid(track.camModel) then track.camModel:Remove() end
+        track.model = surrogateModel
+        track.camModel = surrogateCamModel
+        track.seqID = seqID
+        track.sequenceName = surrogate.data.sequence or surrogate.name
+
+        track.model:ResetSequenceInfo()
+        track.model:SetPlaybackRate(1)
+        track.model:ResetSequence(track.seqID)
+        track.duration = math.max(track.model:SequenceDuration(track.seqID), 0.01)
+        if IsValid(track.camModel) then
+            track.camModel:ResetSequenceInfo()
+            track.camModel:SetPlaybackRate(1)
+            track.camModel:ResetSequence(track.seqID)
+        end
+        GCAL_Log("Legacy fallback: using surrogate animation '" .. tostring(surrogate.name) .. "' for '" .. tostring(name) .. "'.")
+        return true
+    end
+
+    -- Fall back to pose-only mode when a legacy anim has no sequences and no surrogate.
+    local function UsePoseOnlyLegacy(track, name, anim)
+        track.poseOnlyLegacy = true
+        track.duration = math.max(anim.duration or anim.holdtime or anim.lerp_peak or 1, 0.01)
+        GCAL_Log("Legacy fallback: using pose-only mode for '" .. tostring(name) .. "' because the model reported zero sequences.")
+    end
+
+    -- Resolve the firstperson sequence and prepare the source model.
+    local function ResolveFirstPersonSequence(track, name, anim)
         local sequenceList = track.model.GetSequenceList and (track.model:GetSequenceList() or {}) or {}
         track.seqID, track.sequenceName = ResolveSequence(track, name, anim)
 
-        if track.seqID == -1 then
-            if anim.legacy and #sequenceList == 0 then
-                local surrogate = FindLegacySurrogateAnim(name, anim)
-                if surrogate then
-                    local surrogateModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
-                    local surrogateCamModel = nil
-                    if track.camboneEnabled and GCAL.CamBone:GetBool() then
-                        surrogateCamModel = ClientsideModel("models/" .. surrogate.data.model, RENDERGROUP_BOTH)
-                    end
-
-                    if IsValid(surrogateModel) then
-                        surrogateModel:SetNoDraw(true)
-                    end
-                    if IsValid(surrogateCamModel) then
-                        surrogateCamModel:SetNoDraw(true)
-                        surrogateCamModel:SetPos(vector_origin)
-                        surrogateCamModel:SetAngles(angle_zero)
-                    end
-
-                    if IsValid(surrogateModel) then
-                        local surrogateTrack = {
-                            model = surrogateModel,
-                            data = surrogate.data
-                        }
-                        local surrogateSeqID, surrogateSequenceName = ResolveSequence(surrogateTrack, surrogate.name,
-                            surrogate.data)
-                        if surrogateSeqID ~= -1 then
-                            if IsValid(track.model) then track.model:Remove() end
-                            if IsValid(track.camModel) then track.camModel:Remove() end
-
-                            track.model = surrogateModel
-                            track.camModel = surrogateCamModel
-                            track.seqID = surrogateSeqID
-                            track.sequenceName = surrogateSequenceName
-
-                            track.model:ResetSequenceInfo()
-                            track.model:SetPlaybackRate(1)
-                            track.model:ResetSequence(track.seqID)
-                            track.duration = math.max(track.model:SequenceDuration(track.seqID), 0.01)
-
-                            if IsValid(track.camModel) then
-                                track.camModel:ResetSequenceInfo()
-                                track.camModel:SetPlaybackRate(1)
-                                track.camModel:ResetSequence(track.seqID)
-                            end
-
-                            GCAL_Log("Legacy fallback: using surrogate animation '" ..
-                                tostring(surrogate.name) .. "' for '" .. tostring(name) .. "'.")
-                        else
-                            if IsValid(surrogateModel) then surrogateModel:Remove() end
-                            if IsValid(surrogateCamModel) then surrogateCamModel:Remove() end
-                        end
-                    elseif IsValid(surrogateCamModel) then
-                        surrogateCamModel:Remove()
-                    end
-                end
-
-                if track.seqID == -1 then
-                    track.poseOnlyLegacy = true
-                    track.duration = math.max(anim.duration or anim.holdtime or anim.lerp_peak or 1, 0.01)
-                    GCAL_Log("Legacy fallback: using pose-only mode for '" ..
-                        tostring(name) .. "' because the model reported zero sequences.")
-                end
-            else
-                GCAL_Log("Failed: Sequence not found in model!")
-                track.model:Remove()
-                if IsValid(track.camModel) then track.camModel:Remove() end
-                return false
-            end
-        else
+        if track.seqID ~= -1 then
             track.model:ResetSequenceInfo()
             track.model:SetPlaybackRate(1)
             track.model:ResetSequence(track.seqID)
             track.duration = math.max(track.model:SequenceDuration(track.seqID), 0.01)
-
             if IsValid(track.camModel) then
                 track.camModel:ResetSequenceInfo()
                 track.camModel:SetPlaybackRate(1)
                 track.camModel:ResetSequence(track.seqID)
             end
+            return
         end
 
+        if anim.legacy and #sequenceList == 0 then
+            if TryLegacySurrogate(track, name, anim, sequenceList) then return end
+            UsePoseOnlyLegacy(track, name, anim)
+            return
+        end
+
+        GCAL_Log("Failed: Sequence not found in model!")
+        track.model:Remove()
+        if IsValid(track.camModel) then track.camModel:Remove() end
+        error("GCAL_Play_NoSequence")
+    end
+
+    -- Resolve the TPIK sequence and build the thirdperson model + clone.
+    local function SetupThirdPerson(track, name, anim)
         track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, name, anim)
         if track.tpikSeqID == -1 then
             GCAL_Log("TPIK sequence not found, falling back to firstperson sequence for:", name)
@@ -1091,35 +1043,103 @@ if CLIENT then
             track.tpikSequenceName = track.sequenceName
         end
 
-        if track.thirdperson then
-            if track.tpikSeqID ~= track.seqID or track.tpikSequenceRequested then
-                track.tpikModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
-                if IsValid(track.tpikModel) then
-                    track.tpikModel:SetNoDraw(true)
-                    track.tpikModel:ResetSequenceInfo()
-                    track.tpikModel:SetPlaybackRate(1)
-                    track.tpikModel:ResetSequence(track.tpikSeqID)
-                    track.tpikModel:SetCycle(track.cycle)
-                end
-            end
+        if not track.thirdperson then return end
 
-            track.thirdpersonModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
-            if IsValid(track.thirdpersonModel) then
-                track.thirdpersonModel:SetNoDraw(true)
-                track.thirdpersonModel:ResetSequenceInfo()
-                track.thirdpersonModel:SetPlaybackRate(1)
-                track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
+        if track.tpikSeqID ~= track.seqID or track.tpikSequenceRequested then
+            track.tpikModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
+            if IsValid(track.tpikModel) then
+                track.tpikModel:SetNoDraw(true)
+                track.tpikModel:ResetSequenceInfo()
+                track.tpikModel:SetPlaybackRate(1)
+                track.tpikModel:ResetSequence(track.tpikSeqID)
+                track.tpikModel:SetCycle(track.cycle)
             end
         end
 
-        if GCAL.ActiveTracks[trackID] then
-            GCAL:StopTrack(trackID)
+        track.thirdpersonModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
+        if IsValid(track.thirdpersonModel) then
+            track.thirdpersonModel:SetNoDraw(true)
+            track.thirdpersonModel:ResetSequenceInfo()
+            track.thirdpersonModel:SetPlaybackRate(1)
+            track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
+        end
+    end
+
+-- Pre-flight guard for legacy VManip animations
+    local function LegacyAnimAllowed(name, trackID, anim)
+        if not anim.legacy then return true end
+
+        vmatrixpeakinfo = anim.lerp_peak or 0.5
+        VManip_modelname = anim.model
+        vmanipholdtime = anim.holdtime or 0
+
+        local ply = LocalPlayer()
+        if not IsValid(ply) or ply:InVehicle() or not ply:Alive() then return false end
+        if ply:GetViewEntity() ~= ply and not GCAL.ActiveTracks[trackID] then return false end
+
+        local weapon = ply:GetActiveWeapon()
+        if not IsValid(weapon) then return false end
+        if weapon:GetHoldType() == "duel" then return false end
+        if GCAL.ActiveTracks[trackID] then return false end
+
+        local vm = ply:GetViewModel()
+        local bypass = hook.Run("VManipPreActCheck", name, vm)
+        if bypass or not IsValid(vm) then return true end
+
+        if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return false end
+        local cycle = math.Round(vm:GetCycle(), 2)
+        if vm:GetSequenceActivity(vm:GetSequence()) == ACT_VM_RELOAD and (cycle < 0.99 and cycle > 0) then return false end
+        return true
+    end
+
+    -- Resolve which (name, trackID) the caller asked us to play.
+    local function ParsePlayArgs(arg1, arg2)
+        if isstring(arg1) then return arg1, arg2 end
+        return arg2, nil -- GCAL:Play(self, "name")
+    end
+
+    function GCAL:Play(arg1, arg2)
+        local name, trackID = ParsePlayArgs(arg1, arg2)
+        GCAL_Log("Attempting to play:", name)
+
+        if GCAL.IsAnimEnabled and not GCAL:IsAnimEnabled(name) then
+            GCAL_Log("Suppressed: Animation '" .. tostring(name) .. "' is disabled in the GCAL menu.")
+            hook.Run("GCALAnimSuppressed", name, trackID)
+            return true
         end
 
+        local anim = GCAL.Anims[name]
+        if not anim then
+            GCAL_Log("Failed: Animation '" .. tostring(name) .. "' not found in registry!")
+            return false
+        end
+        if not anim.model then
+            GCAL_Log("Failed: Animation '" .. tostring(name) .. "' has no model set!")
+            return false
+        end
+
+        trackID = trackID or anim.group_name or "default"
+        if not LegacyAnimAllowed(name, trackID, anim) then return false end
+        if hook.Run("VManipPrePlayAnim", name) == false then return false end
+
+        local track = CreateTrack(name, anim)
+        if not SetupSourceModels(track, anim) then
+            if IsValid(track.camModel) then track.camModel:Remove() end
+            return false
+        end
+
+        local ok, err = pcall(ResolveFirstPersonSequence, track, name, anim)
+        if not ok then
+            if err == "GCAL_Play_NoSequence" then return false end
+            error(err, 0)
+        end
+
+        SetupThirdPerson(track, name, anim)
+
+        if GCAL.ActiveTracks[trackID] then GCAL:StopTrack(trackID) end
         GCAL.ActiveTracks[trackID] = track
-        if trackID == "legacy_left_arm" then
-            SyncLegacyVManipFields(track)
-        end
+
+        if trackID == "legacy_left_arm" then SyncLegacyVManipFields(track) end
         if track.blockCode then
             hook.Run("GCALCodeBlockStarted", trackID, name, track, track.blockCodeScope)
         end
@@ -2271,7 +2291,7 @@ if CLIENT then
         end
         if not hasAttachment then return end
 
-        -- Compose with other mods' CalcView first, then layer cambone on top
+        -- Compose with other mods' CalcView, then layer cambone on top
         local composed = hook.Run("CalcView", ply, origin, angles, fov, true) or {}
         local baseOrigin = composed.origin or origin
         local baseAngles = composed.angles or angles
