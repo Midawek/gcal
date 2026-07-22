@@ -41,30 +41,51 @@ end
 
 if CLIENT then
     GCAL.Debug = CreateClientConVar("gcal_debug", "0", true, false, "Enable GCAL debug mode.")
-    GCAL.ThirdPerson = CreateClientConVar("gcal_thirdperson", "1", true, false, "Render GCAL arm animations on the local player in thirdperson.")
-    GCAL.PlaybackSpeed = CreateClientConVar("gcal_playback_speed", "1", true, false, "Global GCAL playback speed multiplier.")
+    GCAL.ThirdPerson = CreateClientConVar("gcal_thirdperson", "1", true, false,
+        "Render GCAL arm animations on the local player in thirdperson.")
+    GCAL.PlaybackSpeed = CreateClientConVar("gcal_playback_speed", "1", true, false,
+        "Global GCAL playback speed multiplier.")
     GCAL.MuteSounds = CreateClientConVar("gcal_mute_sounds", "0", true, false, "Mute animation sounds emitted by GCAL.")
-    GCAL.SoundPitch = CreateClientConVar("gcal_sound_pitch", "100", true, false, "Pitch used for animation sounds emitted by GCAL.")
-    GCAL.AnimationOffsetX = CreateClientConVar("gcal_anim_offset_x", "0", true, false, "Global GCAL animation forward/back offset.")
-    GCAL.AnimationOffsetY = CreateClientConVar("gcal_anim_offset_y", "0", true, false, "Global GCAL animation right/left offset.")
-    GCAL.AnimationOffsetZ = CreateClientConVar("gcal_anim_offset_z", "0", true, false, "Global GCAL animation up/down offset.")
-    GCAL.AnimationAngleP = CreateClientConVar("gcal_anim_angle_p", "0", true, false, "Global GCAL animation pitch offset.")
+    GCAL.SoundPitch = CreateClientConVar("gcal_sound_pitch", "100", true, false,
+        "Pitch used for animation sounds emitted by GCAL.")
+    GCAL.AnimationOffsetX = CreateClientConVar("gcal_anim_offset_x", "0", true, false,
+        "Global GCAL animation forward/back offset.")
+    GCAL.AnimationOffsetY = CreateClientConVar("gcal_anim_offset_y", "0", true, false,
+        "Global GCAL animation right/left offset.")
+    GCAL.AnimationOffsetZ = CreateClientConVar("gcal_anim_offset_z", "0", true, false,
+        "Global GCAL animation up/down offset.")
+    GCAL.AnimationAngleP = CreateClientConVar("gcal_anim_angle_p", "0", true, false,
+        "Global GCAL animation pitch offset.")
     GCAL.AnimationAngleY = CreateClientConVar("gcal_anim_angle_y", "0", true, false, "Global GCAL animation yaw offset.")
     GCAL.AnimationAngleR = CreateClientConVar("gcal_anim_angle_r", "0", true, false, "Global GCAL animation roll offset.")
-    GCAL.TPIKOffsetX = CreateClientConVar("gcal_tpik_offset_x", "0", true, false, "Global GCAL thirdperson TPIK forward/back offset.")
-    GCAL.TPIKOffsetY = CreateClientConVar("gcal_tpik_offset_y", "0", true, false, "Global GCAL thirdperson TPIK right/left offset.")
-    GCAL.TPIKOffsetZ = CreateClientConVar("gcal_tpik_offset_z", "0", true, false, "Global GCAL thirdperson TPIK up/down offset.")
-    GCAL.TPIKAngleP = CreateClientConVar("gcal_tpik_angle_p", "0", true, false, "Global GCAL thirdperson TPIK pitch offset.")
-    GCAL.TPIKAngleY = CreateClientConVar("gcal_tpik_angle_y", "0", true, false, "Global GCAL thirdperson TPIK yaw offset.")
-    GCAL.TPIKAngleR = CreateClientConVar("gcal_tpik_angle_r", "0", true, false, "Global GCAL thirdperson TPIK roll offset.")
-    GCAL.TPIKTargetRadiusAdd = CreateClientConVar("gcal_tpik_target_radius_add", "0", true, false, "Global GCAL thirdperson TPIK target radius adjustment.")
-    GCAL.TPIKPoleSourceAdd = CreateClientConVar("gcal_tpik_pole_source_add", "0", true, false, "Global GCAL thirdperson TPIK source pole blend adjustment.")
-    GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false, "Global GCAL thirdperson TPIK native pole blend adjustment.")
-    GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false, "Global GCAL thirdperson TPIK smoothing adjustment.")
-    GCAL.CamBone = CreateClientConVar("gcal_cambone", "1", true, false, "Enable GCAL camera bone (view angle driving from animation attachments) for all tracks.")
-    GCAL.CloneOffsetX = CreateClientConVar("gcal_clone_offset_x", "0", true, false, "Global GCAL thirdperson model clone forward/back offset.")
-    GCAL.CloneOffsetY = CreateClientConVar("gcal_clone_offset_y", "0", true, false, "Global GCAL thirdperson model clone right/left offset.")
-    GCAL.CloneOffsetZ = CreateClientConVar("gcal_clone_offset_z", "0", true, false, "Global GCAL thirdperson model clone up/down offset.")
+    GCAL.TPIKOffsetX = CreateClientConVar("gcal_tpik_offset_x", "0", true, false,
+        "Global GCAL thirdperson TPIK forward/back offset.")
+    GCAL.TPIKOffsetY = CreateClientConVar("gcal_tpik_offset_y", "0", true, false,
+        "Global GCAL thirdperson TPIK right/left offset.")
+    GCAL.TPIKOffsetZ = CreateClientConVar("gcal_tpik_offset_z", "0", true, false,
+        "Global GCAL thirdperson TPIK up/down offset.")
+    GCAL.TPIKAngleP = CreateClientConVar("gcal_tpik_angle_p", "0", true, false,
+        "Global GCAL thirdperson TPIK pitch offset.")
+    GCAL.TPIKAngleY = CreateClientConVar("gcal_tpik_angle_y", "0", true, false,
+        "Global GCAL thirdperson TPIK yaw offset.")
+    GCAL.TPIKAngleR = CreateClientConVar("gcal_tpik_angle_r", "0", true, false,
+        "Global GCAL thirdperson TPIK roll offset.")
+    GCAL.TPIKTargetRadiusAdd = CreateClientConVar("gcal_tpik_target_radius_add", "0", true, false,
+        "Global GCAL thirdperson TPIK target radius adjustment.")
+    GCAL.TPIKPoleSourceAdd = CreateClientConVar("gcal_tpik_pole_source_add", "0", true, false,
+        "Global GCAL thirdperson TPIK source pole blend adjustment.")
+    GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false,
+        "Global GCAL thirdperson TPIK native pole blend adjustment.")
+    GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false,
+        "Global GCAL thirdperson TPIK smoothing adjustment.")
+    GCAL.CamBone = CreateClientConVar("gcal_cambone", "1", true, false,
+        "Enable GCAL camera bone (view angle driving from animation attachments) for all tracks.")
+    GCAL.CloneOffsetX = CreateClientConVar("gcal_clone_offset_x", "0", true, false,
+        "Global GCAL thirdperson model clone forward/back offset.")
+    GCAL.CloneOffsetY = CreateClientConVar("gcal_clone_offset_y", "0", true, false,
+        "Global GCAL thirdperson model clone right/left offset.")
+    GCAL.CloneOffsetZ = CreateClientConVar("gcal_clone_offset_z", "0", true, false,
+        "Global GCAL thirdperson model clone up/down offset.")
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
@@ -171,8 +192,10 @@ if CLIENT then
                 self.TPIKAngleY:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_y"),
                 self.TPIKAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_r")
             ),
-            target_radius_add = self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add"),
-            smoothing_add = self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
+            target_radius_add = self.TPIKTargetRadiusAdd:GetFloat() +
+                self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add"),
+            smoothing_add = self.TPIKSmoothingAdd:GetFloat() +
+                self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
         }
     end
 
@@ -215,7 +238,7 @@ end
 
 local function GCAL_Log(...)
     if not CLIENT or not GCAL.Debug:GetBool() then return end
-    MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat({...}, " "), "\n")
+    MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat({ ... }, " "), "\n")
 end
 
 function GCAL:NormalizeHand(hand)
@@ -297,11 +320,13 @@ function GCAL:RegisterTPIKOptions(name, options)
     for key, value in pairs(options) do
         local expected = TPIK_VALID_OPTIONS[key]
         if not expected then
-            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: unknown option '" .. tostring(key) .. "' for '" .. tostring(name) .. "'\n")
+            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: unknown option '" ..
+                tostring(key) .. "' for '" .. tostring(name) .. "'\n")
             continue
         end
         if TPIK_DEPRECATED_OPTIONS[key] then
-            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: '" .. tostring(key) .. "' is deprecated (" .. TPIK_DEPRECATED_OPTIONS[key] .. ")\n")
+            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: '" ..
+                tostring(key) .. "' is deprecated (" .. TPIK_DEPRECATED_OPTIONS[key] .. ")\n")
         end
         if expected == "number" then
             clean[key] = tonumber(value) or 0
@@ -377,15 +402,17 @@ function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
         return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     end
     for _, handler in ipairs(handlers) do
-        origin, angles, fov = handler.fn(handler.id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
+        origin, angles, fov = handler.fn(handler.id, track, ply, origin, angles, fov, attachment, camAng, camAngInt,
+            lerpVal, handler)
     end
     return origin, angles, fov
 end
 
 -- Default VManip-compatible cambone handler at priority 0
-GCAL:RegisterCamBoneHandler("vmanip", 0, function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
-    return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
-end)
+GCAL:RegisterCamBoneHandler("vmanip", 0,
+    function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+        return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+    end)
 
 function GCAL:PrepareAnimData(data, hand)
     if not data then return data end
@@ -422,9 +449,6 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
     GCAL_Log("Registering animation:", name)
     self.Anims[name] = data
 
-    -- If a track is already running for this anim, push the updated fields onto it
-    -- so the change takes effect immediately (otherwise the user has to stop/replay
-    -- for things like bone list, source bones, or speed to refresh).
     for trackID, track in pairs(self.ActiveTracks or {}) do
         if track.name == name and IsValid(track.model) then
             track.data = data
@@ -452,6 +476,7 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
         end
     end
 end
+
 GCAL.RegisterAnim = GCAL.RegisterAnim
 
 function GCAL:RegisterHandAnim(name, hand, data)
@@ -628,7 +653,7 @@ if CLIENT then
     local scalevec = Vector(1, 1, 1)
     local scaleflipvec = Vector(1, 1, -1)
     local properang = Angle(-79.750, 0, -90)
-    local tableintensity = {1, 1, 1}
+    local tableintensity = { 1, 1, 1 }
     local angleFlip = Angle(180, 0, 0)
     local angleZero = Angle(0, 0, 0)
 
@@ -757,9 +782,9 @@ if CLIENT then
                     else
                         for normalizedTarget in pairs(normalizedTargets) do
                             if #normalizedTarget >= 4 and (
-                                string.find(normalizedSequenceName, normalizedTarget, 1, true) or
-                                string.find(normalizedTarget, normalizedSequenceName, 1, true)
-                            ) then
+                                    string.find(normalizedSequenceName, normalizedTarget, 1, true) or
+                                    string.find(normalizedTarget, normalizedSequenceName, 1, true)
+                                ) then
                                 if not seenPartialMatches[sequenceName] then
                                     partialNormalizedMatches[#partialNormalizedMatches + 1] = sequenceName
                                     seenPartialMatches[sequenceName] = true
@@ -786,7 +811,9 @@ if CLIENT then
             local seqID = track.model:LookupSequence(candidate.name)
             if seqID ~= -1 then
                 if candidate.name ~= animName then
-                    GCAL_Log("Sequence resolver: using '" .. tostring(candidate.name) .. "' from " .. tostring(candidate.reason) .. " for '" .. tostring(animName) .. "'.")
+                    GCAL_Log("Sequence resolver: using '" ..
+                        tostring(candidate.name) ..
+                        "' from " .. tostring(candidate.reason) .. " for '" .. tostring(animName) .. "'.")
                 end
                 return seqID, candidate.name
             end
@@ -836,9 +863,9 @@ if CLIENT then
                     end
 
                     if not partialMatch and (
-                        (#target >= 4 and string.find(normalizedOther, target, 1, true)) or
-                        (#normalizedOther >= 4 and string.find(target, normalizedOther, 1, true))
-                    ) then
+                            (#target >= 4 and string.find(normalizedOther, target, 1, true)) or
+                            (#normalizedOther >= 4 and string.find(target, normalizedOther, 1, true))
+                        ) then
                         partialMatch = {
                             name = otherName,
                             data = otherAnim
@@ -868,9 +895,9 @@ if CLIENT then
         end
 
         local anim = GCAL.Anims[name]
-        if not anim then 
+        if not anim then
             GCAL_Log("Failed: Animation '" .. tostring(name) .. "' not found in registry!")
-            return false 
+            return false
         end
 
         if not anim.model then
@@ -907,7 +934,7 @@ if CLIENT then
         local easingInName = anim.easing_in or "OutQuad"
         local easingOutName = anim.easing_out or "OutQuad"
         local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
-        
+
         local track = {
             name = name,
             data = anim,
@@ -954,13 +981,13 @@ if CLIENT then
             legacyStarted = false,
             poseOnlyLegacy = false
         }
-        
-        if not IsValid(track.model) then 
+
+        if not IsValid(track.model) then
             GCAL_Log("Failed: Invalid model path: models/" .. tostring(anim.model))
             if IsValid(track.camModel) then track.camModel:Remove() end
-            return false 
+            return false
         end
-        
+
         track.model:SetNoDraw(true)
         if track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
             track.camModel = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH)
@@ -974,7 +1001,7 @@ if CLIENT then
 
         local sequenceList = track.model.GetSequenceList and (track.model:GetSequenceList() or {}) or {}
         track.seqID, track.sequenceName = ResolveSequence(track, name, anim)
-        
+
         if track.seqID == -1 then
             if anim.legacy and #sequenceList == 0 then
                 local surrogate = FindLegacySurrogateAnim(name, anim)
@@ -999,7 +1026,8 @@ if CLIENT then
                             model = surrogateModel,
                             data = surrogate.data
                         }
-                        local surrogateSeqID, surrogateSequenceName = ResolveSequence(surrogateTrack, surrogate.name, surrogate.data)
+                        local surrogateSeqID, surrogateSequenceName = ResolveSequence(surrogateTrack, surrogate.name,
+                            surrogate.data)
                         if surrogateSeqID ~= -1 then
                             if IsValid(track.model) then track.model:Remove() end
                             if IsValid(track.camModel) then track.camModel:Remove() end
@@ -1020,7 +1048,8 @@ if CLIENT then
                                 track.camModel:ResetSequence(track.seqID)
                             end
 
-                            GCAL_Log("Legacy fallback: using surrogate animation '" .. tostring(surrogate.name) .. "' for '" .. tostring(name) .. "'.")
+                            GCAL_Log("Legacy fallback: using surrogate animation '" ..
+                                tostring(surrogate.name) .. "' for '" .. tostring(name) .. "'.")
                         else
                             if IsValid(surrogateModel) then surrogateModel:Remove() end
                             if IsValid(surrogateCamModel) then surrogateCamModel:Remove() end
@@ -1033,7 +1062,8 @@ if CLIENT then
                 if track.seqID == -1 then
                     track.poseOnlyLegacy = true
                     track.duration = math.max(anim.duration or anim.holdtime or anim.lerp_peak or 1, 0.01)
-                    GCAL_Log("Legacy fallback: using pose-only mode for '" .. tostring(name) .. "' because the model reported zero sequences.")
+                    GCAL_Log("Legacy fallback: using pose-only mode for '" ..
+                        tostring(name) .. "' because the model reported zero sequences.")
                 end
             else
                 GCAL_Log("Failed: Sequence not found in model!")
@@ -1081,11 +1111,11 @@ if CLIENT then
                 track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
             end
         end
-        
+
         if GCAL.ActiveTracks[trackID] then
             GCAL:StopTrack(trackID)
         end
-        
+
         GCAL.ActiveTracks[trackID] = track
         if trackID == "legacy_left_arm" then
             SyncLegacyVManipFields(track)
@@ -1369,10 +1399,14 @@ if CLIENT then
         if track.cycle >= 1 and not track.loop then
             if track.segmented and not track.segmentFinished then
                 track.segmentFinished = true
-                hook.Run("GCALSegmentFinish", trackID, track.name, track.curSegment, track.lastSegment, track.segmentCount)
+                hook.Run("GCALSegmentFinish", trackID, track.name, track.curSegment, track.lastSegment,
+                    track.segmentCount)
                 hook.Run("VManipSegmentFinish", track.name, track.curSegment, track.lastSegment, track.segmentCount)
             elseif track.segmented and track.lastSegment then
-                if track.lerpVal >= 1 then GCAL:StopTrack(trackID) return true end
+                if track.lerpVal >= 1 then
+                    GCAL:StopTrack(trackID)
+                    return true
+                end
             elseif not track.segmented then
                 GCAL:StopTrack(trackID)
                 return true
@@ -1388,7 +1422,15 @@ if CLIENT then
         return false
     end
 
-    local flipState = { lefty = false, flippedNow = false, flipmode = false, targetRight = false, targetBones = nil, targetSide = "left_arm" }
+    local flipState = {
+        lefty = false,
+        flippedNow = false,
+        flipmode = false,
+        targetRight = false,
+        targetBones = nil,
+        targetSide =
+        "left_arm"
+    }
     local function GetLegacyFlipState(weapon)
         local validWeapon = IsValid(weapon)
         local lefty = validWeapon and tobool(weapon.ViewModelFlipDefault) or false
@@ -1556,7 +1598,8 @@ if CLIENT then
 
         local strategy = context.strategy
         if strategy and strategy.resolveArmTarget then
-            local target = strategy.resolveArmTarget(context.ply, context.weapon, context.vm, context.handsEnt, targetBones, context)
+            local target = strategy.resolveArmTarget(context.ply, context.weapon, context.vm, context.handsEnt,
+                targetBones, context)
             if IsValid(target) then return target end
         end
 
@@ -1654,7 +1697,8 @@ if CLIENT then
         track.debugBoneCount = boneCount
     end
 
-    local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext, skipVMSetup)
+    local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext,
+                              skipVMSetup)
         if not IsValid(vm) or not track.bones then return end
 
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
@@ -1682,7 +1726,7 @@ if CLIENT then
         if not skipVMSetup then
             targetEnt:SetupBones()
         end
-        
+
         if track.data.legacy then
             PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
         elseif track.data.locktoply or track.data.assurepos then
@@ -1707,7 +1751,8 @@ if CLIENT then
 
         for k, boneName in ipairs(track.bones) do
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or sourceBoneName
+            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or
+                sourceBoneName
             local modelBone = track.model:LookupBone(sourceBoneName)
             if not modelBone or modelBone < 0 then continue end
 
@@ -2003,53 +2048,56 @@ if CLIENT then
         end
 
         if GCAL:Play(name, trackID) then
-            MsgC(Color(93, 210, 180), "[GCAL] Playing " .. tostring(name) .. (trackID and (" on " .. tostring(trackID)) or "") .. "\n")
+            MsgC(Color(93, 210, 180),
+                "[GCAL] Playing " .. tostring(name) .. (trackID and (" on " .. tostring(trackID)) or "") .. "\n")
         else
             MsgC(Color(255, 106, 106), "[GCAL] Could not play " .. tostring(name) .. "\n")
         end
     end, GCAL_AnimAutocomplete, "Play a registered GCAL animation. Usage: gcal_play <animation> [track]")
 
     concommand.Add("gcal_debug_sequences", function(_, _, args)
-        local name = args[1]
-        if not name or name == "" then
-            MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_debug_sequences <animation>\n")
-            return
-        end
+            local name = args[1]
+            if not name or name == "" then
+                MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_debug_sequences <animation>\n")
+                return
+            end
 
-        local anim = GCAL.Anims[name]
-        if not anim then
-            MsgC(Color(255, 106, 106), "[GCAL] Unknown animation: " .. tostring(name) .. "\n")
-            return
-        end
+            local anim = GCAL.Anims[name]
+            if not anim then
+                MsgC(Color(255, 106, 106), "[GCAL] Unknown animation: " .. tostring(name) .. "\n")
+                return
+            end
 
-        if not anim.model then
-            MsgC(Color(255, 106, 106), "[GCAL] Animation has no model: " .. tostring(name) .. "\n")
-            return
-        end
+            if not anim.model then
+                MsgC(Color(255, 106, 106), "[GCAL] Animation has no model: " .. tostring(name) .. "\n")
+                return
+            end
 
-        local model = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH)
-        if not IsValid(model) then
-            MsgC(Color(255, 106, 106), "[GCAL] Could not create model: models/" .. tostring(anim.model) .. "\n")
-            return
-        end
+            local model = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH)
+            if not IsValid(model) then
+                MsgC(Color(255, 106, 106), "[GCAL] Could not create model: models/" .. tostring(anim.model) .. "\n")
+                return
+            end
 
-        model:SetNoDraw(true)
+            model:SetNoDraw(true)
 
-        MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for " .. tostring(name) .. "\n")
-        MsgC(Color(236, 242, 255), " - model: " .. tostring(anim.model) .. "\n")
-        MsgC(Color(236, 242, 255), " - explicit sequence: " .. tostring(anim.sequence or "<none>") .. "\n")
+            MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for " .. tostring(name) .. "\n")
+            MsgC(Color(236, 242, 255), " - model: " .. tostring(anim.model) .. "\n")
+            MsgC(Color(236, 242, 255), " - explicit sequence: " .. tostring(anim.sequence or "<none>") .. "\n")
 
-        local sequenceList = model.GetSequenceList and (model:GetSequenceList() or {}) or {}
-        MsgC(Color(236, 242, 255), " - sequences (" .. tostring(#sequenceList) .. "):\n")
-        if #sequenceList == 0 then
-            MsgC(Color(255, 176, 93), "   ! model loaded with zero sequences; this usually means the model content is missing, broken, or not actually the animated asset GCAL expects.\n")
-        end
-        for _, sequenceName in ipairs(sequenceList) do
-            MsgC(Color(236, 242, 255), "   * " .. tostring(sequenceName) .. "\n")
-        end
+            local sequenceList = model.GetSequenceList and (model:GetSequenceList() or {}) or {}
+            MsgC(Color(236, 242, 255), " - sequences (" .. tostring(#sequenceList) .. "):\n")
+            if #sequenceList == 0 then
+                MsgC(Color(255, 176, 93),
+                    "   ! model loaded with zero sequences; this usually means the model content is missing, broken, or not actually the animated asset GCAL expects.\n")
+            end
+            for _, sequenceName in ipairs(sequenceList) do
+                MsgC(Color(236, 242, 255), "   * " .. tostring(sequenceName) .. "\n")
+            end
 
-        model:Remove()
-    end, GCAL_AnimAutocomplete, "Print the runtime model sequence list for a registered animation. Usage: gcal_debug_sequences <animation>")
+            model:Remove()
+        end, GCAL_AnimAutocomplete,
+        "Print the runtime model sequence list for a registered animation. Usage: gcal_debug_sequences <animation>")
 
     concommand.Add("gcal_debug_track", function(_, _, args)
         local trackID = args[1] or "legacy_left_arm"
@@ -2071,15 +2119,22 @@ if CLIENT then
         MsgC(Color(236, 242, 255), " - blockCodeScope: " .. tostring(track.blockCodeScope or "<global>") .. "\n")
         MsgC(Color(236, 242, 255), " - poseOnlyLegacy: " .. tostring(track.poseOnlyLegacy or false) .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson: " .. tostring(track.thirdperson or false) .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson root bone: " .. tostring(track.debugThirdPersonRootBone or "<not cached>") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson mode: " .. tostring(track.debugThirdPersonMode or "<not evaluated>") .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson root bone: " .. tostring(track.debugThirdPersonRootBone or "<not cached>") .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson mode: " .. tostring(track.debugThirdPersonMode or "<not evaluated>") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson host: " .. tostring(track.debugThirdPersonHost or "gcal") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson model: " .. tostring(track.debugThirdPersonModel or "<not rendered>") .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson model: " .. tostring(track.debugThirdPersonModel or "<not rendered>") .. "\n")
         MsgC(Color(236, 242, 255), " - thirdperson model valid: " .. tostring(IsValid(track.thirdpersonModel)) .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson model visible materials: " .. tostring(track.thirdpersonModelHasVisibleMaterials) .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson model ready frame: " .. tostring(track.thirdpersonModelReadyFrame or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson model draw frame: " .. tostring(track.debugThirdPersonModelDrawFrame or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson model distance: " .. tostring(track.debugThirdPersonModelDistance or "<none>") .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson model visible materials: " .. tostring(track.thirdpersonModelHasVisibleMaterials) .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson model ready frame: " .. tostring(track.thirdpersonModelReadyFrame or "<none>") .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson model draw frame: " .. tostring(track.debugThirdPersonModelDrawFrame or "<none>") .. "\n")
+        MsgC(Color(236, 242, 255),
+            " - thirdperson model distance: " .. tostring(track.debugThirdPersonModelDistance or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
 
@@ -2132,11 +2187,13 @@ if CLIENT then
             end
             local targetBone = targetEnt:LookupBone(targetBoneName)
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or sourceBoneName
+            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or
+                sourceBoneName
             local modelBone = IsValid(track.model) and track.model:LookupBone(sourceBoneName) or nil
             if targetBone ~= nil and targetBone >= 0 and modelBone ~= nil and modelBone >= 0 then
                 matched = matched + 1
-                MsgC(Color(236, 242, 255), "   * " .. tostring(targetBoneName) .. " <- " .. tostring(sourceBoneName) .. "\n")
+                MsgC(Color(236, 242, 255),
+                    "   * " .. tostring(targetBoneName) .. " <- " .. tostring(sourceBoneName) .. "\n")
 
                 if samples < 3 then
                     local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
@@ -2199,7 +2256,7 @@ if CLIENT then
         end
     end)
 
-hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
+    hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if self == true then return end
         if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
@@ -2208,7 +2265,9 @@ hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         local hasAttachment = false
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
-            if track.attachment then hasAttachment = true; break end
+            if track.attachment then
+                hasAttachment = true; break
+            end
         end
         if not hasAttachment then return end
 
@@ -2282,8 +2341,8 @@ if SERVER then
         if not name then return false end
 
         net.Start("GCAL_Play")
-            net.WriteString(name)
-            net.WriteString(trackID or "")
+        net.WriteString(name)
+        net.WriteString(trackID or "")
         if recipients then
             net.Send(recipients)
         else
@@ -2295,7 +2354,7 @@ if SERVER then
 
     function GCAL:StopTrack(trackID, recipients)
         net.Start("GCAL_Stop")
-            net.WriteString(trackID or "")
+        net.WriteString(trackID or "")
         if recipients then
             net.Send(recipients)
         else
