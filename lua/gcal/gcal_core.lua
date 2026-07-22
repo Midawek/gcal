@@ -418,9 +418,39 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
     if not name or not data then return end
     self:PrepareAnimData(data)
     data.addon_name = data.addon_name or data.addon or data.source_addon or GCAL.CurrentRegistrationSource or "GCAL"
-    
+
     GCAL_Log("Registering animation:", name)
-    GCAL.Anims[name] = data
+    self.Anims[name] = data
+
+    -- If a track is already running for this anim, push the updated fields onto it
+    -- so the change takes effect immediately (otherwise the user has to stop/replay
+    -- for things like bone list, source bones, or speed to refresh).
+    for trackID, track in pairs(self.ActiveTracks or {}) do
+        if track.name == name and IsValid(track.model) then
+            track.data = data
+            track.bones = data.bones or self.GROUPS.LEFT_ARM
+            track.sourceBones = data.source_bones or data.bones or self.GROUPS.LEFT_ARM
+            track.speed = data.speed or 1
+            track.thirdperson = self.InternalThirdPersonEnabled and data.thirdperson ~= false
+            track.lerpCurve = data.lerp_curve or 1
+            if data.locktoply ~= nil then
+                track.lockZ = data.locktoply and EyePos().z or 0
+            end
+            if data.loop ~= nil then track.loop = data.loop end
+            if data.holdtime ~= nil then
+                track.holdTimeData = data.holdtime
+                if data.holdtime and not track.holdTime then
+                    track.holdTime = track.startTime + data.holdtime
+                end
+            end
+            -- TPIK model/materials cache invalidation so the clone picks up new options
+            track.thirdpersonMaterialsConfigured = nil
+            track.thirdpersonBoneMatrices = nil
+            track.thirdpersonSolveFrame = nil
+            track.thirdpersonModelReadyFrame = nil
+            break
+        end
+    end
 end
 GCAL.RegisterAnim = GCAL.RegisterAnim
 
