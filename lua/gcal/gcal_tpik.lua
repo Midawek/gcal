@@ -169,14 +169,34 @@ function GCAL.InstallTPIK(deps)
         model:SetCycle(track.cycle or 0)
         model:SetupBones()
 
+        -- Clone offsets: whole-clone shift + per-bone tweaks
+        local cloneOffsetX = (Opt(track, "clone_offset_x", "thirdperson_clone_offset_x") or 0) + (GCAL.CloneOffsetX and GCAL.CloneOffsetX:GetFloat() or 0) + OptAdd(track, "clone_offset_x")
+        local cloneOffsetY = (Opt(track, "clone_offset_y", "thirdperson_clone_offset_y") or 0) + (GCAL.CloneOffsetY and GCAL.CloneOffsetY:GetFloat() or 0) + OptAdd(track, "clone_offset_y")
+        local cloneOffsetZ = (Opt(track, "clone_offset_z", "thirdperson_clone_offset_z") or 0) + (GCAL.CloneOffsetZ and GCAL.CloneOffsetZ:GetFloat() or 0) + OptAdd(track, "clone_offset_z")
+        local cloneOffsets = Opt(track, "model_offset")
+
         local copies = {}
         for bone = 0, model:GetBoneCount() - 1 do
             local src = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
             if src then
                 copies[bone] = Matrix(src:ToTable())
-                model:SetBoneMatrix(bone, copies[bone])
-                model:SetBonePosition(bone, copies[bone]:GetTranslation(), copies[bone]:GetAngles())
-                Consider(bone, src:GetTranslation(), false)
+                local m = copies[bone]
+                local pos = m:GetTranslation()
+                if cloneOffsetX ~= 0 or cloneOffsetY ~= 0 or cloneOffsetZ ~= 0 then
+                    pos = pos + Vector(cloneOffsetX, cloneOffsetY, cloneOffsetZ)
+                    m:SetTranslation(pos)
+                end
+                if cloneOffsets then
+                    local boneName = model:GetBoneName(bone)
+                    local boneOffset = cloneOffsets[boneName]
+                    if boneOffset then
+                        pos = pos + boneOffset
+                        m:SetTranslation(pos)
+                    end
+                end
+                model:SetBoneMatrix(bone, m)
+                model:SetBonePosition(bone, pos, m:GetAngles())
+                Consider(bone, pos, false)
             end
         end
 

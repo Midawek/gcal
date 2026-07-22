@@ -475,16 +475,31 @@ Valid TPIK option keys:
 | `offset_x` | number | 0 | Forward/back position offset in render-angle space. |
 | `offset_y` | number | 0 | Right/left position offset. |
 | `offset_z` | number | 0 | Up/down position offset. |
+| `model_offset` | table | — | Per-bone world-space position offset for the third-person model clone (spray cans, tablets, etc.) `{ boneName = Vector(x,y,z), ... }`. Useful for fine-tuning a prop's appearance without retouching the model. |
+| `clone_offset_x` | number | 0 | Forward/back position offset for the whole third-person model clone. |
+| `clone_offset_y` | number | 0 | Right/left position offset. |
+| `clone_offset_z` | number | 0 | Up/down position offset. |
 | `pole_source` | number | — | **Deprecated.** Ignored (IK solver removed). |
 | `pole_native` | number | — | **Deprecated.** Ignored (IK solver removed). |
 
 The per-animation `offset_x/y/z` values are added on top of the global convar adjustments (`gcal_tpik_offset_x/y/z`) and per-animation cookie adjustments. They are applied after clamping, so they can push the arm beyond the clamp range.
 
+The model clone is a separate `ClientsideModel` that renders addon-owned props (spray cans, tablets, etc.) on the player in third person. `model_offset` provides per-bone tweaks (e.g. shift the spray can in the hand forward); `clone_offset_x/y/z` is a simpler whole-clone shift for the same purpose. Both are added on top of the global `gcal_clone_offset_x/y/z` convars and per-animation cookies.
+
+```lua
+GCAL:RegisterTPIKOptions("my_anim", {
+    clone_offset_x = 1,   -- shift the whole prop forward by 1
+    model_offset = {
+        ["ValveBiped.Bip01_L_Hand"] = Vector(0, 0, -2), -- and pull the hand bone down 2
+    },
+})
+```
+
 Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, and all other weapons (including ARC9 weapons without native TPIK) use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. When ARC9's native TPIK is disabled, GCAL falls back to its own direct-bone-copy TPIK instead of disabling thirdperson entirely. This works because GCAL's TPIK is now a simple bone copy (ARC9-style) rather than the old IK solver that could interfere with ARC9's rendering.
 
 Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
 
-The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*` and `gcal_anim_angle_*` affect normal firstperson placement. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` are applied after the source-to-player offset and clamping, so they nudge the final thirdperson pose. `gcal_tpik_target_radius_add` and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values.
+The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*` and `gcal_anim_angle_*` affect normal firstperson placement. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` are applied after the source-to-player offset and clamping, so they nudge the final thirdperson pose. `gcal_tpik_target_radius_add` and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values. For the thirdperson model clone (spray can, tablet, etc.), use `gcal_clone_offset_x/y/z` convars and the per-animation `model_offset` / `clone_offset_x/y/z` options to nudge alignment.
 
 ---
 
@@ -857,7 +872,7 @@ If thirdperson looks wrong:
 
 - First verify firstperson works. TPIK depends on a valid source animation.
 - Add `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` if the firstperson sequence is not a good thirdperson pose.
-- Tune `target_radius`, `smoothing`, and `offset_x/y/z` in `GCAL.TPIKOptions`.
+- Tune `target_radius`, `smoothing`, `offset_x/y/z`, `model_offset`, and `clone_offset_x/y/z` in `GCAL.TPIKOptions`.
 - Use `model = false` to isolate arm solving from prop rendering.
 - Use `model_bone` and `model_max_distance` when addon props drift away from the solved hand.
 
@@ -873,6 +888,7 @@ Use these console commands during development:
 - `gcal_tpik_target_radius_add <value>`: Adds to the thirdperson hand-goal clamp radius. Negative values tighten it; positive values loosen it.
 - `gcal_tpik_pole_source_add <value>` / `gcal_tpik_pole_native_add <value>`: No longer used (IK solver removed). The convars still exist for backward compat but have no effect.
 - `gcal_tpik_smoothing_add <value>`: Adds to the shoulder-local TPIK smoothing speed. The effective value is clamped to `0..60`.
+- `gcal_clone_offset_x/y/z <value>`: Shifts the whole thirdperson model clone in render-angle space without affecting firstperson placement.
 - `gcal_list_anims`: Lists every animation currently registered in GCAL.
 - `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
 - `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.

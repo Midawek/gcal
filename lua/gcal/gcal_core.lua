@@ -62,6 +62,9 @@ if CLIENT then
     GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false, "Global GCAL thirdperson TPIK native pole blend adjustment.")
     GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false, "Global GCAL thirdperson TPIK smoothing adjustment.")
     GCAL.CamBone = CreateClientConVar("gcal_cambone", "1", true, false, "Enable GCAL camera bone (view angle driving from animation attachments) for all tracks.")
+    GCAL.CloneOffsetX = CreateClientConVar("gcal_clone_offset_x", "0", true, false, "Global GCAL thirdperson model clone forward/back offset.")
+    GCAL.CloneOffsetY = CreateClientConVar("gcal_clone_offset_y", "0", true, false, "Global GCAL thirdperson model clone right/left offset.")
+    GCAL.CloneOffsetZ = CreateClientConVar("gcal_clone_offset_z", "0", true, false, "Global GCAL thirdperson model clone up/down offset.")
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
@@ -85,7 +88,10 @@ if CLIENT then
         tpik_target_radius_add = true,
         tpik_pole_source_add = true,
         tpik_pole_native_add = true,
-        tpik_smoothing_add = true
+        tpik_smoothing_add = true,
+        clone_offset_x = true,
+        clone_offset_y = true,
+        clone_offset_z = true
     }
 
     function GCAL:AnimationAdjustmentCookieKey(name, field)
@@ -177,6 +183,15 @@ if CLIENT then
         if option == "smoothing" then
             return self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
         end
+        if option == "clone_offset_x" then
+            return self.CloneOffsetX:GetFloat() + self:GetAnimationAdjustmentValue(name, "clone_offset_x")
+        end
+        if option == "clone_offset_y" then
+            return self.CloneOffsetY:GetFloat() + self:GetAnimationAdjustmentValue(name, "clone_offset_y")
+        end
+        if option == "clone_offset_z" then
+            return self.CloneOffsetZ:GetFloat() + self:GetAnimationAdjustmentValue(name, "clone_offset_z")
+        end
 
         return 0
     end
@@ -254,6 +269,10 @@ local TPIK_VALID_OPTIONS = {
     offset_x = "number",
     offset_y = "number",
     offset_z = "number",
+    model_offset = "table",
+    clone_offset_x = "number",
+    clone_offset_y = "number",
+    clone_offset_z = "number",
     -- Deprecated (IK solver removed, these are ignored)
     pole_source = "number",
     pole_native = "number",
