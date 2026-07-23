@@ -191,7 +191,7 @@ end
 
 function VManip:IsValid()
     local track = GCAL.ActiveTracks["legacy_left_arm"]
-    return track != nil and IsValid(track.model)
+    return track ~= nil and IsValid(track.model)
 end
 
 function VManip:Remove()
