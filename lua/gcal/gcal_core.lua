@@ -505,8 +505,21 @@ local function RefreshActiveTrack(track, data)
     track.bones = data.bones or GCAL.GROUPS.LEFT_ARM
     track.sourceBones = data.source_bones or data.bones or GCAL.GROUPS.LEFT_ARM
     track.speed = data.speed or 1
+
+    -- Check for legacy matrix lerp based on easing mode
+    local easingInName = data.easing_in or "OutQuad"
+    local easingOutName = data.easing_out or "OutQuad"
+    local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
+
     track.thirdperson = GCAL.InternalThirdPersonEnabled and data.thirdperson ~= false
     track.lerpCurve = data.lerp_curve or 1
+    track.legacyMatrixLerp = legacyMatrixLerp
+    track.lerpSpeedIn = data.lerp_speed_in or 1
+    track.lerpSpeedOut = data.lerp_speed_out or 1
+    track.easingIn = GCAL.Lerp.Get(easingInName == "Legacy" and "OutQuad" or easingInName)
+    track.easingOut = GCAL.Lerp.Get(easingOutName == "Legacy" and "OutQuad" or easingOutName)
+    track.lerpPeak = data.lerp_peak or 0.5
+
     if data.locktoply ~= nil then
         track.lockZ = data.locktoply and EyePos().z or 0
     end
@@ -517,6 +530,47 @@ local function RefreshActiveTrack(track, data)
             track.holdTime = track.startTime + data.holdtime
         end
     end
+
+    -- Update callbacks
+    track.canInterrupt = data.can_interrupt ~= false
+    track.onStartCallback = data.on_start
+    track.onFinishCallback = data.on_finish
+    track.onInterruptCallback = data.on_interrupt
+    track.onCycleCallback = data.on_cycle
+
+    -- Update visual effects
+    track.viewmodelFov = data.viewmodel_fov
+    track.viewmodelOffset = data.viewmodel_offset
+    track.screenShake = data.screen_shake
+
+    -- Update sound settings
+    track.soundVolume = data.sound_volume or 75
+    track.soundLevel = data.sound_level or 75
+    track.soundFlags = data.sound_flags or 0
+
+    -- Update blend settings
+    track.blendMode = data.blend_mode or "normal"
+    track.blendWeight = data.blend_weight
+
+    -- Update model settings
+    track.modelScale = data.model_scale
+    track.modelSkin = data.model_skin
+    track.modelBodygroups = data.model_bodygroups
+
+    -- Update TPIK options
+    track.tpikOptions = GetTPIKOptionsForAnim(track.name)
+    track.tpikSequenceRequested = GetTPIKSequenceName(track.name)
+
+    -- Update other control flags
+    track.blockCode = data.block_code or false
+    track.blockCodeScope = data.block_code_scope
+    track.preventQuit = data.preventquit or false
+    track.segmented = data.segmented or false
+    track.camboneEnabled = (data.cambone == nil) or tobool(data.cambone)
+    track.camAng = data.cam_ang or properang
+    track.camAngInt = data.cam_angint or tableintensity
+
+    -- Clear thirdperson cache to force rebuild with new settings
     track.thirdpersonMaterialsConfigured = nil
     track.thirdpersonBoneMatrices = nil
     track.thirdpersonSolveFrame = nil
@@ -993,8 +1047,7 @@ if CLIENT then
             bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
-            -- Disable TPIK for legacy VManip animations to encourage porting to native GCAL
-            thirdperson = GCAL.InternalThirdPersonEnabled and anim.thirdperson ~= false and not anim.legacy,
+            thirdperson = GCAL.InternalThirdPersonEnabled and anim.thirdperson ~= false,
             tpikOptions = GetTPIKOptionsForAnim(name),
             tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
