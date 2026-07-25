@@ -457,9 +457,6 @@ function GCAL:PrepareAnimData(data, hand)
         data.cambone = tobool(data.cambone)
     end
 
-    -- New: Animation priority system (higher = more important)
-    data.priority = data.priority or 0
-
     -- New: Callback support
     data.on_start = data.on_start or data.onstart or data.OnStart
     data.on_finish = data.on_finish or data.onfinish or data.OnFinish
@@ -996,14 +993,14 @@ if CLIENT then
             bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
-            thirdperson = GCAL.InternalThirdPersonEnabled and anim.thirdperson ~= false,
+            -- Disable TPIK for legacy VManip animations to encourage porting to native GCAL
+            thirdperson = GCAL.InternalThirdPersonEnabled and anim.thirdperson ~= false and not anim.legacy,
             tpikOptions = GetTPIKOptionsForAnim(name),
             tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
             legacyStarted = false,
             poseOnlyLegacy = false,
-            -- New: Priority and callbacks
-            priority = anim.priority or 0,
+            -- New: Callbacks
             canInterrupt = anim.can_interrupt ~= false,
             onStartCallback = anim.on_start,
             onFinishCallback = anim.on_finish,
@@ -1227,15 +1224,13 @@ if CLIENT then
         if not LegacyAnimAllowed(name, trackID, anim) then return false end
         if hook.Run("VManipPrePlayAnim", name) == false then return false end
 
-        -- New: Priority system - check if we can interrupt current track
+        -- New: Queue system - check if current track can be interrupted
         local existingTrack = GCAL.ActiveTracks[trackID]
-        if existingTrack then
-            local existingPriority = existingTrack.priority or 0
-            local newPriority = anim.priority or 0
-            if not existingTrack.canInterrupt and newPriority <= existingPriority then
-                GCAL_Log("Suppressed: Cannot interrupt higher priority animation on track '" .. tostring(trackID) .. "'")
-                return false
-            end
+        if existingTrack and not existingTrack.canInterrupt then
+            -- Cannot interrupt - add to queue instead
+            GCAL_Log("Cannot interrupt current animation on track '" .. tostring(trackID) .. "', queueing instead")
+            self:QueueAnim(name, trackID)
+            return true
         end
 
         local track = CreateTrack(name, anim)

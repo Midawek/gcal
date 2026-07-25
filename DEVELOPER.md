@@ -143,7 +143,7 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
 | `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
 | `cambone`             | bool         | When `true`, drives the player's first-person view angles from this track's animation attachments (VManip-style camera bone). When `false`, disables cambone for this animation. When `nil` (default), follows the global `gcal_cambone` convar. See section 11. |
-| `legacy`             | bool         | Marks this as a VManip legacy animation. Enables tolerant name matching and disables arc9-style bone copies. Most VManip addons set this automatically. |
+| `legacy`             | bool         | Marks this as a VManip legacy animation. Enables tolerant name matching and disables arc9-style bone copies. Most VManip addons set this automatically. **Note: Legacy animations do not support thirdperson TPIK to encourage porting to native GCAL.** |
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `preventquit`        | bool         | If true, `GCAL:QuitHolding` will not release this hold state.                                                                                          |
@@ -152,8 +152,7 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `locktoply`          | bool         | If true, pins the animation to the player's view. The model is placed at `EyePos()` with a 25% blend between view and viewmodel angles.              |
 | `assurepos`          | bool         | If true, parents the gesture model to the viewmodel each frame. The strictest lock — guarantees perfect alignment but costs a reparent per weapon swap.  |
 | **NEW FEATURES** | | |
-| `priority`           | number       | Animation priority (default: 0). Higher priority animations can interrupt lower priority ones. |
-| `can_interrupt`      | bool         | If false, this animation cannot be interrupted by lower or equal priority animations (default: true). |
+| `can_interrupt`      | bool         | If false, this animation cannot be interrupted and will play to completion. New animations will be queued (default: true). |
 | `on_start`           | function     | Callback function called when animation starts. Signature: `function(trackID, animName, track)`. Aliases: `onstart`, `OnStart`. |
 | `on_finish`          | function     | Callback function called when animation finishes naturally. Signature: `function(trackID, animName, track)`. Aliases: `onfinish`, `OnFinish`. |
 | `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. Aliases: `oninterrupt`, `OnInterrupt`. |
@@ -544,14 +543,42 @@ GCAL:RegisterTPIKOptions("my_anim", {
 
 ### NEW: Advanced TPIK Examples
 
-**Priority System with Callbacks:**
+**Important Note:** TPIK (thirdperson rendering) is **disabled for legacy VManip animations** (`legacy = true`). To enable thirdperson support for your animations, port them to native GCAL by removing the `legacy` flag and using native GCAL registration. This encourages developers to take advantage of GCAL's modern features and improved thirdperson system.
+
+**Porting from Legacy VManip to Native GCAL:**
+
+```lua
+-- OLD: Legacy VManip
+VManip:RegisterAnim("my_anim", {
+    model = "c_vmanip_mymodel.mdl",
+    lerp_peak = 0.5,
+    -- legacy = true (set automatically by VManip shim)
+})
+
+-- NEW: Native GCAL with TPIK support
+GCAL:RegisterSecondHandAnim("my_anim", {
+    model = "c_vmanip_mymodel.mdl",
+    sequence = "my_anim",  -- Be explicit about sequence
+    lerp_peak = 0.5,
+    -- legacy flag removed - now gets full TPIK support!
+})
+
+-- Optional: Add TPIK customization
+GCAL:RegisterTPIKOptions("my_anim", {
+    sequence = "my_anim_tp",  -- Custom thirdperson sequence
+    target_radius = 35,
+    smoothing = 20,
+    model = true  -- Enable prop rendering in thirdperson
+})
+```
+
+**Queue System with Callbacks:**
 
 ```lua
 GCAL:RegisterSecondHandAnim("tablet_open", {
     model = "myaddon/c_tablet.mdl",
     sequence = "open",
-    priority = 10,  -- Higher priority
-    can_interrupt = false,  -- Cannot be interrupted
+    can_interrupt = false,  -- Cannot be interrupted, other anims will queue
     on_start = function(trackID, animName, track)
         print("Tablet opening animation started!")
     end,
@@ -564,6 +591,10 @@ GCAL:RegisterSecondHandAnim("tablet_open", {
         print("Tablet opening was interrupted by " .. newAnim)
     end
 })
+
+-- If you try to play another animation on the same track while tablet_open is active:
+GCAL:Play("tablet_open", "left_arm")  -- Starts playing
+GCAL:Play("tablet_close", "left_arm") -- Automatically queued, will play after tablet_open finishes
 ```
 
 **Bone-Specific TPIK Control:**
