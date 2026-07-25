@@ -257,14 +257,43 @@ function GCAL.InstallTPIK(deps)
         source:SetModelScale(GetTrackModelScale(track, weapon, flip))
         source:SetupBones()
 
+        -- New: Check for distance fade
+        local options = GetOptions(track)
+        local distanceFade = options and options.distance_fade
+        if distanceFade then
+            local fadeStart = tonumber(options.fade_start) or 100
+            local fadeEnd = tonumber(options.fade_end) or 300
+            local camPos = LocalPlayer():GetPos()
+            local plyPos = ply:GetPos()
+            local dist = camPos:Distance(plyPos)
+
+            if dist > fadeEnd then
+                return -- Too far, don't render
+            elseif dist > fadeStart then
+                -- Fade blend strength based on distance
+                local fadeAlpha = 1 - math.Clamp((dist - fadeStart) / (fadeEnd - fadeStart), 0, 1)
+                track.distanceFadeAlpha = fadeAlpha
+            else
+                track.distanceFadeAlpha = 1
+            end
+        else
+            track.distanceFadeAlpha = 1
+        end
+
         -- Blend factor: 0 = full animation, 1 = full rest pose
+        local baseLerpCurve = track.lerpCurve or (track.data and track.data.lerp_curve) or 1
+        local blendCurve = tonumber(Opt(track, "blend_curve")) or baseLerpCurve
         local blend = math.Clamp(
             (track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp)(
                 track.lerpVal or 1, 0, 1,
-                track.lerpCurve or (track.data and track.data.lerp_curve) or 1
+                blendCurve
             ),
             0, 1
         )
+
+        -- New: Apply blend strength modifier
+        local blendStrength = tonumber(Opt(track, "blend_strength")) or 1
+        blend = blend * blendStrength * (track.distanceFadeAlpha or 1)
 
         -- Spine position for clamping
         local spineIdx = GetBone(ply, "ValveBiped.Bip01_Spine4")
@@ -319,6 +348,12 @@ function GCAL.InstallTPIK(deps)
         local totalOffsetZ = tpikAdjustPos.z + animOffsetZ
         local tpikPosDelta = tpikForward * totalOffsetX + tpikRight * totalOffsetY + tpikUp * totalOffsetZ
 
+        -- New: Get bone-specific options
+        local lockBones = Opt(track, "lock_bones") or {}
+        local ignoreBones = Opt(track, "ignore_bones") or {}
+        local scaleBones = Opt(track, "scale_bones") or {}
+        local blendPerBone = Opt(track, "blend_per_bone") or {}
+
         local finalMatrices = {}
         local carried = {}
         local boneCount = 0
@@ -330,6 +365,16 @@ function GCAL.InstallTPIK(deps)
             local tgtBone = GetBone(ply, tgtBoneName)
             if not tgtBone or tgtBone < 0 then continue end
 
+            -- New: Check ignore list
+            local shouldIgnore = false
+            for _, ignoreName in ipairs(ignoreBones) do
+                if string.find(tgtBoneName, ignoreName, 1, true) then
+                    shouldIgnore = true
+                    break
+                end
+            end
+            if shouldIgnore then continue end
+
             local srcBone = GetBone(source, srcBoneName)
             local isHelper = string.EndsWith(tgtBoneName, "_Wrist") or string.EndsWith(tgtBoneName, "_Ulna")
             if not srcBone or srcBone < 0 then continue end
@@ -337,6 +382,21 @@ function GCAL.InstallTPIK(deps)
             local srcMatrix = source:GetBoneMatrix(srcBone)
             local tgtMatrix = baseMatrices[tgtBone]
             if not srcMatrix or not tgtMatrix then continue end
+
+            -- New: Check if bone is locked (uses rest pose only)
+            local isLocked = false
+            for _, lockName in ipairs(lockBones) do
+                if string.find(tgtBoneName, lockName, 1, true) then
+                    isLocked = true
+                    break
+                end
+            end
+
+            if isLocked then
+                finalMatrices[tgtBone] = Matrix(tgtMatrix:ToTable())
+                boneCount = boneCount + 1
+                continue
+            end
 
             -- Offset, clamp, then apply user adjustment
             local pos = srcMatrix:GetTranslation() + offset
@@ -353,6 +413,19 @@ function GCAL.InstallTPIK(deps)
                 srcMatrix:GetAngles().y + tpikAdjustAng.y,
                 srcMatrix:GetAngles().r + tpikAdjustAng.r
             )
+
+            -- New: Apply bone-specific scale
+            local boneScale = 1
+            for scaleName, scale in pairs(scaleBones) do
+                if string.find(tgtBoneName, scaleName, 1, true) then
+                    boneScale = tonumber(scale) or 1
+                    break
+                end
+            end
+            if boneScale ~= 1 then
+                local boneBase = tgtMatrix:GetTranslation()
+                pos = boneBase + (pos - boneBase) * boneScale
+            end
 
             -- Optional per-bone smoothing
             if smoothing > 0 then
@@ -375,9 +448,18 @@ function GCAL.InstallTPIK(deps)
                 end
             end
 
+            -- New: Apply per-bone blend override
+            local finalBlend = blend
+            for blendBoneName, boneBlend in pairs(blendPerBone) do
+                if string.find(tgtBoneName, blendBoneName, 1, true) then
+                    finalBlend = tonumber(boneBlend) or blend
+                    break
+                end
+            end
+
             -- Blend between animation pose and rest pose
-            local blendedPos = LerpVector(blend, pos, tgtMatrix:GetTranslation())
-            local blendedAng = LerpAngle(blend, ang, tgtMatrix:GetAngles())
+            local blendedPos = LerpVector(finalBlend, pos, tgtMatrix:GetTranslation())
+            local blendedAng = LerpAngle(finalBlend, ang, tgtMatrix:GetAngles())
 
             local final = Matrix()
             final:SetTranslation(blendedPos)

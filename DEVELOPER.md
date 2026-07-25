@@ -151,6 +151,30 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `easing_out`         | string       | Easing function for the exit transition.                                                                                                              |
 | `locktoply`          | bool         | If true, pins the animation to the player's view. The model is placed at `EyePos()` with a 25% blend between view and viewmodel angles.              |
 | `assurepos`          | bool         | If true, parents the gesture model to the viewmodel each frame. The strictest lock — guarantees perfect alignment but costs a reparent per weapon swap.  |
+| **NEW FEATURES** | | |
+| `priority`           | number       | Animation priority (default: 0). Higher priority animations can interrupt lower priority ones. |
+| `can_interrupt`      | bool         | If false, this animation cannot be interrupted by lower or equal priority animations (default: true). |
+| `on_start`           | function     | Callback function called when animation starts. Signature: `function(trackID, animName, track)`. Aliases: `onstart`, `OnStart`. |
+| `on_finish`          | function     | Callback function called when animation finishes naturally. Signature: `function(trackID, animName, track)`. Aliases: `onfinish`, `OnFinish`. |
+| `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. Aliases: `oninterrupt`, `OnInterrupt`. |
+| `on_cycle`           | function     | Callback function called periodically during playback (every 10% cycle). Signature: `function(trackID, animName, track, cycle)`. Aliases: `oncycle`, `OnCycle`. |
+| `delay_start`        | number       | Delay in seconds before animation actually starts playing (default: 0). Aliases: `delaystart`. |
+| `ease_in_time`       | number       | Custom ease-in duration override (seconds). Aliases: `easeintime`. |
+| `ease_out_time`      | number       | Custom ease-out duration override (seconds). Aliases: `easeouttime`. |
+| `play_condition`     | function     | Conditional playback function. Return false to prevent playback. Signature: `function(animName, trackID, animData)`. Aliases: `playcondition`, `condition`. |
+| `viewmodel_fov`      | number       | Custom viewmodel FOV for this animation. Aliases: `vm_fov`, `fov`. |
+| `viewmodel_offset`   | Vector       | Custom viewmodel position offset. Aliases: `vm_offset`. |
+| `screen_shake`       | table        | Screen shake parameters: `{amplitude, frequency, duration}`. Aliases: `screenshake`. |
+| `sound_volume`       | number       | Volume level for animation sounds (default: 75). Aliases: `soundvolume`. |
+| `sound_level`        | number       | Sound level/attenuation for animation sounds (default: 75). Aliases: `soundlevel`. |
+| `sound_flags`        | number       | Sound flags for animation sounds (default: 0). Aliases: `soundflags`. |
+| `blend_mode`         | string       | Bone blending mode: `"normal"`, `"additive"`, `"override"` (default: "normal"). Aliases: `blendmode`. |
+| `blend_weight`       | number       | Custom blend weight multiplier (0-1). Aliases: `blendweight`. |
+| `model_scale`        | number       | Scale multiplier for the source animation model. Aliases: `modelscale`. |
+| `model_skin`         | number       | Skin index for the source animation model. Aliases: `modelskin`. |
+| `model_bodygroups`   | table        | Bodygroup settings for the source model: `{groupID = value, ...}`. Aliases: `modelbodygroups`. |
+| `disable_pred`       | bool         | Disables prediction for this animation (default: false). |
+| `local_only`         | bool         | Prevents network synchronization (clientside only, default: false). |
 
 ---
 
@@ -481,6 +505,29 @@ Valid TPIK option keys:
 | `clone_offset_z` | number | 0 | Up/down position offset. |
 | `pole_source` | number | — | **Deprecated.** Ignored (IK solver removed). |
 | `pole_native` | number | — | **Deprecated.** Ignored (IK solver removed). |
+| **NEW FEATURES** | | | |
+| `blend_strength` | number | 1.0 | Overall blend strength multiplier for animation vs rest pose (0-1). |
+| `blend_curve` | number | 1.0 | Custom blend curve exponent (overrides animation's lerp_curve for TPIK). |
+| `blend_per_bone` | table | — | Per-bone blend overrides: `{ "BoneName" = 0.5, ... }`. Partial bone name matching supported. |
+| `lock_bones` | table | — | List of bone names (or partial matches) to lock to rest pose: `{ "Hand", "Finger" }`. |
+| `ignore_bones` | table | — | List of bone names (or partial matches) to skip entirely: `{ "Wrist", "Ulna" }`. |
+| `scale_bones` | table | — | Per-bone scale multipliers: `{ "UpperArm" = 1.2, "Hand" = 0.9 }`. Scales distance from rest pose. |
+| `model_skin` | number | — | Override skin index for the thirdperson prop clone. |
+| `model_bodygroups` | table | — | Bodygroup overrides for the prop clone: `{ groupID = value, ... }`. |
+| `model_material` | string | — | Custom material override for the prop clone. |
+| `render_mode` | string | — | Render mode for the prop clone: `"normal"`, `"transcolor"`, `"transalpha"`, etc. |
+| `render_fx` | string | — | Render effects for the prop clone: `"none"`, `"hologram"`, `"distort"`, etc. |
+| `offset_relative_to` | string | — | Bone name to use as offset reference instead of view angles: `"ValveBiped.Bip01_Spine4"`. |
+| `offset_space` | string | `"view"` | Offset coordinate space: `"view"` (camera-relative), `"world"`, `"local"` (bone-relative). |
+| `angular_offset_x` | number | 0 | Pitch rotation offset for bones (degrees). |
+| `angular_offset_y` | number | 0 | Yaw rotation offset for bones (degrees). |
+| `angular_offset_z` | number | 0 | Roll rotation offset for bones (degrees). |
+| `distance_fade` | bool | false | Enables distance-based alpha fading. |
+| `fade_start` | number | 100 | Distance (HU) where fading begins. |
+| `fade_end` | number | 300 | Distance (HU) where animation fully fades out. |
+| `update_rate` | number | — | Custom update rate in Hz (e.g., 30 for 30fps updates). Defaults to render framerate. |
+| `interpolate` | bool | true | Enables smooth interpolation between updates (when update_rate is set). |
+| `force_update` | bool | false | Forces update every frame regardless of optimization. |
 
 The per-animation `offset_x/y/z` values are added on top of the global convar adjustments (`gcal_tpik_offset_x/y/z`) and per-animation cookie adjustments. They are applied after clamping, so they can push the arm beyond the clamp range.
 
@@ -492,6 +539,105 @@ GCAL:RegisterTPIKOptions("my_anim", {
     model_offset = {
         ["ValveBiped.Bip01_L_Hand"] = Vector(0, 0, -2), -- and pull the hand bone down 2
     },
+})
+```
+
+### NEW: Advanced TPIK Examples
+
+**Priority System with Callbacks:**
+
+```lua
+GCAL:RegisterSecondHandAnim("tablet_open", {
+    model = "myaddon/c_tablet.mdl",
+    sequence = "open",
+    priority = 10,  -- Higher priority
+    can_interrupt = false,  -- Cannot be interrupted
+    on_start = function(trackID, animName, track)
+        print("Tablet opening animation started!")
+    end,
+    on_finish = function(trackID, animName, track)
+        print("Tablet is now open")
+        -- Auto-play idle animation
+        GCAL:QueueAnim("tablet_idle", trackID)
+    end,
+    on_interrupt = function(trackID, oldAnim, newAnim)
+        print("Tablet opening was interrupted by " .. newAnim)
+    end
+})
+```
+
+**Bone-Specific TPIK Control:**
+
+```lua
+GCAL:RegisterTPIKOptions("spray_can", {
+    sequence = "spray_tp",
+    -- Lock fingers to rest pose for cleaner look
+    lock_bones = { "Finger" },
+    -- Scale the hand closer to body
+    scale_bones = {
+        ["Hand"] = 0.8,
+        ["UpperArm"] = 1.1
+    },
+    -- Custom blend per bone group
+    blend_per_bone = {
+        ["Finger"] = 0.3,  -- Fingers blend less
+        ["Hand"] = 0.7     -- Hand blends more
+    },
+    -- Distance-based fading
+    distance_fade = true,
+    fade_start = 150,
+    fade_end = 400
+})
+```
+
+**Conditional Playback:**
+
+```lua
+GCAL:RegisterSecondHandAnim("binoculars", {
+    model = "myaddon/c_binoculars.mdl",
+    play_condition = function(animName, trackID, animData)
+        local ply = LocalPlayer()
+        if not IsValid(ply) then return false end
+        
+        -- Only allow if player is standing still
+        return ply:GetVelocity():Length() < 5
+    end,
+    delay_start = 0.2,  -- Small delay before starting
+    viewmodel_fov = 50  -- Zoom in FOV
+})
+```
+
+**Per-Cycle Callbacks:**
+
+```lua
+GCAL:RegisterSecondHandAnim("reload_sequence", {
+    model = "myaddon/c_reload.mdl",
+    on_cycle = function(trackID, animName, track, cycle)
+        -- Play sound at 50% cycle
+        if cycle >= 0.5 and cycle < 0.6 then
+            LocalPlayer():EmitSound("weapons/reload_click.wav")
+        end
+        -- Visual effect at 80%
+        if cycle >= 0.8 and cycle < 0.9 then
+            -- Create particle effect
+        end
+    end
+})
+```
+
+**Advanced Material Control:**
+
+```lua
+GCAL:RegisterTPIKOptions("hologram_device", {
+    model_material = "models/effects/vol_light001",
+    render_mode = "transalpha",
+    render_fx = "hologram",
+    model_skin = 2,
+    model_bodygroups = {
+        [1] = 1,  -- Enable antenna
+        [2] = 0   -- Disable screen
+    },
+    blend_strength = 0.8  -- Slightly transparent
 })
 ```
 

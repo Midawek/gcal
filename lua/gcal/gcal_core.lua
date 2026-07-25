@@ -296,6 +296,34 @@ local TPIK_VALID_OPTIONS = {
     clone_offset_x = "number",
     clone_offset_y = "number",
     clone_offset_z = "number",
+    -- New: Advanced blending control
+    blend_strength = "number",
+    blend_curve = "number",
+    blend_per_bone = "table",
+    -- New: Bone-specific behavior
+    lock_bones = "table",
+    ignore_bones = "table",
+    scale_bones = "table",
+    -- New: Visual effects
+    model_skin = "number",
+    model_bodygroups = "table",
+    model_material = "string",
+    render_mode = "string",
+    render_fx = "string",
+    -- New: Advanced positioning
+    offset_relative_to = "string",
+    offset_space = "string",
+    angular_offset_x = "number",
+    angular_offset_y = "number",
+    angular_offset_z = "number",
+    -- New: Distance-based behavior
+    distance_fade = "bool",
+    fade_start = "number",
+    fade_end = "number",
+    -- New: Performance and quality
+    update_rate = "number",
+    interpolate = "bool",
+    force_update = "bool",
     -- Deprecated (IK solver removed, these are ignored)
     pole_source = "number",
     pole_native = "number",
@@ -428,6 +456,47 @@ function GCAL:PrepareAnimData(data, hand)
     if data.cambone ~= nil then
         data.cambone = tobool(data.cambone)
     end
+
+    -- New: Animation priority system (higher = more important)
+    data.priority = data.priority or 0
+
+    -- New: Callback support
+    data.on_start = data.on_start or data.onstart or data.OnStart
+    data.on_finish = data.on_finish or data.onfinish or data.OnFinish
+    data.on_interrupt = data.on_interrupt or data.oninterrupt or data.OnInterrupt
+    data.on_cycle = data.on_cycle or data.oncycle or data.OnCycle
+
+    -- New: Advanced timing control
+    data.ease_in_time = data.ease_in_time or data.easeintime
+    data.ease_out_time = data.ease_out_time or data.easeouttime
+    data.delay_start = data.delay_start or data.delaystart or 0
+
+    -- New: Conditional playback
+    data.play_condition = data.play_condition or data.playcondition or data.condition
+    data.can_interrupt = data.can_interrupt ~= nil and tobool(data.can_interrupt) or true
+
+    -- New: Visual effects
+    data.viewmodel_fov = data.viewmodel_fov or data.vm_fov or data.fov
+    data.viewmodel_offset = data.viewmodel_offset or data.vm_offset
+    data.screen_shake = data.screen_shake or data.screenshake
+
+    -- New: Sound enhancements
+    data.sound_volume = data.sound_volume or data.soundvolume or 75
+    data.sound_level = data.sound_level or data.soundlevel or 75
+    data.sound_flags = data.sound_flags or data.soundflags or 0
+
+    -- New: Blend modes
+    data.blend_mode = data.blend_mode or data.blendmode or "normal"
+    data.blend_weight = data.blend_weight or data.blendweight
+
+    -- New: Model manipulation
+    data.model_scale = data.model_scale or data.modelscale
+    data.model_skin = data.model_skin or data.modelskin
+    data.model_bodygroups = data.model_bodygroups or data.modelbodygroups
+
+    -- New: Advanced flags
+    data.disable_pred = data.disable_pred ~= nil and tobool(data.disable_pred) or false
+    data.local_only = data.local_only ~= nil and tobool(data.local_only) or false
 
     return data
 end
@@ -884,10 +953,14 @@ if CLIENT then
         local easingInName = anim.easing_in or "OutQuad"
         local easingOutName = anim.easing_out or "OutQuad"
         local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
+        local delayStart = tonumber(anim.delay_start) or 0
+
         return {
             name = name,
             data = anim,
-            startTime = CurTime(),
+            startTime = CurTime() + delayStart,
+            realStartTime = CurTime(),
+            delayStart = delayStart,
             cycle = anim.startcycle or 0,
             lerpVal = 1, -- 1 = weapon pose, 0 = full animation
             model = ClientsideModel("models/" .. anim.model, RENDERGROUP_BOTH),
@@ -899,10 +972,10 @@ if CLIENT then
             easingIn = GCAL.Lerp.Get(easingInName == "Legacy" and "OutQuad" or easingInName),
             easingOut = GCAL.Lerp.Get(easingOutName == "Legacy" and "OutQuad" or easingOutName),
             lerpPeak = anim.lerp_peak or 0.5,
-            lerpPeakTime = CurTime() + (anim.lerp_peak or 0.5),
+            lerpPeakTime = CurTime() + delayStart + (anim.lerp_peak or 0.5),
             legacyMatrixLerp = legacyMatrixLerp,
             lerpCurve = anim.lerp_curve or 1,
-            holdTime = anim.holdtime and (CurTime() + anim.holdtime) or nil,
+            holdTime = anim.holdtime and (CurTime() + delayStart + anim.holdtime) or nil,
             holdTimeData = anim.holdtime,
             holdQuit = false,
             gestureOnHold = false,
@@ -929,6 +1002,29 @@ if CLIENT then
             lastLerpVal = 1,
             legacyStarted = false,
             poseOnlyLegacy = false,
+            -- New: Priority and callbacks
+            priority = anim.priority or 0,
+            canInterrupt = anim.can_interrupt ~= false,
+            onStartCallback = anim.on_start,
+            onFinishCallback = anim.on_finish,
+            onInterruptCallback = anim.on_interrupt,
+            onCycleCallback = anim.on_cycle,
+            lastCycleTrigger = 0,
+            -- New: Visual effects
+            viewmodelFov = anim.viewmodel_fov,
+            viewmodelOffset = anim.viewmodel_offset,
+            screenShake = anim.screen_shake,
+            -- New: Sound settings
+            soundVolume = anim.sound_volume or 75,
+            soundLevel = anim.sound_level or 75,
+            soundFlags = anim.sound_flags or 0,
+            -- New: Blend settings
+            blendMode = anim.blend_mode or "normal",
+            blendWeight = anim.blend_weight,
+            -- New: Model settings
+            modelScale = anim.model_scale,
+            modelSkin = anim.model_skin,
+            modelBodygroups = anim.model_bodygroups,
         }
     end
 
@@ -1119,8 +1215,28 @@ if CLIENT then
         end
 
         trackID = trackID or anim.group_name or "default"
+
+        -- New: Check play condition
+        if anim.play_condition and isfunction(anim.play_condition) then
+            if not anim.play_condition(name, trackID, anim) then
+                GCAL_Log("Suppressed: play_condition returned false for '" .. tostring(name) .. "'")
+                return false
+            end
+        end
+
         if not LegacyAnimAllowed(name, trackID, anim) then return false end
         if hook.Run("VManipPrePlayAnim", name) == false then return false end
+
+        -- New: Priority system - check if we can interrupt current track
+        local existingTrack = GCAL.ActiveTracks[trackID]
+        if existingTrack then
+            local existingPriority = existingTrack.priority or 0
+            local newPriority = anim.priority or 0
+            if not existingTrack.canInterrupt and newPriority <= existingPriority then
+                GCAL_Log("Suppressed: Cannot interrupt higher priority animation on track '" .. tostring(trackID) .. "'")
+                return false
+            end
+        end
 
         local track = CreateTrack(name, anim)
         if not SetupSourceModels(track, anim) then
@@ -1136,13 +1252,27 @@ if CLIENT then
 
         SetupThirdPerson(track, name, anim)
 
-        if GCAL.ActiveTracks[trackID] then GCAL:StopTrack(trackID) end
+        -- New: Call interrupt callback on replaced track
+        if GCAL.ActiveTracks[trackID] then
+            local oldTrack = GCAL.ActiveTracks[trackID]
+            if oldTrack.onInterruptCallback and isfunction(oldTrack.onInterruptCallback) then
+                pcall(oldTrack.onInterruptCallback, trackID, oldTrack.name, name)
+            end
+            GCAL:StopTrack(trackID)
+        end
+
         GCAL.ActiveTracks[trackID] = track
 
         if trackID == "legacy_left_arm" then SyncLegacyVManipFields(track) end
         if track.blockCode then
             hook.Run("GCALCodeBlockStarted", trackID, name, track, track.blockCodeScope)
         end
+
+        -- New: Call start callback
+        if track.onStartCallback and isfunction(track.onStartCallback) then
+            pcall(track.onStartCallback, trackID, name, track)
+        end
+
         hook.Run("GCALTrackStarted", trackID, name, track)
         GCAL_Log("Started playback successfully! Track:", trackID)
         return true
@@ -1245,7 +1375,13 @@ if CLIENT then
         if soundCount == 0 then
             if overridePath and not track.soundsPlayed.__custom_start then
                 local ply = LocalPlayer()
-                if IsValid(ply) then ply:EmitSound(overridePath, 75, GCAL.SoundPitch:GetInt()) end
+                if IsValid(ply) then
+                    local volume = track.soundVolume or 75
+                    local pitch = GCAL.SoundPitch:GetInt()
+                    local level = track.soundLevel or 75
+                    local flags = track.soundFlags or 0
+                    ply:EmitSound(overridePath, volume, pitch, 1.0, level, flags)
+                end
                 track.soundsPlayed.__custom_start = true
             end
             return
@@ -1255,7 +1391,13 @@ if CLIENT then
         for soundPath, time in pairs(track.data.sounds) do
             if elapsed >= time and not track.soundsPlayed[soundPath] then
                 local ply = LocalPlayer()
-                if IsValid(ply) then ply:EmitSound(overridePath or soundPath, 75, GCAL.SoundPitch:GetInt()) end
+                if IsValid(ply) then
+                    local volume = track.soundVolume or 75
+                    local pitch = GCAL.SoundPitch:GetInt()
+                    local level = track.soundLevel or 75
+                    local flags = track.soundFlags or 0
+                    ply:EmitSound(overridePath or soundPath, volume, pitch, 1.0, level, flags)
+                end
                 track.soundsPlayed[soundPath] = true
             end
         end
@@ -1360,6 +1502,20 @@ if CLIENT then
 
         curtime = CurTime()
 
+        -- New: Handle delay_start
+        if track.delayStart and track.delayStart > 0 and curtime < track.realStartTime + track.delayStart then
+            return false
+        end
+
+        -- New: Cycle callback
+        if track.onCycleCallback and isfunction(track.onCycleCallback) then
+            local cycleTrigger = math.floor(track.cycle * 10)
+            if cycleTrigger ~= track.lastCycleTrigger then
+                track.lastCycleTrigger = cycleTrigger
+                pcall(track.onCycleCallback, trackID, track.name, track, track.cycle)
+            end
+        end
+
         if track.loop then
             if track.cycle >= 1 then
                 track.lerpPeakTime = curtime + track.lerpPeak
@@ -1424,10 +1580,18 @@ if CLIENT then
                 hook.Run("VManipSegmentFinish", track.name, track.curSegment, track.lastSegment, track.segmentCount)
             elseif track.segmented and track.lastSegment then
                 if track.lerpVal >= 1 then
+                    -- New: Call finish callback before stopping
+                    if track.onFinishCallback and isfunction(track.onFinishCallback) then
+                        pcall(track.onFinishCallback, trackID, track.name, track)
+                    end
                     GCAL:StopTrack(trackID)
                     return true
                 end
             elseif not track.segmented then
+                -- New: Call finish callback before stopping
+                if track.onFinishCallback and isfunction(track.onFinishCallback) then
+                    pcall(track.onFinishCallback, trackID, track.name, track)
+                end
                 GCAL:StopTrack(trackID)
                 return true
             end
