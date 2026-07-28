@@ -2716,6 +2716,16 @@ if CLIENT then
             newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
         end
 
+        -- Apply viewmodel_fov adjustments
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if track.viewmodelFov and track.lerpVal then
+                -- Scale FOV adjustment by inverse lerp (1 - lerpVal means full animation visibility)
+                local fovScale = 1 - track.lerpVal
+                newFov = newFov + (track.viewmodelFov * fovScale)
+            end
+        end
+
         return {
             origin = newOrigin,
             angles = newAngles,
