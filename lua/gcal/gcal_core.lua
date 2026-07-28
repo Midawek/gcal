@@ -1398,6 +1398,19 @@ if CLIENT then
             pcall(track.onStartCallback, trackID, name, track)
         end
 
+        -- Trigger screen shake if configured
+        if track.screenShake then
+            local shake = track.screenShake
+            local ply = LocalPlayer()
+            if IsValid(ply) then
+                local amplitude = shake.amplitude or 2
+                local frequency = shake.frequency or 10
+                local duration = shake.duration or 0.5
+                local radius = shake.radius or 500
+                util.ScreenShake(ply:EyePos(), amplitude, frequency, duration, radius)
+            end
+        end
+
         hook.Run("GCALTrackStarted", trackID, name, track)
         GCAL_Log("Started playback successfully! Track:", trackID)
         return true
