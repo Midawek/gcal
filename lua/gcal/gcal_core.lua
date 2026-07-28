@@ -1650,6 +1650,7 @@ if CLIENT then
         end
 
         if not track.poseOnlyLegacy then
+            local speedMultiplier = track.speed * GCAL.PlaybackSpeed:GetFloat()
             if IsValid(track.model) then
                 track.model:SetCycle(track.cycle)
                 track.model:InvalidateBoneCache()
@@ -1659,10 +1660,12 @@ if CLIENT then
                 track.camModel:InvalidateBoneCache()
             end
             if IsValid(track.tpikModel) then
+                track.tpikModel:SetPlaybackRate(speedMultiplier)
                 track.tpikModel:SetCycle(track.cycle)
                 track.tpikModel:InvalidateBoneCache()
             end
             if IsValid(track.thirdpersonModel) then
+                track.thirdpersonModel:SetPlaybackRate(speedMultiplier)
                 track.thirdpersonModel:SetCycle(track.cycle)
                 track.thirdpersonModel:InvalidateBoneCache()
             end
