@@ -1460,13 +1460,23 @@ if CLIENT then
         if not IsValid(track.model) or track.model:LookupSequence(sequence) == -1 then return false end
         if hook.Run("GCALPrePlaySegment", trackID, track.name, sequence, lastSegment) == false then return false end
 
+        -- Apply speed to all models when resetting sequences
+        local speedMultiplier = track.speed * GCAL.PlaybackSpeed:GetFloat()
         track.model:ResetSequence(sequence)
-        if IsValid(track.camModel) then track.camModel:ResetSequence(sequence) end
+        track.model:SetPlaybackRate(speedMultiplier)
+        if IsValid(track.camModel) then
+            track.camModel:ResetSequence(sequence)
+            track.camModel:SetPlaybackRate(speedMultiplier)
+        end
         if IsValid(track.tpikModel) and track.tpikSeqID and track.tpikSeqID ~= -1 then
             track.tpikModel:ResetSequence(track.tpikSeqID)
+            track.tpikModel:SetPlaybackRate(speedMultiplier)
         end
         local thirdPersonSequence = track.tpikSequenceRequested and track.tpikSeqID or sequence
-        if IsValid(track.thirdpersonModel) then track.thirdpersonModel:ResetSequence(thirdPersonSequence) end
+        if IsValid(track.thirdpersonModel) then
+            track.thirdpersonModel:ResetSequence(thirdPersonSequence)
+            track.thirdpersonModel:SetPlaybackRate(speedMultiplier)
+        end
         track.curSegment = sequence
         track.cycle = 0
         track.segmentFinished = false
