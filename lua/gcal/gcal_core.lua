@@ -384,12 +384,14 @@ local default_intensity = { 1, 1, 1 }
 local function DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     if not attachment or not attachment.Ang then return origin, angles, fov end
     local intensity = camAngInt or default_intensity
-    -- VManip-style: full attachment delta scaled by intensity
+    -- Scale by lerp value so cambone fades in/out with the animation
+    local lerpScale = 1 - (lerpVal or 0)
+    -- VManip-style: full attachment delta scaled by intensity and lerp
     local camang = attachment.Ang - (camAng or default_properang)
     angles = Angle(
-        angles.p + camang.p * (intensity[1] or 1),
-        angles.y + camang.y * (intensity[2] or 1),
-        angles.r + camang.r * (intensity[3] or 1)
+        angles.p + camang.p * (intensity[1] or 1) * lerpScale,
+        angles.y + camang.y * (intensity[2] or 1) * lerpScale,
+        angles.r + camang.r * (intensity[3] or 1) * lerpScale
     )
     return origin, angles, fov
 end
