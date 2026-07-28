@@ -569,8 +569,22 @@ local function RefreshActiveTrack(track, data)
     track.modelBodygroups = data.model_bodygroups
 
     -- Update TPIK options
+    local oldTpikSeqID = track.tpikSeqID
     track.tpikOptions = GetTPIKOptionsForAnim(track.name)
     track.tpikSequenceRequested = GetTPIKSequenceName(track.name)
+
+    -- Re-resolve TPIK sequence and update model if changed
+    if track.tpikSequenceRequested then
+        track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, track.name, data)
+        if IsValid(track.tpikModel) and track.tpikSeqID and track.tpikSeqID ~= -1 and oldTpikSeqID ~= track.tpikSeqID then
+            track.tpikModel:ResetSequence(track.tpikSeqID)
+        end
+    end
+
+    -- Also update thirdperson model sequence if TPIK changed
+    if IsValid(track.thirdpersonModel) and oldTpikSeqID ~= track.tpikSeqID then
+        track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
+    end
 
     -- Update other control flags
     track.blockCode = data.block_code or false
