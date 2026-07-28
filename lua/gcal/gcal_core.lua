@@ -1161,6 +1161,20 @@ if CLIENT then
         track.model:SetNoDraw(true)
         -- Force the model to initialize by setting up bones
         track.model:SetupBones()
+
+        -- Apply model manipulation parameters
+        if track.modelScale then
+            track.model:SetModelScale(track.modelScale)
+        end
+        if track.modelSkin then
+            track.model:SetSkin(track.modelSkin)
+        end
+        if track.modelBodygroups then
+            for bg, value in pairs(track.modelBodygroups) do
+                track.model:SetBodygroup(bg, value)
+            end
+        end
+
         if track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
             track.camModel = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH)
         end
@@ -1170,6 +1184,19 @@ if CLIENT then
             track.camModel:SetPos(vector_origin)
             track.camModel:SetAngles(angle_zero)
             track.camModel:SetupBones()
+
+            -- Apply model manipulation to camModel
+            if track.modelScale then
+                track.camModel:SetModelScale(track.modelScale)
+            end
+            if track.modelSkin then
+                track.camModel:SetSkin(track.modelSkin)
+            end
+            if track.modelBodygroups then
+                for bg, value in pairs(track.modelBodygroups) do
+                    track.camModel:SetBodygroup(bg, value)
+                end
+            end
         end
         return true
     end
@@ -1276,6 +1303,19 @@ if CLIENT then
                 track.tpikModel:SetPlaybackRate(1)
                 track.tpikModel:ResetSequence(track.tpikSeqID)
                 track.tpikModel:SetCycle(track.cycle)
+
+                -- Apply model manipulation to tpikModel
+                if track.modelScale then
+                    track.tpikModel:SetModelScale(track.modelScale)
+                end
+                if track.modelSkin then
+                    track.tpikModel:SetSkin(track.modelSkin)
+                end
+                if track.modelBodygroups then
+                    for bg, value in pairs(track.modelBodygroups) do
+                        track.tpikModel:SetBodygroup(bg, value)
+                    end
+                end
             end
         end
 
@@ -1285,6 +1325,19 @@ if CLIENT then
             track.thirdpersonModel:ResetSequenceInfo()
             track.thirdpersonModel:SetPlaybackRate(1)
             track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
+
+            -- Apply model manipulation to thirdpersonModel
+            if track.modelScale then
+                track.thirdpersonModel:SetModelScale(track.modelScale)
+            end
+            if track.modelSkin then
+                track.thirdpersonModel:SetSkin(track.modelSkin)
+            end
+            if track.modelBodygroups then
+                for bg, value in pairs(track.modelBodygroups) do
+                    track.thirdpersonModel:SetBodygroup(bg, value)
+                end
+            end
         end
     end
 
