@@ -90,7 +90,18 @@ if CLIENT then
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
     function GCAL:IsThirdPersonEnabled()
-        return self.InternalThirdPersonEnabled and self.ThirdPerson:GetBool()
+        -- Check if GCAL's own third-person is enabled
+        if self.InternalThirdPersonEnabled and self.ThirdPerson:GetBool() then
+            return true
+        end
+        
+        -- Also detect external third-person mods (BSMod, etc.)
+        local ply = LocalPlayer()
+        if IsValid(ply) and ply:ShouldDrawLocalPlayer() then
+            return true
+        end
+        
+        return false
     end
 
     local animationAdjustmentFields = {
