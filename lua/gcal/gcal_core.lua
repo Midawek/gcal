@@ -2757,7 +2757,13 @@ if CLIENT then
     hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
         if self == true then return end
         if not GCAL.CamBone:GetBool() then return end
-        if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
+        if ply:GetViewEntity() ~= ply then return end
+        
+        -- In third-person, skip GCAL camera adjustments but don't block other mods
+        if ply:ShouldDrawLocalPlayer() then
+            -- Pass through to other CalcView hooks
+            return hook.Run("CalcView", ply, origin, angles, fov, true)
+        end
 
         -- Skip if no attachment to avoid suppressing other CalcView hooks
         local hasAttachment = false
