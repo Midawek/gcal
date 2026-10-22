@@ -251,6 +251,8 @@ function GCAL.InstallTPIK(deps)
         local flip = GetLegacyFlipState(weapon)
         local targetBones = GetTrackTargetBones(track, weapon, flip)
         local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
+        -- Remote players: use their networked eye angles so the arms follow aim pitch.
+        if ply ~= LocalPlayer() and ply.EyeAngles then renderAngles = ply:EyeAngles() end
 
         -- Place source model at eye position
         PlaceTPIKTrackModel(track, ply:EyePos(), renderAngles)

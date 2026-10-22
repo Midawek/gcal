@@ -26,6 +26,7 @@ if SERVER then
     AddCSLuaFile("gcal/gcal_legs.lua")
     AddCSLuaFile("gcal/gcal_base_anims.lua")
     AddCSLuaFile("gcal/gcal_menu.lua")
+    AddCSLuaFile("gcal/gcal_mp.lua")
     AddCSLuaFile("gcal/gcal_debug_menu.lua")
     AddCSLuaFile("autorun/client/gcal_menu_autorun.lua")
 end
@@ -607,6 +608,7 @@ if CLIENT then
     include("gcal/gcal_core.lua")
     include("gcal/gcal_menu.lua")
     include("gcal/gcal_compat.lua")
+    include("gcal/gcal_mp.lua")
     include("gcal/gcal_legs.lua")
     include("gcal/gcal_base_anims.lua")
     include("gcal/gcal_debug_menu.lua")
@@ -714,6 +716,7 @@ if SERVER then
     include("gcal/gcal_lerp.lua")
     include("gcal/gcal_core.lua")
     include("gcal/gcal_compat.lua")
+    include("gcal/gcal_mp.lua")
     include("gcal/gcal_base_anims.lua")
     
     print("GCAL (Server) Initialized! :3")

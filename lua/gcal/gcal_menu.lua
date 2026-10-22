@@ -981,6 +981,18 @@ function GCAL.Menu.Refresh()
         thirdPersonButton:Dock(TOP)
         thirdPersonButton:DockMargin(0, 0, 0, 7)
         thirdPersonButton:SetTooltip("Applies active GCAL arm tracks to the local player model in thirdperson. This is still in beta and may not work as expected.")
+
+        local mpConVar = GetConVar("gcal_mp_tpik")
+        if mpConVar then
+            local othersEnabled = mpConVar:GetBool()
+            local othersButton = MakeButton(panel.ActionsScroll, othersEnabled and "Others TPIK: on" or "Others TPIK: off", colAccent, function()
+                RunConsoleCommand("gcal_mp_tpik", othersEnabled and "0" or "1")
+                timer.Simple(0, GCAL.Menu.Refresh)
+            end)
+            othersButton:Dock(TOP)
+            othersButton:DockMargin(0, 0, 0, 7)
+            othersButton:SetTooltip("Shows other players' GCAL arm animations on their models in multiplayer. Console: gcal_mp_tpik 0/1.")
+        end
     end
 
     local camboneConVar = GCAL.CamBone or GetConVar("gcal_cambone")

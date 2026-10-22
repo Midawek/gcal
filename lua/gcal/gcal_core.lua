@@ -1912,6 +1912,15 @@ if CLIENT then
     })
     local ApplyCachedThirdPersonBones = tpik.ApplyCachedThirdPersonBones
     local ApplyThirdPersonBones = tpik.ApplyThirdPersonBones
+    -- Exposed for gcal_mp.lua so remote players can reuse the exact same track building and TPIK solver.
+    GCAL.MPInternal = {
+        CreateTrack = CreateTrack,
+        SetupSourceModels = SetupSourceModels,
+        ResolveFirstPersonSequence = ResolveFirstPersonSequence,
+        SetupThirdPerson = SetupThirdPerson,
+        ApplyThirdPersonBones = ApplyThirdPersonBones,
+        ApplyCachedThirdPersonBones = ApplyCachedThirdPersonBones
+    }
     GCAL.WeaponBaseStrategies = GCAL.WeaponBaseStrategies or {}
 
     local function EntityHasAnyBone(ent, bones)
