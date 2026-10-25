@@ -89,7 +89,7 @@ if CLIENT then
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
-    function GCAL:IsThirdPersonEnabled()
+    function GCAL:IsThirdPersonEnabled() if not self.InternalThirdPersonEnabled or not self.ThirdPerson:GetBool() then return false end -- gcal_thirdperson is the master switch
         -- Check if GCAL's own third-person is enabled
         if self.InternalThirdPersonEnabled and self.ThirdPerson:GetBool() then
             return true
@@ -533,7 +533,7 @@ local function RefreshActiveTrack(track, data)
     local easingOutName = data.easing_out or "OutQuad"
     local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
 
-    track.thirdperson = GCAL.InternalThirdPersonEnabled and data.thirdperson ~= false
+    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false
     track.lerpCurve = data.lerp_curve or 1
     track.legacyMatrixLerp = legacyMatrixLerp
     track.lerpSpeedIn = data.lerp_speed_in or 1
@@ -1132,7 +1132,7 @@ if CLIENT then
             bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
-            thirdperson = GCAL.InternalThirdPersonEnabled and anim.thirdperson ~= false,
+            thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and anim.thirdperson ~= false,
             tpikOptions = GetTPIKOptionsForAnim(name),
             tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
