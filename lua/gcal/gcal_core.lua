@@ -1832,15 +1832,16 @@ if CLIENT then
     }
     local function GetLegacyFlipState(weapon)
         local validWeapon = IsValid(weapon)
-        local lefty = validWeapon and tobool(weapon.ViewModelFlipDefault) or false
+        local isScripted = validWeapon and weapon.IsScripted and weapon:IsScripted() or false
+        local lefty = isScripted and tobool(weapon.ViewModelFlipDefault) or false
         local flippedNow = validWeapon and tobool(weapon.ViewModelFlip) or false
         local flipmode = validWeapon and lefty ~= flippedNow or false
         flipState.lefty = lefty
         flipState.flippedNow = flippedNow
         flipState.flipmode = flipmode
-        flipState.targetRight = flippedNow
-        flipState.targetBones = flippedNow and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
-        flipState.targetSide = flippedNow and "right_arm" or "left_arm"
+        flipState.targetRight = lefty
+        flipState.targetBones = lefty and GCAL.GROUPS.RIGHT_ARM or GCAL.GROUPS.LEFT_ARM
+        flipState.targetSide = lefty and "right_arm" or "left_arm"
         return flipState
     end
 
@@ -2225,10 +2226,20 @@ if CLIENT then
         return true
     end
 
+    local lastHandsRenderFrame = -1
+    local lastVMRenderFrame = -1
     local renderTracksBusy = false
     local function RenderTracks(hands, vm, ply, weapon, flags, fromHandsHook)
         if renderTracksBusy then return end
         if not IsValid(vm) then return end
+
+        local frame = FrameNumber()
+        if fromHandsHook then
+            lastHandsRenderFrame = frame
+        else
+            if lastHandsRenderFrame == frame or lastVMRenderFrame == frame then return end
+            lastVMRenderFrame = frame
+        end
 
         renderTracksBusy = true
         local handsEnt = IsValid(hands) and hands or (IsValid(ply) and ply:GetHands() or nil)
@@ -2333,13 +2344,7 @@ if CLIENT then
         RenderTracks(hands, vm, ply, weapon, flags, true)
     end)
 
-    hook.Add("PostDrawViewModel", "VManip", function(vm, ply, weapon, flags)
-        if not IsValid(weapon) or not weapon:IsScripted() or weapon.UseHands then return end
-        RenderTracks(nil, vm, ply, weapon, flags, false)
-    end)
-
     hook.Add("PostDrawViewModel", "GCAL_RenderVM", function(vm, ply, weapon, flags)
-        if not IsValid(weapon) or not weapon:IsScripted() or weapon.UseHands then return end
         RenderTracks(nil, vm, ply, weapon, flags, false)
     end)
 
