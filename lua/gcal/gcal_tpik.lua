@@ -161,7 +161,7 @@ function GCAL.InstallTPIK(deps)
 
         model:SetPos(source:GetPos())
         model:SetAngles(source:GetAngles())
-        model:SetModelScale(1)
+        model:SetModelScale(track.modelScale or 1)
         model:SetSkin(source:GetSkin())
         for _, bg in ipairs(source:GetBodyGroups() or {}) do
             model:SetBodygroup(bg.id, source:GetBodygroup(bg.id))
@@ -170,9 +170,9 @@ function GCAL.InstallTPIK(deps)
         model:SetupBones()
 
         -- Clone offsets: whole-clone shift + per-bone tweaks
-        local cloneOffsetX = (Opt(track, "clone_offset_x", "thirdperson_clone_offset_x") or 0) + (GCAL.CloneOffsetX and GCAL.CloneOffsetX:GetFloat() or 0) + OptAdd(track, "clone_offset_x")
-        local cloneOffsetY = (Opt(track, "clone_offset_y", "thirdperson_clone_offset_y") or 0) + (GCAL.CloneOffsetY and GCAL.CloneOffsetY:GetFloat() or 0) + OptAdd(track, "clone_offset_y")
-        local cloneOffsetZ = (Opt(track, "clone_offset_z", "thirdperson_clone_offset_z") or 0) + (GCAL.CloneOffsetZ and GCAL.CloneOffsetZ:GetFloat() or 0) + OptAdd(track, "clone_offset_z")
+        local cloneOffsetX = (Opt(track, "clone_offset_x", "thirdperson_clone_offset_x") or 0) + OptAdd(track, "clone_offset_x")
+        local cloneOffsetY = (Opt(track, "clone_offset_y", "thirdperson_clone_offset_y") or 0) + OptAdd(track, "clone_offset_y")
+        local cloneOffsetZ = (Opt(track, "clone_offset_z", "thirdperson_clone_offset_z") or 0) + OptAdd(track, "clone_offset_z")
         local cloneOffsets = Opt(track, "model_offset")
 
         local copies = {}
@@ -295,7 +295,7 @@ function GCAL.InstallTPIK(deps)
 
         -- New: Apply blend strength modifier
         local blendStrength = tonumber(Opt(track, "blend_strength")) or 1
-        blend = blend * blendStrength * (track.distanceFadeAlpha or 1)
+        blend = math.Clamp(1 - (1 - blend) * blendStrength * (track.distanceFadeAlpha or 1), 0, 1)
 
         -- Spine position for clamping
         local spineIdx = GetBone(ply, "ValveBiped.Bip01_Spine4")
@@ -378,7 +378,7 @@ function GCAL.InstallTPIK(deps)
             if shouldIgnore then continue end
 
             local srcBone = GetBone(source, srcBoneName)
-            local isHelper = string.EndsWith(tgtBoneName, "_Wrist") or string.EndsWith(tgtBoneName, "_Ulna")
+
             if not srcBone or srcBone < 0 then continue end
 
             local srcMatrix = source:GetBoneMatrix(srcBone)

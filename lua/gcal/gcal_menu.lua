@@ -300,6 +300,43 @@ function GCAL:IsAnimSuppressed(name)
     return not AnimEnabled(name)
 end
 
+GCAL.Menu.DisabledTPIK = GCAL.Menu.DisabledTPIK or {}
+
+local function AnimTPIKCookieKey(name)
+    return "gcal_anim_tpik_enabled_" .. string.gsub(tostring(name), "[^%w_]", "_")
+end
+
+-- Per-animation TPIK toggle. Independent from AnimEnabled: the animation still plays in firstperson.
+local function AnimTPIKEnabled(name)
+    if GCAL.Menu.DisabledTPIK[name] ~= nil then
+        return not GCAL.Menu.DisabledTPIK[name]
+    end
+
+    if cookie and cookie.GetNumber then
+        return cookie.GetNumber(AnimTPIKCookieKey(name), 1) ~= 0
+    end
+
+    return true
+end
+
+function GCAL:IsAnimTPIKEnabled(name)
+    return AnimTPIKEnabled(name)
+end
+
+local function SetAnimTPIKEnabled(name, enabled)
+    GCAL.Menu.DisabledTPIK[name] = not enabled
+
+    if cookie and cookie.Set then
+        cookie.Set(AnimTPIKCookieKey(name), enabled and "1" or "0")
+    end
+end
+
+local function SetGroupTPIKEnabled(names, enabled)
+    for _, name in ipairs(names) do
+        SetAnimTPIKEnabled(name, enabled)
+    end
+end
+
 local function AnimSoundOverride(name)
     if GCAL.Menu.SoundOverrides[name] ~= nil then
         return GCAL.Menu.SoundOverrides[name] ~= "" and GCAL.Menu.SoundOverrides[name] or nil
@@ -375,11 +412,12 @@ local function SortedAnimGroups()
     return names, groups
 end
 
-local function GroupEnabledState(names)
+local function GroupEnabledState(names, isOn)
+    isOn = isOn or AnimEnabled
     local enabledCount = 0
 
     for _, name in ipairs(names) do
-        if AnimEnabled(name) then
+        if isOn(name) then
             enabledCount = enabledCount + 1
         end
     end
@@ -812,7 +850,9 @@ local function BuildAnimList(scroll)
     end
 end
 
-local function BuildToggleAnimList(scroll)
+local function BuildToggleAnimList(scroll, mode)
+    local tpikMode = mode == "tpik"
+    local isOn = tpikMode and AnimTPIKEnabled or AnimEnabled
     local names = SortedAnimNames()
 
     if #names == 0 then
@@ -840,7 +880,7 @@ local function BuildToggleAnimList(scroll)
         end
         if #matchedAnims == 0 then continue end
 
-        local state = GroupEnabledState(matchedAnims)
+        local state = GroupEnabledState(matchedAnims, isOn)
         local collapsed = GCAL.Menu.CollapsedAddonGroups[addonName] == true
         local marker = collapsed and "[+] " or "[-] "
         local legacyLabel = GroupHasLegacyAnim(matchedAnims) and "[LEGACY] " or ""
@@ -848,7 +888,7 @@ local function BuildToggleAnimList(scroll)
         local color = state == "enabled" and colAccent or (state == "disabled" and colBad or colWarn)
 
         local groupButton = MakeButton(scroll, marker .. legacyLabel .. addonName .. suffix, color, function()
-            SetGroupEnabled(matchedAnims, state ~= "enabled")
+            if tpikMode then SetGroupTPIKEnabled(matchedAnims, state ~= "enabled") else SetGroupEnabled(matchedAnims, state ~= "enabled") end
             notification.AddLegacy("GCAL " .. (state == "enabled" and "disabled " or "enabled ") .. addonName, NOTIFY_GENERIC, 2)
             timer.Simple(0, GCAL.Menu.Refresh)
         end)
@@ -864,17 +904,17 @@ local function BuildToggleAnimList(scroll)
         if not collapsed then
             for _, name in ipairs(matchedAnims) do
                 local label = tostring(name)
-                local enabled = AnimEnabled(name)
+                local enabled = isOn(name)
 
                 local btn = MakeButton(scroll, (enabled and "On " or "Off ") .. label, enabled and colAccent or colBad, function()
-                    SetAnimEnabled(name, not AnimEnabled(name))
-                    notification.AddLegacy("GCAL " .. (AnimEnabled(name) and "enabled " or "disabled ") .. label, NOTIFY_GENERIC, 2)
+                    if tpikMode then SetAnimTPIKEnabled(name, not AnimTPIKEnabled(name)) else SetAnimEnabled(name, not AnimEnabled(name)) end
+                    notification.AddLegacy("GCAL " .. (tpikMode and "TPIK " or "") .. (isOn(name) and "enabled " or "disabled ") .. label, NOTIFY_GENERIC, 2)
                     timer.Simple(0, GCAL.Menu.Refresh)
                 end, 14)
 
                 btn:Dock(TOP)
                 btn:DockMargin(10, 0, 0, 5)
-                btn:SetTooltip("Toggle this animation. Right-click the addon row to collapse it.")
+                btn:SetTooltip(tpikMode and "Toggle thirdperson TPIK for this animation. The animation itself keeps playing in firstperson. Right-click the addon row to collapse it." or "Toggle this animation. Right-click the addon row to collapse it.")
                 shown = shown + 1
             end
         else
@@ -1087,8 +1127,42 @@ function GCAL.Menu.Refresh()
     MakeSection(panel.ActionsScroll, "TRACKS")
     BuildTracks(panel.ActionsScroll)
 
-    MakeSection(panel.ToggleScroll, "TOGGLE ANIMS")
-    BuildToggleAnimList(panel.ToggleScroll)
+    local tabBar = vgui.Create("DPanel", panel.ToggleScroll)
+    tabBar:Dock(TOP)
+    tabBar:DockMargin(0, 0, 0, 8)
+    tabBar:SetTall(30)
+    tabBar:SetPaintBackground(false)
+
+    local function MakeToggleTab(text, mode, tooltip)
+        local tab = vgui.Create("DButton", tabBar)
+        tab:Dock(LEFT)
+        tab:SetText("")
+        tab:SetTooltip(tooltip)
+        tab.GCALActive = (GCAL.Menu.ToggleTab or "anims") == mode
+        tab.Paint = function(self, w, h)
+            local fill = self.GCALActive and Color(colAccent.r, colAccent.g, colAccent.b, 70) or (self:IsHovered() and colPanelSoft or Color(colPanelSoft.r, colPanelSoft.g, colPanelSoft.b, 150))
+            draw.RoundedBox(5, 0, 0, w, h, fill)
+            surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, self.GCALActive and 160 or 50)
+            surface.DrawOutlinedRect(0, 0, w, h, 1)
+            draw.SimpleText(text, "GCAL.Menu.Small", w * 0.5, h * 0.5 - 1, self.GCALActive and colText or colMuted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+        tab.DoClick = function()
+            surface.PlaySound("ui/buttonclickrelease.wav")
+            GCAL.Menu.ToggleTab = mode
+            timer.Simple(0, GCAL.Menu.Refresh)
+        end
+        return tab
+    end
+
+    local animsTab = MakeToggleTab("Toggle Anims", "anims", "Enable or disable whole animations.")
+    local tpikTab = MakeToggleTab("Toggle TPIK Anims", "tpik", "Turn thirdperson TPIK off for an animation without disabling the animation itself.")
+    animsTab:DockMargin(0, 0, 4, 0)
+    tabBar.PerformLayout = function(self, w)
+        local half = math.floor((w - 4) * 0.5)
+        animsTab:SetWide(half)
+        tpikTab:SetWide(half)
+    end
+    BuildToggleAnimList(panel.ToggleScroll, GCAL.Menu.ToggleTab)
 
     MakeSection(panel.AnimsScroll, "ANIMS")
     BuildAnimList(panel.AnimsScroll)

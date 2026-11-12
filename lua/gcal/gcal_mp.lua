@@ -77,6 +77,7 @@ end
 
 hook.Add("GCALTrackStarted", "GCAL_MP_Announce", function(trackID, name, track)
     if trackID == "legs" or not track or not track.thirdperson then return end
+    if track.data and track.data.local_only then return end
     Send(OP_START, tostring(trackID), tostring(name))
 end)
 
@@ -125,6 +126,7 @@ local function StartRemoteTrack(ply, trackID, name)
     local anim = GCAL.Anims and GCAL.Anims[name]
     if not anim or not anim.model or anim.thirdperson == false then return end
     if GCAL.IsAnimEnabled and not GCAL:IsAnimEnabled(name) then return end
+    if GCAL.IsAnimTPIKEnabled and not GCAL:IsAnimTPIKEnabled(name) then return end
 
     RemoveRemoteTrack(ply, trackID)
 

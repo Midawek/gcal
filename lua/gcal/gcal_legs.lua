@@ -30,7 +30,7 @@ if CLIENT then
 
     function GCAL.Legs:Update(ply)
         local track = GCAL.ActiveTracks["legs"]
-        if not track then return end
+        if not track or not IsValid(track.model) then return end
         
         local eyeAng = GetMainEyeAngles()
         local eyePos = GetMainEyePos()
@@ -97,7 +97,7 @@ function VMLegs:PlayAnim(name)
     if track.legModel.SnatchModelInstance then track.legModel:SnatchModelInstance(ply) end
     track.legModel:SetSkin(ply:GetSkin())
 
-    for i = 0, track.legModel:GetNumBodyGroups() do
+    for i = 0, track.legModel:GetNumBodyGroups() - 1 do
         track.legModel:SetBodygroup(i, ply:GetBodygroup(i))
     end
 

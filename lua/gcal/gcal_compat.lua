@@ -256,6 +256,7 @@ function VManip:QuitHolding(animtostop)
             VManip.HoldQuit = true
             if track.segmented then track.lastSegment = true end
             hook.Run("VManipHoldQuit", track.name, animtostop)
+            hook.Run("GCALHoldQuit", "legacy_left_arm", track.name, animtostop)
         end
         if VManip.QueuedAnim == animtostop then VManip.QueuedAnim = nil end
     end

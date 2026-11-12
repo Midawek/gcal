@@ -249,7 +249,12 @@ end
 
 local function GCAL_Log(...)
     if not CLIENT or not GCAL.Debug:GetBool() then return end
-    MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat({ ... }, " "), "\n")
+    local count = select("#", ...)
+    local parts = {}
+    for i = 1, count do
+        parts[i] = tostring(select(i, ...))
+    end
+    MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat(parts, " "), "\n")
 end
 
 function GCAL:NormalizeHand(hand)
@@ -492,7 +497,11 @@ function GCAL:PrepareAnimData(data, hand)
 
     -- New: Conditional playback
     data.play_condition = data.play_condition or data.playcondition or data.condition
-    data.can_interrupt = data.can_interrupt ~= nil and tobool(data.can_interrupt) or true
+    if data.can_interrupt == nil then
+        data.can_interrupt = true
+    else
+        data.can_interrupt = tobool(data.can_interrupt)
+    end
 
     -- New: Visual effects
     data.viewmodel_fov = data.viewmodel_fov or data.vm_fov or data.fov
@@ -520,6 +529,12 @@ function GCAL:PrepareAnimData(data, hand)
     return data
 end
 
+local defaultCamAng = Angle(-79.750, 0, -90)
+local defaultCamIntensity = { 1, 1, 1 }
+local GetTPIKOptionsForAnim
+local GetTPIKSequenceName
+local ResolveTPIKSequence
+
 -- Push live-edited fields from a re-registered anim onto the active track
 local function RefreshActiveTrack(track, data)
     if not IsValid(track.model) then return end
@@ -533,7 +548,7 @@ local function RefreshActiveTrack(track, data)
     local easingOutName = data.easing_out or "OutQuad"
     local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
 
-    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false
+    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
     track.lerpCurve = data.lerp_curve or 1
     track.legacyMatrixLerp = legacyMatrixLerp
     track.lerpSpeedIn = data.lerp_speed_in or 1
@@ -581,11 +596,11 @@ local function RefreshActiveTrack(track, data)
 
     -- Update TPIK options
     local oldTpikSeqID = track.tpikSeqID
-    track.tpikOptions = GetTPIKOptionsForAnim(track.name)
-    track.tpikSequenceRequested = GetTPIKSequenceName(track.name)
+    track.tpikOptions = GetTPIKOptionsForAnim and GetTPIKOptionsForAnim(track.name) or nil
+    track.tpikSequenceRequested = GetTPIKSequenceName and GetTPIKSequenceName(track.name) or nil
 
     -- Re-resolve TPIK sequence and update model if changed
-    if track.tpikSequenceRequested then
+    if track.tpikSequenceRequested and ResolveTPIKSequence then
         track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, track.name, data)
         if IsValid(track.tpikModel) and track.tpikSeqID and track.tpikSeqID ~= -1 and oldTpikSeqID ~= track.tpikSeqID then
             track.tpikModel:ResetSequence(track.tpikSeqID)
@@ -603,8 +618,8 @@ local function RefreshActiveTrack(track, data)
     track.preventQuit = data.preventquit or false
     track.segmented = data.segmented or false
     track.camboneEnabled = (data.cambone == nil) or tobool(data.cambone)
-    track.camAng = data.cam_ang or properang
-    track.camAngInt = data.cam_angint or tableintensity
+    track.camAng = data.cam_ang or defaultCamAng
+    track.camAngInt = data.cam_angint or defaultCamIntensity
 
     -- Clear thirdperson cache to force rebuild with new settings
     track.thirdpersonMaterialsConfigured = nil
@@ -628,10 +643,9 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
     GCAL_Log("Registering animation:", name)
     self.Anims[name] = data
 
-    for trackID, track in pairs(self.ActiveTracks or {}) do
+    for _, track in pairs(self.ActiveTracks or {}) do
         if track.name == name then
             RefreshActiveTrack(track, data)
-            break
         end
     end
 end
@@ -797,7 +811,7 @@ function GCAL:GetTrackDuration(trackID)
 end
 
 function GCAL:StopAllTracks()
-    for trackID in pairs(self.ActiveTracks or {}) do
+    for _, trackID in ipairs(self:GetActiveTrackIDs()) do
         self:StopTrack(trackID)
     end
 end
@@ -815,6 +829,7 @@ if CLIENT then
     local angleZero = Angle(0, 0, 0)
 
     local SyncLegacyVManipFields
+    local posparentcache
 
     -- Helper function to normalize model paths and prevent double "models/" prefix
     local function NormalizeModelPath(modelPath)
@@ -1028,18 +1043,18 @@ if CLIENT then
         return -1, nil
     end
 
-    local function GetTPIKOptionsForAnim(animName)
+    GetTPIKOptionsForAnim = function(animName)
         return GCAL.GetTPIKOptions and GCAL:GetTPIKOptions(animName) or nil
     end
 
-    local function GetTPIKSequenceName(animName)
+    GetTPIKSequenceName = function(animName)
         local options = GetTPIKOptionsForAnim(animName)
         if not options then return nil end
 
         return options.sequence or options.anim or options.animation
     end
 
-    local function ResolveTPIKSequence(track, animName, anim)
+    ResolveTPIKSequence = function(track, animName, anim)
         local sequenceName = GetTPIKSequenceName(animName)
         sequenceName = sequenceName and tostring(sequenceName) or ""
         if sequenceName == "" then return track.seqID, track.sequenceName end
@@ -1132,7 +1147,7 @@ if CLIENT then
             bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
-            thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and anim.thirdperson ~= false,
+            thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and anim.thirdperson ~= false and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(name)),
             tpikOptions = GetTPIKOptionsForAnim(name),
             tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
@@ -1490,6 +1505,7 @@ if CLIENT then
             if IsValid(track.thirdpersonModel) then track.thirdpersonModel:Remove() end
             if IsValid(track.legModel) then track.legModel:Remove() end
             if trackID == "legacy_left_arm" then
+                posparentcache = nil
                 vmatrixpeakinfo = vmatrixpeakinfo or 0
                 VManip_modelname = VManip_modelname or ""
                 vmanipholdtime = vmanipholdtime or 0
@@ -1580,6 +1596,14 @@ if CLIENT then
         return true
     end
 
+    local function EmitTrackSound(ply, track, soundPath)
+        local soundLevel = track.soundLevel or track.soundVolume or 75
+        local pitch = GCAL.SoundPitch:GetInt()
+        local volume = (track.soundVolume and track.soundVolume <= 1) and track.soundVolume or 1.0
+        local flags = track.soundFlags or 0
+        ply:EmitSound(soundPath, soundLevel, pitch, volume, CHAN_AUTO, flags)
+    end
+
     local function HandleSounds(track)
         if GCAL.MuteSounds:GetBool() then return end
         local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
@@ -1588,11 +1612,7 @@ if CLIENT then
             if overridePath and not track.soundsPlayed.__custom_start then
                 local ply = LocalPlayer()
                 if IsValid(ply) then
-                    local volume = track.soundVolume or 75
-                    local pitch = GCAL.SoundPitch:GetInt()
-                    local level = track.soundLevel or 75
-                    local flags = track.soundFlags or 0
-                    ply:EmitSound(overridePath, volume, pitch, 1.0, level, flags)
+                    EmitTrackSound(ply, track, overridePath)
                 end
                 track.soundsPlayed.__custom_start = true
             end
@@ -1604,11 +1624,7 @@ if CLIENT then
             if elapsed >= time and not track.soundsPlayed[soundPath] then
                 local ply = LocalPlayer()
                 if IsValid(ply) then
-                    local volume = track.soundVolume or 75
-                    local pitch = GCAL.SoundPitch:GetInt()
-                    local level = track.soundLevel or 75
-                    local flags = track.soundFlags or 0
-                    ply:EmitSound(overridePath or soundPath, volume, pitch, 1.0, level, flags)
+                    EmitTrackSound(ply, track, overridePath or soundPath)
                 end
                 track.soundsPlayed[soundPath] = true
             end
@@ -1710,7 +1726,6 @@ if CLIENT then
         track.lastLerpVal = track.lastLerpVal or track.lerpVal or 1
 
         local dt = FrameTime()
-        HandleSounds(track)
 
         curtime = CurTime()
 
@@ -1718,6 +1733,8 @@ if CLIENT then
         if track.delayStart and track.delayStart > 0 and curtime < track.realStartTime + track.delayStart then
             return false
         end
+
+        HandleSounds(track)
 
         -- New: Cycle callback
         if track.onCycleCallback and isfunction(track.onCycleCallback) then
@@ -2015,7 +2032,6 @@ if CLIENT then
         return self:FindArmTarget(context.vm, context.handsEnt, targetBones)
     end
 
-    local posparentcache
     local function ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext, skipVMSetup)
         if not IsValid(track.model) or not IsValid(vm) then return end
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
@@ -2215,8 +2231,11 @@ if CLIENT then
 
         ProcessQueuedTracks()
 
-        for id, track in pairs(GCAL.ActiveTracks) do
-            UpdateTrack(track, id)
+        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+            local track = GCAL.ActiveTracks[id]
+            if track then
+                UpdateTrack(track, id)
+            end
         end
 
         if next(GCAL.ActiveTracks) == nil and VManip and VManip.QueuedAnim and VManip:PlayAnim(VManip.QueuedAnim) then
@@ -2261,7 +2280,9 @@ if CLIENT then
         if IsValid(handsEnt) and handsEnt ~= vm then handsEnt:SetupBones() end
         local skipVMSetup = true
 
-        for id, track in pairs(GCAL.ActiveTracks) do
+        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+            local track = GCAL.ActiveTracks[id]
+            if not track then continue end
             if id == "legacy_left_arm" and IsValid(ply) and not ply:Alive() then
                 GCAL:StopTrack(id)
                 continue
@@ -2749,7 +2770,7 @@ if CLIENT then
         end
 
         local stopped = 0
-        for activeTrackID in pairs(GCAL.ActiveTracks or {}) do
+        for _, activeTrackID in ipairs(GCAL:GetActiveTrackIDs()) do
             GCAL:StopTrack(activeTrackID)
             stopped = stopped + 1
         end
@@ -2779,16 +2800,14 @@ if CLIENT then
         end
     end)
 
-    hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, self)
-        if self == true then return end
+    local inCalcView = false
+    hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, znear, zfar)
+        if inCalcView then return end
         if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply then return end
-        
-        -- In third-person, skip GCAL camera adjustments but don't block other mods
-        if ply:ShouldDrawLocalPlayer() then
-            -- Pass through to other CalcView hooks
-            return hook.Run("CalcView", ply, origin, angles, fov, true)
-        end
+
+        -- In third-person, skip GCAL camera adjustments without blocking other mods
+        if ply:ShouldDrawLocalPlayer() then return end
 
         -- Skip if no attachment to avoid suppressing other CalcView hooks
         local hasAttachment = false
@@ -2801,7 +2820,14 @@ if CLIENT then
         if not hasAttachment then return end
 
         -- Compose with other mods' CalcView, then layer cambone on top
-        local composed = hook.Run("CalcView", ply, origin, angles, fov, true) or {}
+        inCalcView = true
+        local ok, composed = pcall(hook.Run, "CalcView", ply, origin, angles, fov, znear, zfar)
+        inCalcView = false
+        if not ok then
+            ErrorNoHaltWithStack(composed)
+            composed = {}
+        end
+        composed = composed or {}
         local baseOrigin = composed.origin or origin
         local baseAngles = composed.angles or angles
         local baseFov = composed.fov or fov
