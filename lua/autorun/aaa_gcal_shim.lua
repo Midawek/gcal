@@ -37,6 +37,8 @@ function VManip:RegisterAnim(arg1, arg2, arg3)
 
     if not name or not data then return end
     self.Anims = self.Anims or GCAL.Anims or {}
+    -- Raw legacy table; gcal_compat.lua re-registers it properly once GCAL has loaded.
+    data.__gcal_pending = "vmanip"
     self.Anims[name] = data
 end
 
@@ -74,6 +76,7 @@ function VMLegs:RegisterAnim(arg1, arg2, arg3)
 
     if not name or not data then return end
     self.Anims = self.Anims or GCAL.Anims or {}
+    data.__gcal_pending = "vmlegs"
     self.Anims["legs_" .. name] = data
 end
 

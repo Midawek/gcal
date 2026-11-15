@@ -158,21 +158,21 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. Aliases: `oninterrupt`, `OnInterrupt`. |
 | `on_cycle`           | function     | Callback function called periodically during playback (every 10% cycle). Signature: `function(trackID, animName, track, cycle)`. Aliases: `oncycle`, `OnCycle`. |
 | `delay_start`        | number       | Delay in seconds before animation actually starts playing (default: 0). Aliases: `delaystart`. |
-| `ease_in_time`       | number       | Custom ease-in duration override (seconds). Aliases: `easeintime`. |
-| `ease_out_time`      | number       | Custom ease-out duration override (seconds). Aliases: `easeouttime`. |
+| `ease_in_time`       | number       | Duration of the blend-in in seconds. Overrides `lerp_speed_in` (a full blend lasts `1 / (7 * lerp_speed_in)` seconds otherwise). Aliases: `easeintime`. |
+| `ease_out_time`      | number       | Duration of the blend-out in seconds. Overrides `lerp_speed_out`. Aliases: `easeouttime`. |
 | `play_condition`     | function     | Conditional playback function. Return false to prevent playback. Signature: `function(animName, trackID, animData)`. Aliases: `playcondition`, `condition`. |
-| `viewmodel_fov`      | number       | Custom viewmodel FOV for this animation. Aliases: `vm_fov`, `fov`. |
-| `viewmodel_offset`   | Vector       | Custom viewmodel position offset. Aliases: `vm_offset`. |
+| `viewmodel_fov`      | number       | View FOV to reach while the animation is fully blended in (e.g. `50` zooms in); fades in and out with the animation. First person only. Aliases: `vm_fov`, `fov`. |
+| `viewmodel_offset`   | Vector       | Shifts the viewmodel by (forward, right, up) units while the animation is blended in. Aliases: `vm_offset`. |
 | `screen_shake`       | table        | Screen shake parameters: `{amplitude, frequency, duration}`. Aliases: `screenshake`. |
 | `sound_volume`       | number       | Volume level for animation sounds (default: 75). Aliases: `soundvolume`. |
 | `sound_level`        | number       | Sound level/attenuation for animation sounds (default: 75). Aliases: `soundlevel`. |
 | `sound_flags`        | number       | Sound flags for animation sounds (default: 0). Aliases: `soundflags`. |
-| `blend_mode`         | string       | Bone blending mode: `"normal"`, `"additive"`, `"override"` (default: "normal"). Aliases: `blendmode`. |
-| `blend_weight`       | number       | Custom blend weight multiplier (0-1). Aliases: `blendweight`. |
+| `blend_mode`         | string       | Reserved. Only `"normal"` is implemented; `"additive"` and `"override"` are accepted but currently behave like `"normal"`. Aliases: `blendmode`. |
+| `blend_weight`       | number       | Caps how strongly the animation overrides the rest pose (0-1, default 1), in first person and TPIK. Not applied to legacy animations. Aliases: `blendweight`. |
 | `model_scale`        | number       | Scale multiplier for the source animation model. Aliases: `modelscale`. |
 | `model_skin`         | number       | Skin index for the source animation model. Aliases: `modelskin`. |
 | `model_bodygroups`   | table        | Bodygroup settings for the source model: `{groupID = value, ...}`. Aliases: `modelbodygroups`. |
-| `disable_pred`       | bool         | Disables prediction for this animation (default: false). |
+| `disable_pred`       | bool         | Reserved; currently has no effect (GCAL playback is clientside and unpredicted). |
 | `local_only`         | bool         | Prevents network synchronization (clientside only, default: false). |
 
 ---
@@ -499,7 +499,7 @@ Valid TPIK option keys:
 | `offset_y` | number | 0 | Right/left position offset. |
 | `offset_z` | number | 0 | Up/down position offset. |
 | `model_offset` | table | — | Per-bone world-space position offset for the third-person model clone (spray cans, tablets, etc.) `{ boneName = Vector(x,y,z), ... }`. Useful for fine-tuning a prop's appearance without retouching the model. |
-| `clone_offset_x` | number | 0 | Forward/back position offset for the whole third-person model clone. |
+| `clone_offset_x` | number | 0 | Forward/back position offset for the whole third-person model clone, relative to the player's aim. The clone already follows the solved hand, so this is a fine-tuning offset. |
 | `clone_offset_y` | number | 0 | Right/left position offset. |
 | `clone_offset_z` | number | 0 | Up/down position offset. |
 | `pole_source` | number | — | **Deprecated.** Ignored (IK solver removed). |

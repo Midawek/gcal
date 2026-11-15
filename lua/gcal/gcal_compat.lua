@@ -173,6 +173,7 @@ function VManip:RegisterAnim(arg1, arg2, arg3)
         cam_angint = data.cam_angint,
         segmented = data.segmented,
         legacy = true,
+        thirdperson = false, -- legacy animations do not get thirdperson TPIK
         addon_name = data.addon_name or data.addon or GCAL.CurrentRegistrationSource or "Legacy VManip"
     }
     
@@ -346,6 +347,29 @@ end
 function VMLegs:Remove()
     if not CLIENT then return end
     GCAL:StopTrack("legs")
+end
+
+-- Addons that registered before GCAL loaded went through the stubs in aaa_gcal_shim.lua,
+-- which store the raw VManip / VMLegs table. Push those through the real translation layer
+-- so they get their track, bones, sequence and legacy handling.
+do
+    local pending = {}
+    for name, data in pairs(GCAL.Anims) do
+        if istable(data) and data.__gcal_pending then
+            pending[#pending + 1] = { name, data, data.__gcal_pending }
+        end
+    end
+
+    for _, entry in ipairs(pending) do
+        local name, data, kind = entry[1], entry[2], entry[3]
+        data.__gcal_pending = nil
+        if kind == "vmlegs" then
+            GCAL.Anims[name] = nil
+            VMLegs:RegisterAnim(string.sub(tostring(name), 6), data) -- strip the "legs_" prefix the stub added
+        else
+            VManip:RegisterAnim(name, data)
+        end
+    end
 end
 
 GCAL.ImportedFiles = GCAL.ImportedFiles or {}

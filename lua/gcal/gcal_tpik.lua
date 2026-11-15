@@ -134,7 +134,9 @@ function GCAL.InstallTPIK(deps)
     end
 
     -- Third-person model clone: visual copy of the source viewmodel for props
-    local function PrepareClone(track, handPos)
+    -- cloneShift moves the clone from the source model (placed at the eyes) to where the arms
+    -- were actually solved; cloneAngles is the frame for the clone_offset_x/y/z options.
+    local function PrepareClone(track, handPos, cloneShift, cloneAngles)
         local model = track.thirdpersonModel
         local source = GetSourceModel(track)
         if not IsValid(model) or Opt(track, "model", "thirdperson_model") == false then return end
@@ -178,6 +180,18 @@ function GCAL.InstallTPIK(deps)
         local cloneOffsetZ = (Opt(track, "clone_offset_z", "thirdperson_clone_offset_z") or 0) + OptAdd(track, "clone_offset_z")
         local cloneOffsets = Opt(track, "model_offset")
 
+        -- Whole-clone shift: follow the solved hand, then forward/right/up offsets in render-angle space
+        local shift = Vector(0, 0, 0)
+        if cloneShift then shift:Add(cloneShift) end
+        if cloneOffsetX ~= 0 or cloneOffsetY ~= 0 or cloneOffsetZ ~= 0 then
+            if cloneAngles then
+                shift:Add(cloneAngles:Forward() * cloneOffsetX + cloneAngles:Right() * cloneOffsetY + cloneAngles:Up() * cloneOffsetZ)
+            else
+                shift:Add(Vector(cloneOffsetX, cloneOffsetY, cloneOffsetZ))
+            end
+        end
+        local hasShift = not shift:IsZero()
+
         local copies = {}
         for bone = 0, model:GetBoneCount() - 1 do
             local src = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
@@ -185,8 +199,8 @@ function GCAL.InstallTPIK(deps)
                 copies[bone] = Matrix(src:ToTable())
                 local m = copies[bone]
                 local pos = m:GetTranslation()
-                if cloneOffsetX ~= 0 or cloneOffsetY ~= 0 or cloneOffsetZ ~= 0 then
-                    pos = pos + Vector(cloneOffsetX, cloneOffsetY, cloneOffsetZ)
+                if hasShift then
+                    pos = pos + shift
                     m:SetTranslation(pos)
                 end
                 if cloneOffsets then
@@ -501,16 +515,33 @@ function GCAL.InstallTPIK(deps)
         track.debugThirdPersonPole = "none"
         track.debugThirdPersonRootBone = track.bones[1] or nil
 
-        -- Find hand position for the clone model
+        -- Find hand position for the clone model, and how far that hand ended up from where the
+        -- source model has it. The prop clone gets the same shift so it stays in the hand
+        -- (shoulder alignment, clamping, offsets, smoothing and blend all included).
         local handPos = nil
+        local cloneShift = offset + tpikPosDelta
         for _, side in ipairs({ "L", "R" }) do
-            local handBone = GetBone(ply, "ValveBiped.Bip01_" .. side .. "_Hand")
+            local handName = "ValveBiped.Bip01_" .. side .. "_Hand"
+            local handBone = GetBone(ply, handName)
             if handBone and finalMatrices[handBone] then
                 handPos = finalMatrices[handBone]:GetTranslation()
+
+                local srcHandName = handName
+                for k, boneName in ipairs(track.bones) do
+                    if (targetBones[k] or boneName) == handName then
+                        srcHandName = track.sourceBones and track.sourceBones[k] or boneName
+                        break
+                    end
+                end
+                local srcHandBone = GetBone(source, srcHandName)
+                local srcHandMatrix = srcHandBone and srcHandBone >= 0 and source:GetBoneMatrix(srcHandBone) or nil
+                if srcHandMatrix then
+                    cloneShift = handPos - srcHandMatrix:GetTranslation()
+                end
                 break
             end
         end
-        PrepareClone(track, handPos)
+        PrepareClone(track, handPos, cloneShift, renderAngles)
     end
 
     return {

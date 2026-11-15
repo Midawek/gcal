@@ -525,6 +525,14 @@ local GetTPIKOptionsForAnim
 local GetTPIKSequenceName
 local ResolveTPIKSequence
 
+-- lerpVal moves by (FrameTime() * 7 * speed) per frame, so a full blend lasts 1 / (7 * speed) seconds.
+-- ease_in_time / ease_out_time give that duration directly and override lerp_speed_in / lerp_speed_out.
+local function LerpSpeedFromTime(seconds, fallbackSpeed)
+    seconds = tonumber(seconds)
+    if seconds and seconds > 0 then return 1 / (7 * seconds) end
+    return fallbackSpeed or 1
+end
+
 -- Push live-edited fields from a re-registered anim onto the active track
 local function RefreshActiveTrack(track, data)
     if not IsValid(track.model) then return end
@@ -538,11 +546,12 @@ local function RefreshActiveTrack(track, data)
     local easingOutName = data.easing_out or "Legacy"
     local legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
 
-    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
+    -- Legacy VManip animations never get thirdperson TPIK (see DEVELOPER.md).
+    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false and not data.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
     track.lerpCurve = data.lerp_curve or 1
     track.legacyMatrixLerp = legacyMatrixLerp
-    track.lerpSpeedIn = data.lerp_speed_in or 1
-    track.lerpSpeedOut = data.lerp_speed_out or 1
+    track.lerpSpeedIn = LerpSpeedFromTime(data.ease_in_time, data.lerp_speed_in)
+    track.lerpSpeedOut = LerpSpeedFromTime(data.ease_out_time, data.lerp_speed_out)
     -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
     track.easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil
     track.easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil
@@ -1109,8 +1118,8 @@ if CLIENT then
             camboneEnabled = (anim.cambone == nil) or tobool(anim.cambone),
             camModel = nil,
             speed = anim.speed or 1,
-            lerpSpeedIn = anim.lerp_speed_in or 1,
-            lerpSpeedOut = anim.lerp_speed_out or 1,
+            lerpSpeedIn = LerpSpeedFromTime(anim.ease_in_time, anim.lerp_speed_in),
+            lerpSpeedOut = LerpSpeedFromTime(anim.ease_out_time, anim.lerp_speed_out),
             -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
             easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil,
             easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil,
@@ -1139,7 +1148,8 @@ if CLIENT then
             bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
             sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
-            thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and anim.thirdperson ~= false and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(name)),
+            -- Legacy VManip animations never get thirdperson TPIK (see DEVELOPER.md).
+            thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and anim.thirdperson ~= false and not anim.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(name)),
             tpikOptions = GetTPIKOptionsForAnim(name),
             tpikSequenceRequested = GetTPIKSequenceName(name),
             lastLerpVal = 1,
@@ -1230,7 +1240,11 @@ if CLIENT then
             surrogateCamModel = ClientsideModel(NormalizeModelPath(surrogate.data.model), RENDERGROUP_BOTH)
         end
 
-        if IsValid(surrogateModel) then surrogateModel:SetNoDraw(true) end
+        if not IsValid(surrogateModel) then
+            if IsValid(surrogateCamModel) then surrogateCamModel:Remove() end
+            return false
+        end
+        surrogateModel:SetNoDraw(true)
         if IsValid(surrogateCamModel) then
             surrogateCamModel:SetNoDraw(true)
             surrogateCamModel:SetPos(vector_origin)
@@ -1299,7 +1313,7 @@ if CLIENT then
         GCAL_Log("Failed: Sequence not found in model!")
         track.model:Remove()
         if IsValid(track.camModel) then track.camModel:Remove() end
-        error("GCAL_Play_NoSequence")
+        error("GCAL_Play_NoSequence", 0) -- level 0: no file:line prefix, GCAL:Play matches this string
     end
 
     -- Resolve the TPIK sequence and build the thirdperson model + clone.
@@ -1443,6 +1457,8 @@ if CLIENT then
         local ok, err = pcall(ResolveFirstPersonSequence, track, name, anim)
         if not ok then
             if err == "GCAL_Play_NoSequence" then return false end
+            if IsValid(track.model) then track.model:Remove() end
+            if IsValid(track.camModel) then track.camModel:Remove() end
             error(err, 0)
         end
 
@@ -1926,10 +1942,19 @@ if CLIENT then
         if fn ~= track.easingOut and not IsBlendingIn(track) then
             fn = track.easingOut
         end
+        local factor
         if fn then
-            return fn(t, 0, 1, 1)
+            factor = fn(t, 0, 1, 1)
+        else
+            factor = GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
         end
-        return GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
+
+        -- blend_weight (0-1) caps how far the animation pulls the bones away from the rest pose.
+        local weight = tonumber(track.blendWeight)
+        if weight then
+            factor = 1 - (1 - factor) * math.Clamp(weight, 0, 1)
+        end
+        return factor
     end
     GCAL.GetTrackBlendFactor = GetTrackBlendFactor
 
@@ -2257,6 +2282,14 @@ if CLIENT then
         if lastTrackUpdateFrame == frame then return false end
         lastTrackUpdateFrame = frame
 
+        -- Like OG VManip / VMLegs: drop the legacy gesture and legs when the player dies,
+        -- so a held or looping one does not carry over into the next life.
+        local ply = LocalPlayer()
+        if IsValid(ply) and not ply:Alive() then
+            if GCAL.ActiveTracks["legacy_left_arm"] then GCAL:StopTrack("legacy_left_arm") end
+            if GCAL.ActiveTracks["legs"] then GCAL:StopTrack("legs") end
+        end
+
         ProcessQueuedTracks()
 
         for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
@@ -2284,11 +2317,12 @@ if CLIENT then
     local lastHandsRenderFrame = -1
     local lastVMRenderFrame = -1
     local renderTracksBusy = false
+    local renderTracksBusyFrame = -1
     local function RenderTracks(hands, vm, ply, weapon, flags, fromHandsHook)
-        if renderTracksBusy then return end
-        if not IsValid(vm) then return end
-
         local frame = FrameNumber()
+        -- Re-entrancy guard, scoped to the frame so an error mid-render cannot leave it stuck forever.
+        if renderTracksBusy and renderTracksBusyFrame == frame then return end
+        if not IsValid(vm) then return end
         if fromHandsHook then
             lastHandsRenderFrame = frame
         else
@@ -2297,6 +2331,7 @@ if CLIENT then
         end
 
         renderTracksBusy = true
+        renderTracksBusyFrame = frame
         local handsEnt = IsValid(hands) and hands or (IsValid(ply) and ply:GetHands() or nil)
         if IsValid(handsEnt) then
             handsEnt:SetupBones()
@@ -2823,11 +2858,6 @@ if CLIENT then
             if trackID == "legs" then continue end
             if not IsValid(track.camModel) then continue end
 
-            if trackID == "legacy_left_arm" and not ply:Alive() then
-                GCAL:StopTrack(trackID)
-                continue
-            end
-
             track.camModel:SetupBones()
             local attachments = track.camModel:GetAttachments()
             if #attachments > 0 then
@@ -2839,21 +2869,22 @@ if CLIENT then
     local inCalcView = false
     hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, znear, zfar)
         if inCalcView then return end
-        if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply then return end
 
         -- In third-person, skip GCAL camera adjustments without blocking other mods
         if ply:ShouldDrawLocalPlayer() then return end
 
-        -- Skip if no attachment to avoid suppressing other CalcView hooks
-        local hasAttachment = false
+        -- Skip unless a track drives the camera (cambone attachment) or the FOV (viewmodel_fov),
+        -- to avoid suppressing other CalcView hooks
+        local camBoneEnabled = GCAL.CamBone:GetBool()
+        local needsView = false
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
-            if track.attachment then
-                hasAttachment = true; break
+            if (camBoneEnabled and track.attachment) or tonumber(track.viewmodelFov) then
+                needsView = true; break
             end
         end
-        if not hasAttachment then return end
+        if not needsView then return end
 
         -- Compose with other mods' CalcView, then layer cambone on top
         inCalcView = true
@@ -2869,19 +2900,21 @@ if CLIENT then
         local baseFov = composed.fov or fov
 
         local newOrigin, newAngles, newFov = baseOrigin, baseAngles, baseFov
-        for trackID, track in pairs(GCAL.ActiveTracks) do
-            if trackID == "legs" then continue end
-            if not track.attachment then continue end
-            newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
+        if camBoneEnabled then
+            for trackID, track in pairs(GCAL.ActiveTracks) do
+                if trackID == "legs" then continue end
+                if not track.attachment then continue end
+                newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
+            end
         end
 
-        -- Apply viewmodel_fov adjustments
+        -- viewmodel_fov is the FOV to reach while the animation is fully blended in:
+        -- fade from the current FOV toward it as the track blends in, and back out again.
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
-            if track.viewmodelFov and track.lerpVal then
-                -- Scale FOV adjustment by inverse lerp (1 - lerpVal means full animation visibility)
-                local fovScale = 1 - track.lerpVal
-                newFov = newFov + (track.viewmodelFov * fovScale)
+            local targetFov = tonumber(track.viewmodelFov)
+            if targetFov and newFov then
+                newFov = Lerp(1 - (track.lerpVal or 1), newFov, targetFov)
             end
         end
 
@@ -2891,6 +2924,39 @@ if CLIENT then
         view.angles = newAngles
         view.fov = newFov
         return view
+    end)
+
+    -- viewmodel_offset: shift the viewmodel (forward, right, up) while the animation is blended in.
+    -- Composes with the gamemode / weapon / other addons the same way GCAL_VManipCam does.
+    local inCalcViewModelView = false
+    hook.Add("CalcViewModelView", "GCAL_ViewModelOffset", function(weapon, vm, oldPos, oldAng, pos, ang)
+        if inCalcViewModelView then return end
+
+        local offX, offY, offZ = 0, 0, 0
+        local hasOffset = false
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            local offset = track.viewmodelOffset
+            if trackID ~= "legs" and isvector(offset) then
+                local scale = 1 - (track.lerpVal or 1)
+                offX = offX + offset.x * scale
+                offY = offY + offset.y * scale
+                offZ = offZ + offset.z * scale
+                hasOffset = true
+            end
+        end
+        if not hasOffset then return end
+
+        inCalcViewModelView = true
+        local ok, newPos, newAng = pcall(hook.Run, "CalcViewModelView", weapon, vm, oldPos, oldAng, pos, ang)
+        inCalcViewModelView = false
+        if not ok then
+            ErrorNoHaltWithStack(newPos)
+            newPos, newAng = nil, nil
+        end
+        if not isvector(newPos) then newPos = pos end
+        if not isangle(newAng) then newAng = ang end
+
+        return newPos + newAng:Forward() * offX + newAng:Right() * offY + newAng:Up() * offZ, newAng
     end)
 
     hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)
@@ -2957,6 +3023,7 @@ if SERVER then
         return true
     end
 
+    -- A nil / empty trackID stops every track on the receiving clients.
     function GCAL:StopTrack(trackID, recipients)
         net.Start("GCAL_Stop")
         net.WriteString(trackID or "")
@@ -2965,5 +3032,9 @@ if SERVER then
         else
             net.Broadcast()
         end
+    end
+
+    function GCAL:StopAllTracks(recipients)
+        self:StopTrack(nil, recipients)
     end
 end
