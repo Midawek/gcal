@@ -174,6 +174,8 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `model_bodygroups`   | table        | Bodygroup settings for the source model: `{groupID = value, ...}`. Aliases: `modelbodygroups`. |
 | `disable_pred`       | bool         | Reserved; currently has no effect (GCAL playback is clientside and unpredicted). |
 | `local_only`         | bool         | Prevents network synchronization (clientside only, default: false). |
+| `gun_mode`           | string       | Firstperson weapon handling: `"follow"` carries the weapon bones along with the animated hand so the gun stays in the grip; `"animated"` copies the gun bone(s) from the animation model (see `gun_bones`) and carries the rest of the gun with them. Default: off. `true` means `"follow"`. Not applied to legacy animations. Aliases: `gunmode`. |
+| `gun_bones`          | string/table | For `gun_mode = "animated"`: the weapon bone to copy, a list of bones, or a map `{ ["source model bone"] = "viewmodel bone" }`. When omitted GCAL tries common names (`ValveBiped.weapon_bone`, `weapon_bone`, `Weapon`, `tag_weapon`, ...) that exist in both models; if nothing matches it behaves like `"follow"`. Aliases: `gunbones`. |
 
 ---
 

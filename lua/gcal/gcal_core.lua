@@ -449,6 +449,16 @@ GCAL:RegisterCamBoneHandler("vmanip", 0,
         return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     end)
 
+-- gun_mode values: "follow" (weapon bones are carried by the animated hand) or
+-- "animated" (weapon bones are copied from the animation model, see gun_bones). Anything else = off.
+function GCAL:NormalizeGunMode(mode)
+    if mode == true then return "follow" end
+    mode = string.lower(tostring(mode or ""))
+    if mode == "follow" or mode == "hand" or mode == "1" then return "follow" end
+    if mode == "animated" or mode == "anim" or mode == "animation" or mode == "2" then return "animated" end
+    return nil
+end
+
 function GCAL:PrepareAnimData(data, hand)
     if not data then return data end
 
@@ -511,6 +521,12 @@ function GCAL:PrepareAnimData(data, hand)
     data.model_scale = data.model_scale or data.modelscale
     data.model_skin = data.model_skin or data.modelskin
     data.model_bodygroups = data.model_bodygroups or data.modelbodygroups
+
+    -- Gun bone handling (firstperson)
+    local gunMode = data.gun_mode
+    if gunMode == nil then gunMode = data.gunmode end
+    data.gun_mode = self:NormalizeGunMode(gunMode)
+    data.gun_bones = data.gun_bones or data.gunbones
 
     -- New: Advanced flags
     data.disable_pred = data.disable_pred ~= nil and tobool(data.disable_pred) or false
@@ -588,6 +604,11 @@ local function RefreshActiveTrack(track, data)
     -- Update blend settings
     track.blendMode = data.blend_mode or "normal"
     track.blendWeight = data.blend_weight
+
+    -- Update gun bone settings
+    track.gunMode = data.gun_mode
+    track.gunBones = data.gun_bones
+    track.gunBonePairs = nil
 
     -- Update model settings
     track.modelScale = data.model_scale
@@ -1173,6 +1194,9 @@ if CLIENT then
             -- New: Blend settings
             blendMode = anim.blend_mode or "normal",
             blendWeight = anim.blend_weight,
+            -- Gun bone handling
+            gunMode = anim.gun_mode,
+            gunBones = anim.gun_bones,
             -- New: Model settings
             modelScale = anim.model_scale,
             modelSkin = anim.model_skin,
@@ -2254,6 +2278,295 @@ if CLIENT then
         track.debugBoneCount = boneCount
     end
 
+    ----------------------------------------------------------------------------------------
+    -- Gun bones (firstperson)
+    --
+    -- ApplyBones only writes the arm bones, so the weapon keeps its own pose while the hands
+    -- move away from it. Two opt-in modes fix that:
+    --   "follow"   - every bone below an animated arm bone is carried along with it, so the gun
+    --                stays in the grip. Viewmodels whose gun bones are not parented to the hand
+    --                fall back to moving all weapon bones rigidly with the right hand.
+    --   "animated" - the gun bone(s) are copied from the animation model like the arm bones
+    --                (gun_bones = "bone", { "bone", ... } or { ["source bone"] = "viewmodel bone" }),
+    --                and the rest of the gun is carried by them. Falls back to "follow" when
+    --                no gun bone can be matched.
+    -- The viewmodel is drawn before the hands, so this runs in PreDrawViewModel and never
+    -- writes arm bones: those stay the job of RenderTracks.
+    ----------------------------------------------------------------------------------------
+    local gunBoneCache = setmetatable({}, { __mode = "k" })
+    local function GetGunBoneCache(ent)
+        local model = ent:GetModel() or ""
+        local cache = gunBoneCache[ent]
+        if not cache or cache.model ~= model then
+            cache = { model = model, children = {}, isArm = {} }
+            gunBoneCache[ent] = cache
+        end
+        return cache
+    end
+
+    local function GetGunChildBones(ent, bone)
+        local cache = GetGunBoneCache(ent)
+        local children = cache.children[bone]
+        if not children then
+            children = ent:GetChildBones(bone) or {}
+            cache.children[bone] = children
+        end
+        return children
+    end
+
+    -- Arm / body bones ("Bip01") are never written by the gun pass.
+    local function IsArmBone(ent, bone)
+        local cache = GetGunBoneCache(ent)
+        local isArm = cache.isArm[bone]
+        if isArm == nil then
+            local name = ent:GetBoneName(bone)
+            isArm = not name or name == "__INVALIDBONE__" or string.find(name, "Bip01", 1, true) ~= nil
+            cache.isArm[bone] = isArm
+        end
+        return isArm
+    end
+
+    local gunBoneCandidates = {
+        "ValveBiped.weapon_bone", "weapon_bone", "Weapon", "weapon", "tag_weapon", "j_gun", "v_weapon"
+    }
+
+    -- Gun bone handling is chosen per animation through gun_mode in RegisterAnim.
+    local function ResolveGunMode(track)
+        return track.gunMode
+    end
+
+    function GCAL:GetGunMode(trackID)
+        local track = self:GetTrack(trackID)
+        return track and ResolveGunMode(track) or nil
+    end
+
+    local function GetGunBonePairs(track)
+        if track.gunBonePairs then return track.gunBonePairs end
+
+        local out = {}
+        local bones = track.gunBones
+        if isstring(bones) then
+            out[1] = { bones, bones }
+        elseif istable(bones) then
+            for key, value in pairs(bones) do
+                if isnumber(key) then
+                    out[#out + 1] = { tostring(value), tostring(value) }
+                else
+                    out[#out + 1] = { tostring(key), tostring(value) }
+                end
+            end
+        else
+            for _, name in ipairs(gunBoneCandidates) do
+                out[#out + 1] = { name, name, true }
+            end
+        end
+
+        track.gunBonePairs = out
+        return out
+    end
+
+    local function BlendGunMatrix(sourceMatrix, targetMatrix, blendFactor)
+        local mTable = sourceMatrix:ToTable()
+        local targetTable = targetMatrix:ToTable()
+        for i = 1, 4 do
+            local mi, ti = mTable[i], targetTable[i]
+            for j = 1, 4 do
+                mi[j] = mi[j] + (ti[j] - mi[j]) * blendFactor
+            end
+        end
+
+        local m = Matrix(mTable)
+        m:SetScale(scalevec)
+        return m
+    end
+
+    local function GunDelta(oldMatrix, newMatrix)
+        local inverse = Matrix(oldMatrix:ToTable())
+        if not inverse:Invert() then return nil end
+        return newMatrix * inverse
+    end
+
+    -- Move everything below parentBone by the same transform its parent went through.
+    -- solved: bones that already have a pose this pass; out: bones this pass will write.
+    local function CarryGunChildren(ent, parentBone, parentOld, parentNew, solved, out)
+        local delta = GunDelta(parentOld, parentNew)
+        if not delta then return 0 end
+
+        local moved = 0
+        for _, child in ipairs(GetGunChildBones(ent, parentBone)) do
+            if not solved[child] then
+                local childOld = ent:GetBoneMatrix(child)
+                if childOld then
+                    local childNew = delta * childOld
+                    solved[child] = true
+                    if not IsArmBone(ent, child) then
+                        out[child] = childNew
+                        moved = moved + 1
+                    end
+                    moved = moved + CarryGunChildren(ent, child, childOld, childNew, solved, out)
+                end
+            end
+        end
+        return moved
+    end
+
+    local function ApplyGunBones(track, vm, weapon, renderContext, mode)
+        if not IsValid(track.model) or not track.bones or not track.data then return end
+        if TrackUsesLegacyFlip(track) then return end -- legacy flip mirrors the source; arms only
+
+        local flip = GetLegacyFlipState(weapon)
+        local targetBones = GetTrackTargetBones(track, weapon, flip)
+        local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
+        if not IsValid(targetEnt) then return end
+        if targetEnt ~= vm then targetEnt:SetupBones() end
+
+        -- Same source placement as ApplyBones
+        if track.data.locktoply or track.data.assurepos then
+            PlaceTrackModel(track, EyePos(), EyeAngles())
+        else
+            PlaceTrackModel(track, vm:GetPos(), vm:GetAngles())
+        end
+        track.model:SetModelScale(1)
+        track.model:SetupBones()
+
+        local curve = track.lerpCurve or track.data.lerp_curve or 1
+        local blendFactor = GetTrackBlendFactor(track, track.lerpVal or 1, curve)
+
+        -- Solve the arm bones exactly like ApplyBones does, without writing them.
+        local roots = {}                -- { ent, bone, old, new }
+        local solved = { [targetEnt] = {} }
+        local rightHandOld, rightHandNew
+        for k, boneName in ipairs(track.bones) do
+            local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
+            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or
+                sourceBoneName
+            local modelBone = track.model:LookupBone(sourceBoneName)
+            if not modelBone or modelBone < 0 then continue end
+
+            local modelMatrix = track.model:GetBoneMatrix(modelBone)
+            if not modelMatrix then continue end
+
+            local targetBoneName = targetBones[k] or boneName
+            local targetBone = targetEnt:LookupBone(targetBoneName)
+            if not targetBone or targetBone < 0 then continue end
+
+            local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
+            if not targetMatrix then continue end
+
+            local newMatrix = BlendGunMatrix(modelMatrix, targetMatrix, blendFactor)
+            solved[targetEnt][targetBone] = true
+            roots[#roots + 1] = { targetEnt, targetBone, targetMatrix, newMatrix }
+            if targetBoneName == "ValveBiped.Bip01_R_Hand" then
+                rightHandOld, rightHandNew = targetMatrix, newMatrix
+            end
+        end
+        if #roots == 0 then return end
+
+        local out = { [targetEnt] = {} }
+        solved[vm] = solved[vm] or {}
+        out[vm] = out[vm] or {}
+
+        -- "animated": copy the gun bone(s) from the animation model
+        local drivenOld, drivenNew
+        local gunMoved = 0
+        if mode == "animated" then
+            for _, pair in ipairs(GetGunBonePairs(track)) do
+                local sourceBone = track.model:LookupBone(pair[1])
+                local gunBone = vm:LookupBone(pair[2])
+                if sourceBone and sourceBone >= 0 and gunBone and gunBone >= 0 and not solved[vm][gunBone] then
+                    local sourceMatrix = track.model:GetBoneMatrix(sourceBone)
+                    local gunMatrix = vm:GetBoneMatrix(gunBone)
+                    if sourceMatrix and gunMatrix then
+                        local newMatrix = BlendGunMatrix(sourceMatrix, gunMatrix, blendFactor)
+                        solved[vm][gunBone] = true
+                        out[vm][gunBone] = newMatrix
+                        roots[#roots + 1] = { vm, gunBone, gunMatrix, newMatrix }
+                        gunMoved = gunMoved + 1
+                        if not drivenOld then drivenOld, drivenNew = gunMatrix, newMatrix end
+                        if pair[3] then break end -- auto-detected candidate: first match wins
+                    end
+                end
+            end
+        end
+
+        -- Carry everything below the solved bones
+        local carried = 0
+        for _, root in ipairs(roots) do
+            local ent = root[1]
+            local moved = CarryGunChildren(ent, root[2], root[3], root[4], solved[ent], out[ent])
+            if ent == vm then carried = carried + moved end
+        end
+
+        -- Rigid fallback: nothing on the viewmodel hangs off the hand (or the driven gun bone),
+        -- so move every remaining weapon bone with it instead.
+        local driverOld, driverNew = drivenOld or rightHandOld, drivenNew or rightHandNew
+        local rigid = false
+        if carried == 0 and driverOld then
+            local delta = GunDelta(driverOld, driverNew)
+            if delta then
+                for bone = 0, vm:GetBoneCount() - 1 do
+                    if not solved[vm][bone] and not IsArmBone(vm, bone) then
+                        local matrix = vm:GetBoneMatrix(bone)
+                        if matrix then
+                            out[vm][bone] = delta * matrix
+                            carried = carried + 1
+                            rigid = true
+                        end
+                    end
+                end
+            end
+        end
+
+        for ent, matrices in pairs(out) do
+            for bone, matrix in pairs(matrices) do
+                ent:SetBoneMatrix(bone, matrix)
+            end
+        end
+
+        track.debugGunMode = mode .. ((mode == "animated" and gunMoved == 0) and " (no gun bone matched, following hand)" or "") ..
+            (rigid and " [rigid]" or "")
+        track.debugGunBoneCount = gunMoved + carried
+    end
+
+    local lastGunBonesFrame = -1
+    hook.Add("PreDrawViewModel", "GCAL_GunBones", function(vm, ply, weapon)
+        if next(GCAL.ActiveTracks) == nil then return end
+        if not IsValid(vm) or not IsValid(weapon) or ply ~= LocalPlayer() then return end
+
+        local frame = FrameNumber()
+        if lastGunBonesFrame == frame then return end
+
+        local wanted = false
+        for id, track in pairs(GCAL.ActiveTracks) do
+            if id ~= "legs" and id ~= "legacy_left_arm" and ResolveGunMode(track) then
+                wanted = true
+                break
+            end
+        end
+        if not wanted then return end
+        lastGunBonesFrame = frame
+
+        if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
+
+        local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, ply:GetHands())
+        local targetVM = renderContext.vm
+        if not IsValid(targetVM) then return end
+        targetVM:SetupBones()
+
+        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+            local track = GCAL.ActiveTracks[id]
+            if track and id ~= "legs" and id ~= "legacy_left_arm" then
+                local mode = ResolveGunMode(track)
+                if mode then
+                    ApplyGunBones(track, targetVM, weapon, renderContext, mode)
+                else
+                    track.debugGunMode = nil
+                    track.debugGunBoneCount = nil
+                end
+            end
+        end
+    end)
+
     local function ProcessQueuedTracks()
         if not next(GCAL.QueuedAnims) then return end
         -- Snapshot the idle entries first: GCAL:Play can queue again while we iterate.
@@ -2752,6 +3065,8 @@ if CLIENT then
             " - thirdperson model distance: " .. tostring(track.debugThirdPersonModelDistance or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
         MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
+        MsgC(Color(236, 242, 255), " - gun mode: " .. tostring(track.debugGunMode or "off") .. "\n")
+        MsgC(Color(236, 242, 255), " - gun bones moved: " .. tostring(track.debugGunBoneCount or 0) .. "\n")
 
         local ply = LocalPlayer()
         local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
