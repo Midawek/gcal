@@ -73,13 +73,20 @@ end
 
 -- Hook up VMLegs:PlayAnim in compat or here
 function VMLegs:PlayAnim(name)
+    if not CLIENT then return false end
     local animName = "legs_" .. name
     local res = GCAL:Play(animName, "legs")
-    if not res or not CLIENT then return res end
+    if not res then return res end
 
+    -- GCAL:Play also returns true when the anim was suppressed or queued, so make sure
+    -- the legs track is really playing this anim before attaching a leg model.
     local track = GCAL.ActiveTracks["legs"]
     local ply = LocalPlayer()
-    if not track or not IsValid(ply) or not IsValid(track.model) then return res end
+    if not track or track.name ~= animName or not IsValid(ply) or not IsValid(track.model) then return res end
+
+    if IsValid(track.legModel) then
+        track.legModel:Remove()
+    end
 
     track.legModel = ClientsideModel(string.Replace(ply:GetModel(), "models/models/", "models/"), RENDERGROUP_TRANSLUCENT)
     if not IsValid(track.legModel) then return res end

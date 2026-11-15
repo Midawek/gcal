@@ -10,6 +10,9 @@ function GCAL.InstallTPIK(deps)
     local GetLegacyFlipState = deps.GetLegacyFlipState
     local GetTrackTargetBones = deps.GetTrackTargetBones
     local GetTrackModelScale = deps.GetTrackModelScale
+    local GetTrackBlendFactor = deps.GetTrackBlendFactor or function(track, t, curve)
+        return GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
+    end
 
     -- Bone lookup cache (keyed by entity, invalidated on model change)
     local boneIndexCache = setmetatable({}, { __mode = "k" })
@@ -250,9 +253,8 @@ function GCAL.InstallTPIK(deps)
 
         local flip = GetLegacyFlipState(weapon)
         local targetBones = GetTrackTargetBones(track, weapon, flip)
-        local renderAngles = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
-        -- Remote players: use their networked eye angles so the arms follow aim pitch.
-        if ply ~= LocalPlayer() and ply.EyeAngles then renderAngles = ply:EyeAngles() end
+        -- Eye angles (local and remote players alike) so the arms follow aim pitch.
+        local renderAngles = ply.EyeAngles and ply:EyeAngles() or (ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles())
 
         -- Place source model at eye position
         PlaceTPIKTrackModel(track, ply:EyePos(), renderAngles)
@@ -285,13 +287,7 @@ function GCAL.InstallTPIK(deps)
         -- Blend factor: 0 = full animation, 1 = full rest pose
         local baseLerpCurve = track.lerpCurve or (track.data and track.data.lerp_curve) or 1
         local blendCurve = tonumber(Opt(track, "blend_curve")) or baseLerpCurve
-        local blend = math.Clamp(
-            (track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp)(
-                track.lerpVal or 1, 0, 1,
-                blendCurve
-            ),
-            0, 1
-        )
+        local blend = math.Clamp(GetTrackBlendFactor(track, track.lerpVal or 1, blendCurve), 0, 1)
 
         -- New: Apply blend strength modifier
         local blendStrength = tonumber(Opt(track, "blend_strength")) or 1

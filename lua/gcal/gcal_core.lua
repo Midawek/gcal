@@ -89,19 +89,9 @@ if CLIENT then
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
-    function GCAL:IsThirdPersonEnabled() if not self.InternalThirdPersonEnabled or not self.ThirdPerson:GetBool() then return false end -- gcal_thirdperson is the master switch
-        -- Check if GCAL's own third-person is enabled
-        if self.InternalThirdPersonEnabled and self.ThirdPerson:GetBool() then
-            return true
-        end
-        
-        -- Also detect external third-person mods (BSMod, etc.)
-        local ply = LocalPlayer()
-        if IsValid(ply) and ply:ShouldDrawLocalPlayer() then
-            return true
-        end
-        
-        return false
+    -- gcal_thirdperson is the master switch for all thirdperson rendering.
+    function GCAL:IsThirdPersonEnabled()
+        return self.InternalThirdPersonEnabled == true and self.ThirdPerson ~= nil and self.ThirdPerson:GetBool()
     end
 
     local animationAdjustmentFields = {
@@ -544,17 +534,18 @@ local function RefreshActiveTrack(track, data)
     track.speed = data.speed or 1
 
     -- Check for legacy matrix lerp based on easing mode
-    local easingInName = data.easing_in or "OutQuad"
-    local easingOutName = data.easing_out or "OutQuad"
-    local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
+    local easingInName = data.easing_in or "Legacy"
+    local easingOutName = data.easing_out or "Legacy"
+    local legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
 
     track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
     track.lerpCurve = data.lerp_curve or 1
     track.legacyMatrixLerp = legacyMatrixLerp
     track.lerpSpeedIn = data.lerp_speed_in or 1
     track.lerpSpeedOut = data.lerp_speed_out or 1
-    track.easingIn = GCAL.Lerp.Get(easingInName == "Legacy" and "OutQuad" or easingInName)
-    track.easingOut = GCAL.Lerp.Get(easingOutName == "Legacy" and "OutQuad" or easingOutName)
+    -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
+    track.easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil
+    track.easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil
     track.lerpPeak = data.lerp_peak or 0.5
 
     if data.locktoply ~= nil then
@@ -1101,9 +1092,9 @@ if CLIENT then
 
     -- Build the runtime track table from a registered anim.
     local function CreateTrack(name, anim)
-        local easingInName = anim.easing_in or "OutQuad"
-        local easingOutName = anim.easing_out or "OutQuad"
-        local legacyMatrixLerp = easingInName == "Legacy" or easingOutName == "Legacy"
+        local easingInName = anim.easing_in or "Legacy"
+        local easingOutName = anim.easing_out or "Legacy"
+        local legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
         local delayStart = tonumber(anim.delay_start) or 0
 
         return {
@@ -1120,8 +1111,9 @@ if CLIENT then
             speed = anim.speed or 1,
             lerpSpeedIn = anim.lerp_speed_in or 1,
             lerpSpeedOut = anim.lerp_speed_out or 1,
-            easingIn = GCAL.Lerp.Get(easingInName == "Legacy" and "OutQuad" or easingInName),
-            easingOut = GCAL.Lerp.Get(easingOutName == "Legacy" and "OutQuad" or easingOutName),
+            -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
+            easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil,
+            easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil,
             lerpPeak = anim.lerp_peak or 0.5,
             lerpPeakTime = CurTime() + delayStart + (anim.lerp_peak or 0.5),
             legacyMatrixLerp = legacyMatrixLerp,
@@ -1546,6 +1538,14 @@ if CLIENT then
         return true
     end
 
+    local function EmitTrackSound(ply, track, soundPath)
+        local soundLevel = track.soundLevel or track.soundVolume or 75
+        local pitch = GCAL.SoundPitch:GetInt()
+        local volume = (track.soundVolume and track.soundVolume <= 1) and track.soundVolume or 1.0
+        local flags = track.soundFlags or 0
+        ply:EmitSound(soundPath, soundLevel, pitch, volume, CHAN_AUTO, flags)
+    end
+
     function GCAL:PlaySegment(trackID, sequence, lastSegment, soundTable)
         local track = self:GetTrack(trackID)
         if not track then return false end
@@ -1585,7 +1585,7 @@ if CLIENT then
                     if self:GetCurrentAnim(trackID) == track.name and IsValid(LocalPlayer()) and LocalPlayer():Alive() then
                         if not GCAL.MuteSounds:GetBool() then
                             local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
-                            LocalPlayer():EmitSound(overridePath or soundPath, 75, GCAL.SoundPitch:GetInt())
+                            EmitTrackSound(LocalPlayer(), track, overridePath or soundPath)
                         end
                     end
                 end)
@@ -1594,14 +1594,6 @@ if CLIENT then
 
         hook.Run("GCALPlaySegment", trackID, track.name, sequence, lastSegment)
         return true
-    end
-
-    local function EmitTrackSound(ply, track, soundPath)
-        local soundLevel = track.soundLevel or track.soundVolume or 75
-        local pitch = GCAL.SoundPitch:GetInt()
-        local volume = (track.soundVolume and track.soundVolume <= 1) and track.soundVolume or 1.0
-        local flags = track.soundFlags or 0
-        ply:EmitSound(soundPath, soundLevel, pitch, volume, CHAN_AUTO, flags)
     end
 
     local function HandleSounds(track)
@@ -1720,8 +1712,6 @@ if CLIENT then
         track.segmentCount = track.segmentCount or 0
         track.holdTimeData = track.holdTimeData or track.data.holdtime
         if not track.holdTime and track.holdTimeData then track.holdTime = track.startTime + track.holdTimeData end
-        track.easingIn = track.easingIn or GCAL.Lerp.OutQuad
-        track.easingOut = track.easingOut or GCAL.Lerp.OutQuad
         track.soundsPlayed = track.soundsPlayed or {}
         track.lastLerpVal = track.lastLerpVal or track.lerpVal or 1
 
@@ -1749,6 +1739,9 @@ if CLIENT then
             if track.cycle >= 1 then
                 track.lerpPeakTime = curtime + track.lerpPeak
                 track.cycle = 0
+                -- Restart the sound table so sounds replay on every loop
+                track.startTime = curtime
+                table.Empty(track.soundsPlayed)
             end
             if track.holdQuit then track.loop = false end
         end
@@ -1919,8 +1912,30 @@ if CLIENT then
         return parentInverse * worldMatrix, parent
     end
 
+    -- Mirrors the lerp direction logic in UpdateTrack: true while lerpVal is heading toward the animation.
+    local function IsBlendingIn(track)
+        return (CurTime() < (track.lerpPeakTime or 0) or (track.segmented and not track.lastSegment))
+            and (not track.gestureOnHold or track.gesturePastHold)
+    end
+
+    -- Blend weight toward the weapon/rest pose for a raw lerp value (1 = rest pose, 0 = full animation).
+    -- Default is the OG VManip power curve (t ^ lerp_curve); an explicit easing_in / easing_out
+    -- uses the named GCAL.Lerp function for that direction instead.
+    local function GetTrackBlendFactor(track, t, curve)
+        local fn = track.easingIn
+        if fn ~= track.easingOut and not IsBlendingIn(track) then
+            fn = track.easingOut
+        end
+        if fn then
+            return fn(t, 0, 1, 1)
+        end
+        return GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
+    end
+    GCAL.GetTrackBlendFactor = GetTrackBlendFactor
+
     include("gcal/gcal_tpik.lua")
     local tpik = GCAL.InstallTPIK({
+        GetTrackBlendFactor = GetTrackBlendFactor,
         BoneLocalMatrix = BoneLocalMatrix,
         PlaceTrackModel = PlaceTrackModel,
         PlaceTPIKTrackModel = PlaceTPIKTrackModel,
@@ -2070,8 +2085,8 @@ if CLIENT then
             end
         end
 
-        track.model:SetupBones()
         track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
+        track.model:SetupBones()
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
         DrawGShaderFriendlyModel(track.model, flags)
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
@@ -2171,7 +2186,7 @@ if CLIENT then
         local boneCount = 0
         local curve = track.lerpCurve or track.data.lerp_curve or 1
         local lerpVal = track.lerpVal
-        local matrixLerp = track.legacyMatrixLerp and GCAL.Lerp.Legacy or Lerp
+        local blendFactor = GetTrackBlendFactor(track, lerpVal, curve)
         local scaleVec = useLegacyFlip and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
 
         for k, boneName in ipairs(track.bones) do
@@ -2196,7 +2211,7 @@ if CLIENT then
                 for i = 1, 4 do
                     local mi, ti = mTable[i], targetTable[i]
                     for j = 1, 4 do
-                        mi[j] = matrixLerp(lerpVal, mi[j], ti[j], curve)
+                        mi[j] = mi[j] + (ti[j] - mi[j]) * blendFactor
                     end
                 end
 
@@ -2216,9 +2231,22 @@ if CLIENT then
 
     local function ProcessQueuedTracks()
         if not next(GCAL.QueuedAnims) then return end
+        -- Snapshot the idle entries first: GCAL:Play can queue again while we iterate.
+        local ready
         for queuedTrackID, queuedName in pairs(GCAL.QueuedAnims) do
-            if not GCAL.ActiveTracks[queuedTrackID] and GCAL:Play(queuedName, queuedTrackID) then
+            if not GCAL.ActiveTracks[queuedTrackID] then
+                ready = ready or {}
+                ready[#ready + 1] = { queuedTrackID, queuedName }
+            end
+        end
+        if not ready then return end
+
+        -- One-shot consumption (like legacy VManip): an unplayable entry is dropped, not retried every frame.
+        for _, entry in ipairs(ready) do
+            local queuedTrackID, queuedName = entry[1], entry[2]
+            if GCAL.QueuedAnims[queuedTrackID] == queuedName and not GCAL.ActiveTracks[queuedTrackID] then
                 GCAL.QueuedAnims[queuedTrackID] = nil
+                GCAL:Play(queuedName, queuedTrackID)
             end
         end
     end
@@ -2238,12 +2266,20 @@ if CLIENT then
             end
         end
 
-        if next(GCAL.ActiveTracks) == nil and VManip and VManip.QueuedAnim and VManip:PlayAnim(VManip.QueuedAnim) then
+        if not GCAL.ActiveTracks["legacy_left_arm"] and VManip and VManip.QueuedAnim then
+            local queued = VManip.QueuedAnim
             VManip.QueuedAnim = nil
+            VManip:PlayAnim(queued)
         end
 
         return true
     end
+
+    -- Keep tracks advancing when nothing is rendering them (no viewmodel, vehicles, remote
+    -- view entities, ARC9-hosted TPIK). UpdateTracksForFrame dedupes per frame.
+    hook.Add("Think", "GCAL_ThinkUpdateTracks", function()
+        UpdateTracksForFrame()
+    end)
 
     local lastHandsRenderFrame = -1
     local lastVMRenderFrame = -1
@@ -2827,7 +2863,7 @@ if CLIENT then
             ErrorNoHaltWithStack(composed)
             composed = {}
         end
-        composed = composed or {}
+        if not istable(composed) then composed = {} end
         local baseOrigin = composed.origin or origin
         local baseAngles = composed.angles or angles
         local baseFov = composed.fov or fov
@@ -2849,11 +2885,12 @@ if CLIENT then
             end
         end
 
-        return {
-            origin = newOrigin,
-            angles = newAngles,
-            fov = newFov
-        }
+        -- Keep drawviewer / znear / zfar / ortho etc. from the composed view
+        local view = istable(composed) and table.Copy(composed) or {}
+        view.origin = newOrigin
+        view.angles = newAngles
+        view.fov = newFov
+        return view
     end)
 
     hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)
@@ -2880,8 +2917,11 @@ if CLIENT then
 
     net.Receive("GCAL_Stop", function()
         local trackID = net.ReadString()
-        if trackID == "" then trackID = "default" end
-        GCAL:StopTrack(trackID)
+        if trackID == "" then
+            GCAL:StopAllTracks()
+        else
+            GCAL:StopTrack(trackID)
+        end
     end)
 
     net.Receive("VManip_StopHold", function()

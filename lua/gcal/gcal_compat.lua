@@ -180,6 +180,7 @@ function VManip:RegisterAnim(arg1, arg2, arg3)
 end
 
 function VManip:PlayAnim(name)
+    if not CLIENT then return false end -- clientside-only like OG VManip; never broadcast from the server
     local res = GCAL:Play(name, "legacy_left_arm")
     return res and true or false
 end
@@ -195,6 +196,7 @@ function VManip:IsValid()
 end
 
 function VManip:Remove()
+    if not CLIENT then return end
     if self:IsActive() then
         hook.Run("VManipPreRemove", self:GetCurrentAnim())
     end
@@ -269,41 +271,17 @@ function VManip:QueueAnim(animtoqueue)
 end
 
 function VManip:PlaySegment(sequence, lastsegment, soundtable)
+    if not CLIENT then return false end
     local track = GCAL.ActiveTracks["legacy_left_arm"]
-    if track then
-        if not track.segmented or not track.segmentFinished or track.lastSegment then return false end
-        if not IsValid(track.model) or track.model:LookupSequence(sequence) == -1 then return false end
-        if hook.Run("VManipPrePlaySegment", track.name, sequence, lastsegment) == false then return false end
+    if not track then return false end
+    if not track.segmented or not track.segmentFinished or track.lastSegment then return false end
+    if not IsValid(track.model) or track.model:LookupSequence(sequence) == -1 then return false end
+    if hook.Run("VManipPrePlaySegment", track.name, sequence, lastsegment) == false then return false end
 
-        track.model:ResetSequence(sequence)
-        if IsValid(track.camModel) then track.camModel:ResetSequence(sequence) end
-        if IsValid(track.thirdpersonModel) then track.thirdpersonModel:ResetSequence(sequence) end
-        track.curSegment = sequence
-        track.cycle = 0
-        track.segmentFinished = false
-        track.segmentCount = track.segmentCount + 1
-        if lastsegment then
-            track.lastSegment = true
-            track.lerpPeakTime = CurTime() + track.lerpPeak
-        end
+    if not GCAL:PlaySegment("legacy_left_arm", sequence, lastsegment, soundtable) then return false end
 
-        if soundtable then
-            for soundPath, time in pairs(soundtable) do
-                timer.Simple(time, function()
-                    if VManip:GetCurrentAnim() == track.name and IsValid(LocalPlayer()) and LocalPlayer():Alive() then
-                        if not GCAL.MuteSounds:GetBool() then
-                            local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
-                            LocalPlayer():EmitSound(overridePath or soundPath, 75, GCAL.SoundPitch:GetInt())
-                        end
-                    end
-                end)
-            end
-        end
-
-        hook.Run("VManipPlaySegment", track.name, sequence, lastsegment)
-        return true
-    end
-    return false
+    hook.Run("VManipPlaySegment", track.name, sequence, lastsegment)
+    return true
 end
 
 function VManip:GetAnim(name)
@@ -341,6 +319,7 @@ function VMLegs:RegisterAnim(arg1, arg2, arg3)
 end
 
 function VMLegs:PlayAnim(name)
+    if not CLIENT then return false end
     return GCAL:Play("legs_" .. name, "legs")
 end
 
@@ -365,6 +344,7 @@ function VMLegs:GetCurrentAnim()
 end
 
 function VMLegs:Remove()
+    if not CLIENT then return end
     GCAL:StopTrack("legs")
 end
 

@@ -5,7 +5,6 @@ if not CLIENT then return end
 GCAL = GCAL or {}
 GCAL.Menu = GCAL.Menu or {}
 
-if GCAL.Menu.Loaded then return end
 GCAL.Menu.Loaded = true
 
 -- Initialize ConVar, defaulting if needed
@@ -209,6 +208,10 @@ local function FirstTrackName()
 end
 
 local function StopAllTracks()
+    if GCAL.StopAllTracks then
+        GCAL:StopAllTracks()
+        return
+    end
     for id in pairs(GCAL.ActiveTracks or {}) do
         GCAL:StopTrack(id)
     end
@@ -371,7 +374,9 @@ local function SetAnimEnabled(name, enabled)
     end
 
     if not enabled then
-        for id, track in pairs(GCAL.ActiveTracks or {}) do
+        local trackIDs = GCAL.GetActiveTrackIDs and GCAL:GetActiveTrackIDs() or {}
+        for _, id in ipairs(trackIDs) do
+            local track = GCAL.ActiveTracks and GCAL.ActiveTracks[id]
             if track and track.name == name then
                 GCAL:StopTrack(id)
             end

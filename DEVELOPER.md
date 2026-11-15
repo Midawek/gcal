@@ -147,8 +147,8 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
 | `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
 | `preventquit`        | bool         | If true, `GCAL:QuitHolding` will not release this hold state.                                                                                          |
-| `easing_in`          | string       | Easing function for the entry transition.                                                                                                             |
-| `easing_out`         | string       | Easing function for the exit transition.                                                                                                              |
+| `easing_in`          | string       | Easing function for the entry transition (default: `"Legacy"`, the VManip power curve driven by `lerp_curve`). |
+| `easing_out`         | string       | Easing function for the exit transition (default: `"Legacy"`, the VManip power curve driven by `lerp_curve`). |
 | `locktoply`          | bool         | If true, pins the animation to the player's view. The model is placed at `EyePos()` with a 25% blend between view and viewmodel angles.              |
 | `assurepos`          | bool         | If true, parents the gesture model to the viewmodel each frame. The strictest lock — guarantees perfect alignment but costs a reparent per weapon swap.  |
 | **NEW FEATURES** | | |
@@ -688,7 +688,9 @@ GCAL includes a built-in easing library for natural movement. Available options:
 - `InQuad`, `OutQuad`, `InOutQuad`
 - `InCubic`, `OutCubic`, `InOutCubic`
 - `OutElastic` (Great for "snappy" or "bouncy" movements)
-- `Legacy` (Matches the original VManip power-curve behavior)
+- `Legacy` (Matches the original VManip power-curve behavior; this is the default)
+
+`Legacy` blends with `t ^ lerp_curve`, in first person and in thirdperson TPIK. Setting `easing_in` or `easing_out` to another name uses that function for the matching transition; `lerp_curve` (and the TPIK `blend_curve`) then only applies to a side still left on `Legacy`.
 
 ---
 
