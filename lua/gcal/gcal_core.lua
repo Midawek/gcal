@@ -2749,7 +2749,10 @@ if CLIENT then
         RenderTracks(hands, vm, ply, weapon, flags, true)
     end)
 
-    hook.Add("PostDrawViewModel", "GCAL_RenderVM", function(vm, ply, weapon, flags)
+    -- Must stay named "VManip": MW Base calls hook.GetTable().PostDrawViewModel.VManip(vm, ply, weapon)
+    -- directly from mg_viewmodel's BuildBonePositions callback to apply arm bones.
+    hook.Remove("PostDrawViewModel", "GCAL_RenderVM")
+    hook.Add("PostDrawViewModel", "VManip", function(vm, ply, weapon, flags)
         RenderTracks(nil, vm, ply, weapon, flags, false)
     end)
 

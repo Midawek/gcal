@@ -363,11 +363,18 @@ do
     for _, entry in ipairs(pending) do
         local name, data, kind = entry[1], entry[2], entry[3]
         data.__gcal_pending = nil
-        if kind == "vmlegs" then
-            GCAL.Anims[name] = nil
-            VMLegs:RegisterAnim(string.sub(tostring(name), 6), data) -- strip the "legs_" prefix the stub added
-        else
-            VManip:RegisterAnim(name, data)
+        -- Isolate each one: a single malformed addon anim must not abort the rest of this file
+        -- (which would also skip the weapon-base compat below).
+        local ok, err = pcall(function()
+            if kind == "vmlegs" then
+                GCAL.Anims[name] = nil
+                VMLegs:RegisterAnim(string.sub(tostring(name), 6), data) -- strip the "legs_" prefix the stub added
+            else
+                VManip:RegisterAnim(name, data)
+            end
+        end)
+        if not ok then
+            MsgC(Color(236, 116, 121), "[GCAL] Failed to re-register legacy anim '" .. tostring(name) .. "': " .. tostring(err) .. "\n")
         end
     end
 end
@@ -432,16 +439,7 @@ end
 
 -- Weapon Base Compatibility Hooks
 if CLIENT then
-    local function GCAL_VManipFallback(_, matrix)
-        return matrix or Matrix()
-    end
-
-    for _, metaName in ipairs({"Entity", "Weapon", "Player"}) do
-        local meta = FindMetaTable(metaName)
-        if meta and not meta.VManip then
-            meta.VManip = GCAL_VManipFallback
-        end
-    end
+    -- ent:VManip() fallback for MW Base lives in autorun/aaa_gcal_shim.lua so it installs first.
 
     local function OwnerViewModel(ply, weapon)
         local owner = IsValid(weapon) and weapon.GetOwner and weapon:GetOwner() or ply

@@ -15,6 +15,21 @@ setmetatable(VManip, getmetatable(VManip) or {
     end
 })
 
+-- MW Base (mg_viewmodel) calls ent:VManip(matrix) during SetupBones. Install the fallback here,
+-- before anything else, so an error further down the GCAL load chain can't leave it missing.
+if CLIENT then
+    local function GCAL_VManipFallback(_, matrix)
+        return matrix or Matrix()
+    end
+
+    for _, metaName in ipairs({"Entity", "Weapon", "Player"}) do
+        local meta = FindMetaTable(metaName)
+        if meta and not meta.VManip then
+            meta.VManip = GCAL_VManipFallback
+        end
+    end
+end
+
 local function StubNoop()
     return false
 end
