@@ -133,12 +133,37 @@ if CLIENT then
         return tonumber(value) or 0
     end
 
+    -- Combined (global convar + per-animation cookie) adjustments are read every frame for every
+    -- track, so they are cached per animation and dropped whenever one of their inputs changes.
+    local adjustmentCache = {}
+
+    local function InvalidateAdjustmentCache(name)
+        if name == nil then
+            adjustmentCache = {}
+        else
+            adjustmentCache[tostring(name)] = nil
+        end
+    end
+    GCAL.InvalidateAdjustmentCache = InvalidateAdjustmentCache
+
+    for _, convarName in ipairs({
+        "gcal_anim_offset_x", "gcal_anim_offset_y", "gcal_anim_offset_z",
+        "gcal_anim_angle_p", "gcal_anim_angle_y", "gcal_anim_angle_r",
+        "gcal_tpik_offset_x", "gcal_tpik_offset_y", "gcal_tpik_offset_z",
+        "gcal_tpik_angle_p", "gcal_tpik_angle_y", "gcal_tpik_angle_r",
+        "gcal_tpik_target_radius_add", "gcal_tpik_smoothing_add",
+        "gcal_clone_offset_x", "gcal_clone_offset_y", "gcal_clone_offset_z"
+    }) do
+        cvars.AddChangeCallback(convarName, function() InvalidateAdjustmentCache() end, "GCAL_AdjustmentCache")
+    end
+
     function GCAL:SetAnimationAdjustmentValue(name, field, value)
         if not animationAdjustmentFields[field] then return end
 
         name = tostring(name or "")
         self.AnimationAdjustments[name] = self.AnimationAdjustments[name] or {}
         self.AnimationAdjustments[name][field] = tonumber(value) or 0
+        InvalidateAdjustmentCache(name)
 
         if cookie and cookie.Set then
             cookie.Set(self:AnimationAdjustmentCookieKey(name, field), tostring(self.AnimationAdjustments[name][field]))
@@ -148,6 +173,7 @@ if CLIENT then
     function GCAL:ClearAnimationAdjustment(name)
         name = tostring(name or "")
         self.AnimationAdjustments[name] = nil
+        InvalidateAdjustmentCache(name)
 
         for field in pairs(animationAdjustmentFields) do
             if cookie and cookie.Set then
@@ -156,67 +182,67 @@ if CLIENT then
         end
     end
 
-    function GCAL:GetAnimationAdjustment(name)
-        return {
-            pos = Vector(
-                self.AnimationOffsetX:GetFloat() + self:GetAnimationAdjustmentValue(name, "pos_x"),
-                self.AnimationOffsetY:GetFloat() + self:GetAnimationAdjustmentValue(name, "pos_y"),
-                self.AnimationOffsetZ:GetFloat() + self:GetAnimationAdjustmentValue(name, "pos_z")
-            ),
-            ang = Angle(
-                self.AnimationAngleP:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_p"),
-                self.AnimationAngleY:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_y"),
-                self.AnimationAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "ang_r")
-            )
+    local function BuildAdjustment(self, name)
+        local function value(convar, field)
+            return convar:GetFloat() + self:GetAnimationAdjustmentValue(name, field)
+        end
+
+        local adjustment = {
+            pos = Vector(value(self.AnimationOffsetX, "pos_x"), value(self.AnimationOffsetY, "pos_y"),
+                value(self.AnimationOffsetZ, "pos_z")),
+            ang = Angle(value(self.AnimationAngleP, "ang_p"), value(self.AnimationAngleY, "ang_y"),
+                value(self.AnimationAngleR, "ang_r")),
+            tpik = {
+                pos = Vector(value(self.TPIKOffsetX, "tpik_pos_x"), value(self.TPIKOffsetY, "tpik_pos_y"),
+                    value(self.TPIKOffsetZ, "tpik_pos_z")),
+                ang = Angle(value(self.TPIKAngleP, "tpik_ang_p"), value(self.TPIKAngleY, "tpik_ang_y"),
+                    value(self.TPIKAngleR, "tpik_ang_r")),
+                target_radius_add = value(self.TPIKTargetRadiusAdd, "tpik_target_radius_add"),
+                smoothing_add = value(self.TPIKSmoothingAdd, "tpik_smoothing_add")
+            },
+            option_add = {
+                clone_offset_x = value(self.CloneOffsetX, "clone_offset_x"),
+                clone_offset_y = value(self.CloneOffsetY, "clone_offset_y"),
+                clone_offset_z = value(self.CloneOffsetZ, "clone_offset_z")
+            }
         }
+        adjustment.option_add.target_radius = adjustment.tpik.target_radius_add
+        adjustment.option_add.smoothing = adjustment.tpik.smoothing_add
+        adjustment.isZero = adjustment.pos:IsZero() and adjustment.ang:IsZero()
+        return adjustment
+    end
+
+    local function CachedAdjustment(self, name)
+        name = tostring(name or "")
+        local adjustment = adjustmentCache[name]
+        if not adjustment then
+            adjustment = BuildAdjustment(self, name)
+            adjustmentCache[name] = adjustment
+        end
+        return adjustment
+    end
+
+    -- The returned tables are shared and cached: read them, do not modify them.
+    function GCAL:GetAnimationAdjustment(name)
+        return CachedAdjustment(self, name)
     end
 
     function GCAL:ApplyAnimationAdjustment(name, pos, ang)
-        local adjustment = self:GetAnimationAdjustment(name)
-        local offset = adjustment.pos
-        local adjustedPos = pos + ang:Forward() * offset.x + ang:Right() * offset.y + ang:Up() * offset.z
-        local angleOffset = adjustment.ang
+        local adjustment = CachedAdjustment(self, name)
+        if adjustment.isZero then return pos, ang end
 
+        local offset = adjustment.pos
+        local angleOffset = adjustment.ang
+        local adjustedPos = pos + ang:Forward() * offset.x + ang:Right() * offset.y + ang:Up() * offset.z
         return adjustedPos, Angle(ang.p + angleOffset.p, ang.y + angleOffset.y, ang.r + angleOffset.r)
     end
 
     function GCAL:GetTPIKAdjustment(name)
-        return {
-            pos = Vector(
-                self.TPIKOffsetX:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pos_x"),
-                self.TPIKOffsetY:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pos_y"),
-                self.TPIKOffsetZ:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_pos_z")
-            ),
-            ang = Angle(
-                self.TPIKAngleP:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_p"),
-                self.TPIKAngleY:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_y"),
-                self.TPIKAngleR:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_ang_r")
-            ),
-            target_radius_add = self.TPIKTargetRadiusAdd:GetFloat() +
-                self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add"),
-            smoothing_add = self.TPIKSmoothingAdd:GetFloat() +
-                self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
-        }
+        return CachedAdjustment(self, name).tpik
     end
 
     function GCAL:GetTPIKOptionAdd(name, option)
-        if option == "target_radius" then
-            return self.TPIKTargetRadiusAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_target_radius_add")
-        end
-        if option == "smoothing" then
-            return self.TPIKSmoothingAdd:GetFloat() + self:GetAnimationAdjustmentValue(name, "tpik_smoothing_add")
-        end
-        if option == "clone_offset_x" then
-            return self.CloneOffsetX:GetFloat() + self:GetAnimationAdjustmentValue(name, "clone_offset_x")
-        end
-        if option == "clone_offset_y" then
-            return self.CloneOffsetY:GetFloat() + self:GetAnimationAdjustmentValue(name, "clone_offset_y")
-        end
-        if option == "clone_offset_z" then
-            return self.CloneOffsetZ:GetFloat() + self:GetAnimationAdjustmentValue(name, "clone_offset_z")
-        end
-
-        return 0
+        return CachedAdjustment(self, name).option_add[option] or 0
     end
 end
 
@@ -742,6 +768,9 @@ local function RefreshActiveTrack(track, data)
     track.camAngInt = data.cam_angint or defaultCamIntensity
 
     -- Clear thirdperson cache to force rebuild with new settings
+    track.tpikBoneRules = nil
+    track.soundsDone = nil
+    track.camAttachmentID = nil
     track.thirdpersonMaterialsConfigured = nil
     track.thirdpersonBoneMatrices = nil
     track.thirdpersonSolveFrame = nil
@@ -1722,31 +1751,41 @@ if CLIENT then
         return true
     end
 
+    -- track.soundsDone stops the per-frame scan once every sound of this pass has played
+    -- (reset when a looping track restarts).
     local function HandleSounds(track)
-        if GCAL.MuteSounds:GetBool() then return end
+        if track.soundsDone or GCAL.MuteSounds:GetBool() then return end
         local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
-        local soundCount = track.data.sounds and table.Count(track.data.sounds) or 0
-        if soundCount == 0 then
-            if overridePath and not track.soundsPlayed.__custom_start then
+        local sounds = track.data.sounds
+        local played = track.soundsPlayed
+
+        if not sounds or next(sounds) == nil then
+            if overridePath then
                 local ply = LocalPlayer()
                 if IsValid(ply) then
                     EmitTrackSound(ply, track, overridePath)
                 end
-                track.soundsPlayed.__custom_start = true
+                track.soundsDone = true
             end
             return
         end
 
         local elapsed = CurTime() - track.startTime
-        for soundPath, time in pairs(track.data.sounds) do
-            if elapsed >= time and not track.soundsPlayed[soundPath] then
-                local ply = LocalPlayer()
-                if IsValid(ply) then
-                    EmitTrackSound(ply, track, overridePath or soundPath)
+        local pending = false
+        for soundPath, time in pairs(sounds) do
+            if not played[soundPath] then
+                if elapsed >= time then
+                    local ply = LocalPlayer()
+                    if IsValid(ply) then
+                        EmitTrackSound(ply, track, overridePath or soundPath)
+                    end
+                    played[soundPath] = true
+                else
+                    pending = true
                 end
-                track.soundsPlayed[soundPath] = true
             end
         end
+        if not pending then track.soundsDone = true end
     end
 
     SyncLegacyVManipFields = function(track)
@@ -1822,25 +1861,8 @@ if CLIENT then
         end
     end
 
+    -- Every field read here is initialised by CreateTrack.
     local function UpdateTrack(track, trackID)
-        track.data = track.data or {}
-        track.startTime = track.startTime or CurTime()
-        track.cycle = track.cycle or 0
-        track.speed = track.speed or 1
-        track.duration = track.duration or 1
-        track.lerpPeak = track.lerpPeak or track.data.lerp_peak or 0.5
-        track.lerpPeakTime = track.lerpPeakTime or (CurTime() + track.lerpPeak)
-        track.lerpSpeedIn = track.lerpSpeedIn or track.data.lerp_speed_in or 1
-        track.lerpSpeedOut = track.lerpSpeedOut or track.data.lerp_speed_out or 1
-        track.lerpCurve = track.lerpCurve or track.data.lerp_curve or 1
-        if track.loop == nil then track.loop = track.data.loop or false end
-        if track.segmented == nil then track.segmented = track.data.segmented or false end
-        track.segmentCount = track.segmentCount or 0
-        track.holdTimeData = track.holdTimeData or track.data.holdtime
-        if not track.holdTime and track.holdTimeData then track.holdTime = track.startTime + track.holdTimeData end
-        track.soundsPlayed = track.soundsPlayed or {}
-        track.lastLerpVal = track.lastLerpVal or track.lerpVal or 1
-
         local dt = FrameTime()
 
         curtime = CurTime()
@@ -1854,6 +1876,7 @@ if CLIENT then
                 -- Restart the sound table so sounds replay on every loop
                 track.startTime = curtime
                 table.Empty(track.soundsPlayed)
+                track.soundsDone = nil
             end
             if track.holdQuit then track.loop = false end
         end
@@ -2008,6 +2031,31 @@ if CLIENT then
         model:DrawModel(flags)
     end
 
+    -- Bone index cache per entity, rebuilt when the entity's model changes. LookupBone is a C call
+    -- and used to run for every bone of every track each frame. Missing bones are stored as -1.
+    local boneCaches = setmetatable({}, { __mode = "k" })
+    local function BoneCache(ent)
+        local model = ent:GetModel() or ""
+        local cache = boneCaches[ent]
+        if not cache or cache.__model ~= model then
+            cache = { __model = model }
+            boneCaches[ent] = cache
+        end
+        return cache
+    end
+
+    local function CachedBone(cache, ent, name)
+        local idx = cache[name]
+        if idx == nil then
+            idx = ent:LookupBone(name) or -1
+            cache[name] = idx
+        end
+        return idx
+    end
+
+    local ULNA_L = "ValveBiped.Bip01_L_Ulna"
+    local FOREARM_L = "ValveBiped.Bip01_L_Forearm"
+
     local function BoneLocalMatrix(ent, bone, worldMatrix, worldMatrices)
         local parent = ent:GetBoneParent(bone)
         if not parent or parent < 0 then
@@ -2062,7 +2110,9 @@ if CLIENT then
         PlaceTPIKTrackModel = PlaceTPIKTrackModel,
         GetLegacyFlipState = GetLegacyFlipState,
         GetTrackTargetBones = GetTrackTargetBones,
-        GetTrackModelScale = GetTrackModelScale
+        GetTrackModelScale = GetTrackModelScale,
+        BoneCache = BoneCache,
+        CachedBone = CachedBone
     })
     local ApplyCachedThirdPersonBones = tpik.ApplyCachedThirdPersonBones
     local ApplyThirdPersonBones = tpik.ApplyThirdPersonBones
@@ -2080,18 +2130,25 @@ if CLIENT then
     local function EntityHasAnyBone(ent, bones)
         if not IsValid(ent) or not bones then return false end
 
+        local cache = BoneCache(ent)
         for _, boneName in ipairs(bones) do
-            local bone = ent:LookupBone(boneName)
-            if bone ~= nil and bone >= 0 then return true end
+            if CachedBone(cache, ent, boneName) >= 0 then return true end
         end
 
         return false
     end
 
+    -- Strategy detection runs several times per frame (firstperson, gun bones, thirdperson), so the
+    -- result is kept per weapon for a short while. The re-check covers weapons whose detect()
+    -- answer changes after deploy (e.g. MW Base creating m_ViewModel late).
+    local STRATEGY_CACHE_SECONDS = 0.5
+    local strategyCache = setmetatable({}, { __mode = "k" })
+
     function GCAL:RegisterWeaponBaseStrategy(id, strategy)
         if not id or not strategy or not isfunction(strategy.detect) then return false end
 
         strategy.id = id
+        strategyCache = setmetatable({}, { __mode = "k" })
         for k, existing in ipairs(self.WeaponBaseStrategies) do
             if existing.id == id then
                 self.WeaponBaseStrategies[k] = strategy
@@ -2106,11 +2163,22 @@ if CLIENT then
     function GCAL:GetWeaponBaseStrategy(ply, weapon)
         if not IsValid(weapon) then return nil end
 
-        for _, strategy in ipairs(self.WeaponBaseStrategies or {}) do
-            if strategy.detect(ply, weapon) then return strategy end
+        local now = RealTime()
+        local cached = strategyCache[weapon]
+        if cached and cached.ply == ply and now < cached.expires then
+            return cached.strategy or nil
         end
 
-        return nil
+        local found = false
+        for _, strategy in ipairs(self.WeaponBaseStrategies or {}) do
+            if strategy.detect(ply, weapon) then
+                found = strategy
+                break
+            end
+        end
+
+        strategyCache[weapon] = { ply = ply, strategy = found, expires = now + STRATEGY_CACHE_SECONDS }
+        return found or nil
     end
 
     function GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy)
@@ -2219,35 +2287,36 @@ if CLIENT then
         targetEnt:SetupBones()
 
         local boneCount = 0
-        local lerpVal = track.lerpVal
-        local lerpCurve = track.lerpCurve or 1
-        local legacyLerp = GCAL.Lerp.Legacy
+        -- GCAL.Lerp.Legacy(t, a, b, curve) = a + (b - a) * t ^ curve; t ^ curve is the same for every element.
+        local factor = (track.lerpVal or 1) ^ (track.lerpCurve or 1)
+        local scaleVec = flip.targetRight and flipped or scalevec
+        local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
 
         for k, boneName in ipairs(rigpick) do
-            local sourceBoneName = boneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or boneName
-            local sourceBone = track.model:LookupBone(sourceBoneName)
-            if sourceBone == nil or sourceBone < 0 then continue end
+            local sourceBoneName = boneName == ULNA_L and FOREARM_L or boneName
+            local sourceBone = CachedBone(sourceCache, track.model, sourceBoneName)
+            if sourceBone < 0 then continue end
+
+            local targetBone = CachedBone(targetCache, targetEnt, targetRig[k] or boneName)
+            if targetBone < 0 then continue end
 
             local gestureMatrix = track.model:GetBoneMatrix(sourceBone)
-            local targetBone = targetEnt:LookupBone(targetRig[k] or boneName)
+            local targetBoneMatrix = gestureMatrix and targetEnt:GetBoneMatrix(targetBone)
+            if targetBoneMatrix then
+                local gestureTable = gestureMatrix:ToTable()
+                local targetTable = targetBoneMatrix:ToTable()
 
-            if targetBone ~= nil and targetBone >= 0 and gestureMatrix ~= nil then
-                local targetBoneMatrix = targetEnt:GetBoneMatrix(targetBone)
-                if targetBoneMatrix then
-                    local targetTable = targetBoneMatrix:ToTable()
-                    local gestureTable = gestureMatrix:ToTable()
-
-                    for i, row in pairs(gestureTable) do
-                        for j, value in pairs(row) do
-                            gestureTable[i][j] = legacyLerp(lerpVal, value, targetTable[i][j], lerpCurve)
-                        end
+                for i = 1, 4 do
+                    local gi, ti = gestureTable[i], targetTable[i]
+                    for j = 1, 4 do
+                        gi[j] = gi[j] + (ti[j] - gi[j]) * factor
                     end
-
-                    local m = Matrix(gestureTable)
-                    m:SetScale(flip.targetRight and flipped or scalevec)
-                    targetEnt:SetBoneMatrix(targetBone, m)
-                    boneCount = boneCount + 1
                 end
+
+                local m = Matrix(gestureTable)
+                m:SetScale(scaleVec)
+                targetEnt:SetBoneMatrix(targetBone, m)
+                boneCount = boneCount + 1
             end
         end
 
@@ -2305,42 +2374,46 @@ if CLIENT then
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
 
         local boneCount = 0
-        local curve = track.lerpCurve or track.data.lerp_curve or 1
         local lerpVal = track.lerpVal
-        local blendFactor = GetTrackBlendFactor(track, lerpVal, curve)
+        local blendFactor = GetTrackBlendFactor(track, lerpVal, track.lerpCurve or 1)
         local scaleVec = useLegacyFlip and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
+        local sourceBones = track.sourceBones
+        local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
 
         for k, boneName in ipairs(track.bones) do
-            local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or
-                sourceBoneName
-            local modelBone = track.model:LookupBone(sourceBoneName)
-            if not modelBone or modelBone < 0 then continue end
+            local sourceBoneName = sourceBones and sourceBones[k] or boneName
+            if sourceBoneName == ULNA_L then sourceBoneName = FOREARM_L end
+            local modelBone = CachedBone(sourceCache, track.model, sourceBoneName)
+            if modelBone < 0 then continue end
+
+            local targetBone = CachedBone(targetCache, targetEnt, targetBones[k] or boneName)
+            if targetBone < 0 then continue end
 
             local modelMatrix = track.model:GetBoneMatrix(modelBone)
-            if modelMatrix then
-                local targetBoneName = targetBones[k] or boneName
-                local targetBone = targetEnt:LookupBone(targetBoneName)
-                if not targetBone or targetBone < 0 then continue end
+            if not modelMatrix then continue end
 
+            local m
+            if blendFactor == 0 then
+                -- Fully blended in (most of an animation): the source pose is the result.
+                m = modelMatrix
+            else
                 local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if not targetMatrix then continue end
 
                 local mTable = modelMatrix:ToTable()
                 local targetTable = targetMatrix:ToTable()
-
                 for i = 1, 4 do
                     local mi, ti = mTable[i], targetTable[i]
                     for j = 1, 4 do
                         mi[j] = mi[j] + (ti[j] - mi[j]) * blendFactor
                     end
                 end
-
-                local m = Matrix(mTable)
-                m:SetScale(scaleVec)
-                targetEnt:SetBoneMatrix(targetBone, m)
-                boneCount = boneCount + 1
+                m = Matrix(mTable)
             end
+
+            m:SetScale(scaleVec)
+            targetEnt:SetBoneMatrix(targetBone, m)
+            boneCount = boneCount + 1
         end
 
         if IsValid(handsEnt) and handsEnt ~= targetEnt then
@@ -2501,26 +2574,25 @@ if CLIENT then
         track.model:SetModelScale(1)
         track.model:SetupBones()
 
-        local curve = track.lerpCurve or track.data.lerp_curve or 1
-        local blendFactor = GetTrackBlendFactor(track, track.lerpVal or 1, curve)
+        local blendFactor = GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1)
 
         -- Solve the arm bones exactly like ApplyBones does, without writing them.
         local roots = {}                -- { ent, bone, old, new }
         local solved = { [targetEnt] = {} }
         local rightHandOld, rightHandNew
+        local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
         for k, boneName in ipairs(track.bones) do
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or
-                sourceBoneName
-            local modelBone = track.model:LookupBone(sourceBoneName)
-            if not modelBone or modelBone < 0 then continue end
+            if sourceBoneName == ULNA_L then sourceBoneName = FOREARM_L end
+            local modelBone = CachedBone(sourceCache, track.model, sourceBoneName)
+            if modelBone < 0 then continue end
 
             local modelMatrix = track.model:GetBoneMatrix(modelBone)
             if not modelMatrix then continue end
 
             local targetBoneName = targetBones[k] or boneName
-            local targetBone = targetEnt:LookupBone(targetBoneName)
-            if not targetBone or targetBone < 0 then continue end
+            local targetBone = CachedBone(targetCache, targetEnt, targetBoneName)
+            if targetBone < 0 then continue end
 
             local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
             if not targetMatrix then continue end
@@ -2542,10 +2614,11 @@ if CLIENT then
         local drivenOld, drivenNew
         local gunMoved = 0
         if mode == "animated" then
+            local vmCache = BoneCache(vm)
             for _, pair in ipairs(GetGunBonePairs(track)) do
-                local sourceBone = track.model:LookupBone(pair[1])
-                local gunBone = vm:LookupBone(pair[2])
-                if sourceBone and sourceBone >= 0 and gunBone and gunBone >= 0 and not solved[vm][gunBone] then
+                local sourceBone = CachedBone(sourceCache, track.model, pair[1])
+                local gunBone = CachedBone(vmCache, vm, pair[2])
+                if sourceBone >= 0 and gunBone >= 0 and not solved[vm][gunBone] then
                     local sourceMatrix = track.model:GetBoneMatrix(sourceBone)
                     local gunMatrix = vm:GetBoneMatrix(gunBone)
                     if sourceMatrix and gunMatrix then
@@ -2600,6 +2673,68 @@ if CLIENT then
         track.debugGunBoneCount = gunMoved + carried
     end
 
+    -- Tracks can start or stop while the per-frame loops run (callbacks, queued anims, StopTrack),
+    -- so those loops walk a snapshot of the IDs. Each loop reuses its own buffer instead of
+    -- allocating a fresh table through GCAL:GetActiveTrackIDs() every frame.
+    local function SnapshotTrackIDs(buffer)
+        local count = 0
+        for id in pairs(GCAL.ActiveTracks) do
+            count = count + 1
+            buffer[count] = id
+        end
+        for i = count + 1, #buffer do buffer[i] = nil end
+        return buffer
+    end
+    local gunTrackIDs, updateTrackIDs, renderTrackIDs = {}, {}, {}
+
+    -- The TPIK solver only reads Spine4, the mapped arm bones and everything below the upper arms,
+    -- so only those player bones are copied instead of the whole skeleton. GetBoneMatrix already
+    -- returns a fresh copy, so no extra ToTable() round trip is needed.
+    local tpikBaseBones = setmetatable({}, { __mode = "k" })
+    local function GetTPIKBaseBones(ply)
+        local model = ply:GetModel() or ""
+        local entry = tpikBaseBones[ply]
+        if entry and entry.model == model then return entry.bones end
+
+        local bones, seen = {}, {}
+        local cache = BoneCache(ply)
+        local function AddTree(bone, recurse)
+            if bone < 0 or seen[bone] then return end
+            seen[bone] = true
+            bones[#bones + 1] = bone
+            if not recurse then return end
+            for _, child in ipairs(ply:GetChildBones(bone) or {}) do AddTree(child, true) end
+        end
+        AddTree(CachedBone(cache, ply, "ValveBiped.Bip01_Spine4"), false)
+        AddTree(CachedBone(cache, ply, "ValveBiped.Bip01_L_UpperArm"), true)
+        AddTree(CachedBone(cache, ply, "ValveBiped.Bip01_R_UpperArm"), true)
+
+        tpikBaseBones[ply] = { model = model, bones = bones }
+        return bones
+    end
+
+    local function CollectTPIKBaseMatrices(ply, tracks)
+        local matrices = {}
+        for _, bone in ipairs(GetTPIKBaseBones(ply)) do
+            matrices[bone] = ply:GetBoneMatrix(bone)
+        end
+
+        -- Custom bone lists can map bones outside the arm trees (clavicles, spine, ...).
+        local cache = BoneCache(ply)
+        for _, track in pairs(tracks) do
+            if track.thirdperson and track.bones then
+                for _, name in ipairs(track.bones) do
+                    local bone = CachedBone(cache, ply, name)
+                    if bone >= 0 and matrices[bone] == nil then
+                        matrices[bone] = ply:GetBoneMatrix(bone)
+                    end
+                end
+            end
+        end
+        return matrices
+    end
+    GCAL.MPInternal.CollectTPIKBaseMatrices = CollectTPIKBaseMatrices
+
     local lastGunBonesFrame = -1
     hook.Add("PreDrawViewModel", "GCAL_GunBones", function(vm, ply, weapon)
         if next(GCAL.ActiveTracks) == nil then return end
@@ -2625,7 +2760,7 @@ if CLIENT then
         if not IsValid(targetVM) then return end
         targetVM:SetupBones()
 
-        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+        for _, id in ipairs(SnapshotTrackIDs(gunTrackIDs)) do
             local track = GCAL.ActiveTracks[id]
             if track and id ~= "legs" and id ~= "legacy_left_arm" then
                 local mode = ResolveGunMode(track)
@@ -2677,7 +2812,7 @@ if CLIENT then
 
         ProcessQueuedTracks()
 
-        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+        for _, id in ipairs(SnapshotTrackIDs(updateTrackIDs)) do
             local track = GCAL.ActiveTracks[id]
             if track then
                 UpdateTrack(track, id)
@@ -2736,7 +2871,7 @@ if CLIENT then
         if IsValid(handsEnt) and handsEnt ~= vm then handsEnt:SetupBones() end
         local skipVMSetup = true
 
-        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+        for _, id in ipairs(SnapshotTrackIDs(renderTrackIDs)) do
             local track = GCAL.ActiveTracks[id]
             if not track then continue end
             if id == "legacy_left_arm" and IsValid(ply) and not ply:Alive() then
@@ -2792,15 +2927,8 @@ if CLIENT then
                 ply:SetupBones()
             end
 
-            local baseMatrices = {}
-            for bone = 0, ply:GetBoneCount() - 1 do
-                local matrix = ply:GetBoneMatrix(bone)
-                if matrix then
-                    baseMatrices[bone] = Matrix(matrix:ToTable())
-                end
-            end
             renderContext = {
-                thirdpersonBaseMatrices = baseMatrices
+                thirdpersonBaseMatrices = CollectTPIKBaseMatrices(ply, GCAL.ActiveTracks)
             }
         end
 
@@ -3170,10 +3298,15 @@ if CLIENT then
             if trackID == "legs" then continue end
             if not IsValid(track.camModel) then continue end
 
-            track.camModel:SetupBones()
-            local attachments = track.camModel:GetAttachments()
-            if #attachments > 0 then
-                track.attachment = track.camModel:GetAttachment(attachments[1].id)
+            -- GetAttachments() builds a new table, so the first attachment id is looked up once
+            -- per track (false = the model has none).
+            if track.camAttachmentID == nil then
+                local attachments = track.camModel:GetAttachments() or {}
+                track.camAttachmentID = attachments[1] and attachments[1].id or false
+            end
+            if track.camAttachmentID then
+                track.camModel:SetupBones()
+                track.attachment = track.camModel:GetAttachment(track.camAttachmentID)
             end
         end
     end)

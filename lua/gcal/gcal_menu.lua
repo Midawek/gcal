@@ -157,7 +157,10 @@ local function DrawPrideTitle(panel, text, font, x, y, fallbackColor)
     render.SetScissorRect(0, 0, 0, 0, false)
 end
 
-hook.Add("Think", "GCAL_MenuPrideAccent", function()
+-- Called from the main window's Paint, so the accent only animates while the menu is drawn
+-- (it used to run from a Think hook every frame, menu open or not).
+hook.Remove("Think", "GCAL_MenuPrideAccent")
+local function UpdateMenuAccent()
     if PrideEnabled() then
         local rainbow = HSVToColor((RealTime() * 55) % 360, 0.72, 1)
         colAccent.r = rainbow.r
@@ -169,7 +172,7 @@ hook.Add("Think", "GCAL_MenuPrideAccent", function()
     colAccent.r = defaultAccent.r
     colAccent.g = defaultAccent.g
     colAccent.b = defaultAccent.b
-end)
+end
 
 local function PaintPill(x, y, w, h, color, text)
     draw.RoundedBox(5, x, y, w, h, Color(color.r, color.g, color.b, 26))
@@ -1196,6 +1199,7 @@ function GCAL.Menu.BuildWindow(window)
     end
 
     window.Paint = function(_, w, h)
+        UpdateMenuAccent()
         draw.RoundedBox(7, 0, 0, w, h, colFrame)
         draw.RoundedBox(6, 1, 1, w - 2, h - 2, colPanel)
         PaintPrideLine(10, 0, w - 20, PrideEnabled() and 3 or 1)

@@ -14,24 +14,19 @@ function GCAL.InstallTPIK(deps)
         return GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
     end
 
-    -- Bone lookup cache (keyed by entity, invalidated on model change)
-    local boneIndexCache = setmetatable({}, { __mode = "k" })
+    -- Bone lookups share core's per-entity cache (see BoneCache in gcal_core.lua).
+    local BoneCache, CachedBone = deps.BoneCache, deps.CachedBone
     local childBoneCache = setmetatable({}, { __mode = "k" })
 
+    -- Bone index or nil. Hot loops grab BoneCache(ent) once and call CachedBone directly.
     local function GetBone(ent, name)
         if not IsValid(ent) or not name then return nil end
-        local model = ent:GetModel() or ""
-        local cache = boneIndexCache[ent]
-        if not cache or cache.model ~= model then
-            cache = { model = model, bones = {} }
-            boneIndexCache[ent] = cache
-        end
-        local cached = cache.bones[name]
-        if cached ~= nil then return cached ~= false and cached or nil end
-        local idx = ent:LookupBone(name)
-        cache.bones[name] = idx or false
-        return idx
+        local idx = CachedBone(BoneCache(ent), ent, name)
+        return idx >= 0 and idx or nil
     end
+
+    local UPPER_ARM = { "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_R_UpperArm" }
+    local HAND = { "ValveBiped.Bip01_L_Hand", "ValveBiped.Bip01_R_Hand" }
 
     local function GetChildren(ent, bone)
         if not IsValid(ent) or not bone or bone < 0 then return {} end
@@ -64,6 +59,43 @@ function GCAL.InstallTPIK(deps)
         local options = GetOptions(track)
         if options then return options[key] end
         return nil
+    end
+
+    -- lock_bones / scale_bones / blend_per_bone match bone names by substring. That matching is
+    -- resolved once per track and bone name instead of running string.find every frame.
+    -- track.tpikBoneRules is cleared whenever the track's TPIK options change.
+    local function GetBoneRules(track, boneName)
+        local rules = track.tpikBoneRules
+        if not rules then
+            rules = {}
+            track.tpikBoneRules = rules
+        end
+
+        local rule = rules[boneName]
+        if rule then return rule end
+
+        rule = { locked = false, scale = 1, blend = nil }
+        for _, lockName in ipairs(Opt(track, "lock_bones") or {}) do
+            if string.find(boneName, tostring(lockName), 1, true) then
+                rule.locked = true
+                break
+            end
+        end
+        for scaleName, scale in pairs(Opt(track, "scale_bones") or {}) do
+            if string.find(boneName, tostring(scaleName), 1, true) then
+                rule.scale = tonumber(scale) or 1
+                break
+            end
+        end
+        for blendName, boneBlend in pairs(Opt(track, "blend_per_bone") or {}) do
+            if string.find(boneName, tostring(blendName), 1, true) then
+                rule.blend = tonumber(boneBlend)
+                break
+            end
+        end
+
+        rules[boneName] = rule
+        return rule
     end
 
     local function OptAdd(track, key)
@@ -273,21 +305,19 @@ function GCAL.InstallTPIK(deps)
         -- Blend factor: 0 = full animation, 1 = full rest pose
         local blend = math.Clamp(GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1), 0, 1)
 
-        -- Spine position for clamping
-        local spineIdx = GetBone(ply, "ValveBiped.Bip01_Spine4")
-        local spinePos = nil
-        if spineIdx then
-            local m = baseMatrices[spineIdx]
-            if m then spinePos = m:GetTranslation() end
-        end
+        local plyCache, srcCache = BoneCache(ply), BoneCache(source)
 
--- Offset viewmodel bones (camera space) to player body space via shoulder
+        -- Spine position for clamping
+        local spineIdx = CachedBone(plyCache, ply, "ValveBiped.Bip01_Spine4")
+        local spineMatrix = spineIdx >= 0 and baseMatrices[spineIdx] or nil
+        local spinePos = spineMatrix and spineMatrix:GetTranslation() or nil
+
+        -- Offset viewmodel bones (camera space) to player body space via shoulder
         local offset = Vector(0, 0, 0)
-        for _, side in ipairs({ "L", "R" }) do
-            local name = "ValveBiped.Bip01_" .. side .. "_UpperArm"
-            local srcIdx = GetBone(source, name)
-            local tgtIdx = GetBone(ply, name)
-            if srcIdx and srcIdx >= 0 and tgtIdx and tgtIdx >= 0 then
+        for _, name in ipairs(UPPER_ARM) do
+            local srcIdx = CachedBone(srcCache, source, name)
+            local tgtIdx = CachedBone(plyCache, ply, name)
+            if srcIdx >= 0 and tgtIdx >= 0 then
                 local srcM = source:GetBoneMatrix(srcIdx)
                 local tgtM = baseMatrices[tgtIdx]
                 if srcM and tgtM then
@@ -298,69 +328,41 @@ function GCAL.InstallTPIK(deps)
         end
 
         -- Options
-        local clampRadius = tonumber(Opt(track, "target_radius")) or 38
-        clampRadius = clampRadius + OptAdd(track, "target_radius")
-        local smoothing = tonumber(Opt(track, "smoothing")) or 18
-        smoothing = math.Clamp(smoothing + OptAdd(track, "smoothing"), 0, 60)
+        local clampRadius = (tonumber(Opt(track, "target_radius")) or 38) + OptAdd(track, "target_radius")
+        local smoothing = math.Clamp((tonumber(Opt(track, "smoothing")) or 18) + OptAdd(track, "smoothing"), 0, 60)
+        local smoothAlpha = smoothing > 0 and math.Clamp(1 - math.exp(-smoothing * RealFrameTime()), 0, 1) or 0
 
-        -- Per-animation offsets from RegisterTPIKOptions
-        local animOffsetX = tonumber(Opt(track, "offset_x")) or 0
-        local animOffsetY = tonumber(Opt(track, "offset_y")) or 0
-        local animOffsetZ = tonumber(Opt(track, "offset_z")) or 0
-
-        -- Global adjustments from convars + per-animation cookies
-        local tpikAdjustPos = Vector(0, 0, 0)
-        local tpikAdjustAng = Angle(0, 0, 0)
-        if GCAL.GetTPIKAdjustment then
-            local adj = GCAL:GetTPIKAdjustment(track.name)
-            if adj then
-                tpikAdjustPos = adj.pos or tpikAdjustPos
-                tpikAdjustAng = adj.ang or tpikAdjustAng
-            end
-        end
-        local tpikForward = renderAngles:Forward()
-        local tpikRight = renderAngles:Right()
-        local tpikUp = renderAngles:Up()
-        local totalOffsetX = tpikAdjustPos.x + animOffsetX
-        local totalOffsetY = tpikAdjustPos.y + animOffsetY
-        local totalOffsetZ = tpikAdjustPos.z + animOffsetZ
-        local tpikPosDelta = tpikForward * totalOffsetX + tpikRight * totalOffsetY + tpikUp * totalOffsetZ
-
-        -- New: Get bone-specific options
-        local lockBones = Opt(track, "lock_bones") or {}
-        local scaleBones = Opt(track, "scale_bones") or {}
-        local blendPerBone = Opt(track, "blend_per_bone") or {}
+        -- Per-animation offsets from RegisterTPIKOptions, plus the global convar and per-animation
+        -- cookie adjustments (cached in core).
+        local adj = GCAL:GetTPIKAdjustment(track.name)
+        local tpikAdjustPos, tpikAdjustAng = adj.pos, adj.ang
+        local totalOffsetX = tpikAdjustPos.x + (tonumber(Opt(track, "offset_x")) or 0)
+        local totalOffsetY = tpikAdjustPos.y + (tonumber(Opt(track, "offset_y")) or 0)
+        local totalOffsetZ = tpikAdjustPos.z + (tonumber(Opt(track, "offset_z")) or 0)
+        local tpikPosDelta = renderAngles:Forward() * totalOffsetX + renderAngles:Right() * totalOffsetY +
+            renderAngles:Up() * totalOffsetZ
 
         local finalMatrices = {}
         local carried = {}
         local boneCount = 0
+        local sourceBones = track.sourceBones
 
         -- Copy each mapped bone from source to player
         for k, boneName in ipairs(track.bones) do
-            local srcBoneName = track.sourceBones and track.sourceBones[k] or boneName
             local tgtBoneName = targetBones[k] or boneName
-            local tgtBone = GetBone(ply, tgtBoneName)
-            if not tgtBone or tgtBone < 0 then continue end
+            local tgtBone = CachedBone(plyCache, ply, tgtBoneName)
+            if tgtBone < 0 then continue end
 
-            local srcBone = GetBone(source, srcBoneName)
-
-            if not srcBone or srcBone < 0 then continue end
+            local srcBone = CachedBone(srcCache, source, sourceBones and sourceBones[k] or boneName)
+            if srcBone < 0 then continue end
 
             local srcMatrix = source:GetBoneMatrix(srcBone)
             local tgtMatrix = baseMatrices[tgtBone]
             if not srcMatrix or not tgtMatrix then continue end
 
-            -- New: Check if bone is locked (uses rest pose only)
-            local isLocked = false
-            for _, lockName in ipairs(lockBones) do
-                if string.find(tgtBoneName, lockName, 1, true) then
-                    isLocked = true
-                    break
-                end
-            end
-
-            if isLocked then
-                finalMatrices[tgtBone] = Matrix(tgtMatrix:ToTable())
+            local rules = GetBoneRules(track, tgtBoneName)
+            if rules.locked then
+                finalMatrices[tgtBone] = tgtMatrix
                 boneCount = boneCount + 1
                 continue
             end
@@ -375,62 +377,43 @@ function GCAL.InstallTPIK(deps)
                 )
             end
             pos = pos + tpikPosDelta
-            local ang = Angle(
-                srcMatrix:GetAngles().p + tpikAdjustAng.p,
-                srcMatrix:GetAngles().y + tpikAdjustAng.y,
-                srcMatrix:GetAngles().r + tpikAdjustAng.r
-            )
+            local srcAng = srcMatrix:GetAngles()
+            local ang = Angle(srcAng.p + tpikAdjustAng.p, srcAng.y + tpikAdjustAng.y, srcAng.r + tpikAdjustAng.r)
 
-            -- New: Apply bone-specific scale
-            local boneScale = 1
-            for scaleName, scale in pairs(scaleBones) do
-                if string.find(tgtBoneName, scaleName, 1, true) then
-                    boneScale = tonumber(scale) or 1
-                    break
-                end
-            end
-            if boneScale ~= 1 then
+            if rules.scale ~= 1 then
                 local boneBase = tgtMatrix:GetTranslation()
-                pos = boneBase + (pos - boneBase) * boneScale
+                pos = boneBase + (pos - boneBase) * rules.scale
             end
 
             -- Optional per-bone smoothing
             if smoothing > 0 then
-                track.thirdpersonTPIKSmoothing = track.thirdpersonTPIKSmoothing or {}
                 local cache = track.thirdpersonTPIKSmoothing
+                if not cache then
+                    cache = {}
+                    track.thirdpersonTPIKSmoothing = cache
+                end
                 local entry = cache[tgtBone]
                 if not entry then
-                    entry = { pos = Vector(pos.x, pos.y, pos.z), ang = Angle(ang.p, ang.y, ang.r) }
-                    cache[tgtBone] = entry
+                    cache[tgtBone] = { pos = Vector(pos.x, pos.y, pos.z), ang = Angle(ang.p, ang.y, ang.r) }
                 else
-                    local a = math.Clamp(1 - math.exp(-smoothing * RealFrameTime()), 0, 1)
-                    entry.pos.x = entry.pos.x + (pos.x - entry.pos.x) * a
-                    entry.pos.y = entry.pos.y + (pos.y - entry.pos.y) * a
-                    entry.pos.z = entry.pos.z + (pos.z - entry.pos.z) * a
-                    entry.ang.p = entry.ang.p + math.AngleDifference(ang.p, entry.ang.p) * a
-                    entry.ang.y = entry.ang.y + math.AngleDifference(ang.y, entry.ang.y) * a
-                    entry.ang.r = entry.ang.r + math.AngleDifference(ang.r, entry.ang.r) * a
-                    pos = entry.pos
-                    ang = entry.ang
-                end
-            end
-
-            -- New: Apply per-bone blend override
-            local finalBlend = blend
-            for blendBoneName, boneBlend in pairs(blendPerBone) do
-                if string.find(tgtBoneName, blendBoneName, 1, true) then
-                    finalBlend = tonumber(boneBlend) or blend
-                    break
+                    local a = smoothAlpha
+                    local ep, ea = entry.pos, entry.ang
+                    ep.x = ep.x + (pos.x - ep.x) * a
+                    ep.y = ep.y + (pos.y - ep.y) * a
+                    ep.z = ep.z + (pos.z - ep.z) * a
+                    ea.p = ea.p + math.AngleDifference(ang.p, ea.p) * a
+                    ea.y = ea.y + math.AngleDifference(ang.y, ea.y) * a
+                    ea.r = ea.r + math.AngleDifference(ang.r, ea.r) * a
+                    pos = ep
+                    ang = ea
                 end
             end
 
             -- Blend between animation pose and rest pose
-            local blendedPos = LerpVector(finalBlend, pos, tgtMatrix:GetTranslation())
-            local blendedAng = LerpAngle(finalBlend, ang, tgtMatrix:GetAngles())
-
+            local finalBlend = rules.blend or blend
             local final = Matrix()
-            final:SetTranslation(blendedPos)
-            final:SetAngles(blendedAng)
+            final:SetTranslation(LerpVector(finalBlend, pos, tgtMatrix:GetTranslation()))
+            final:SetAngles(LerpAngle(finalBlend, ang, tgtMatrix:GetAngles()))
             finalMatrices[tgtBone] = final
             boneCount = boneCount + 1
         end
@@ -454,9 +437,9 @@ function GCAL.InstallTPIK(deps)
             end
         end
 
-        for _, side in ipairs({ "L", "R" }) do
-            local upper = GetBone(ply, "ValveBiped.Bip01_" .. side .. "_UpperArm")
-            if upper and upper >= 0 and finalMatrices[upper] then CarryChildren(upper) end
+        for _, name in ipairs(UPPER_ARM) do
+            local upper = CachedBone(plyCache, ply, name)
+            if upper >= 0 and finalMatrices[upper] then CarryChildren(upper) end
         end
 
         -- Apply and cache
@@ -475,21 +458,20 @@ function GCAL.InstallTPIK(deps)
         -- (shoulder alignment, clamping, offsets, smoothing and blend all included).
         local handPos = nil
         local cloneShift = offset + tpikPosDelta
-        for _, side in ipairs({ "L", "R" }) do
-            local handName = "ValveBiped.Bip01_" .. side .. "_Hand"
-            local handBone = GetBone(ply, handName)
-            if handBone and finalMatrices[handBone] then
+        for _, handName in ipairs(HAND) do
+            local handBone = CachedBone(plyCache, ply, handName)
+            if handBone >= 0 and finalMatrices[handBone] then
                 handPos = finalMatrices[handBone]:GetTranslation()
 
                 local srcHandName = handName
                 for k, boneName in ipairs(track.bones) do
                     if (targetBones[k] or boneName) == handName then
-                        srcHandName = track.sourceBones and track.sourceBones[k] or boneName
+                        srcHandName = sourceBones and sourceBones[k] or boneName
                         break
                     end
                 end
-                local srcHandBone = GetBone(source, srcHandName)
-                local srcHandMatrix = srcHandBone and srcHandBone >= 0 and source:GetBoneMatrix(srcHandBone) or nil
+                local srcHandBone = CachedBone(srcCache, source, srcHandName)
+                local srcHandMatrix = srcHandBone >= 0 and source:GetBoneMatrix(srcHandBone) or nil
                 if srcHandMatrix then
                     cloneShift = handPos - srcHandMatrix:GetTranslation()
                 end
