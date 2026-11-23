@@ -2,8 +2,6 @@ if not CLIENT then return end
 
 GCAL = GCAL or {}
 
--- Simple TPIK: direct bone copy (ARC9-style)
-
 function GCAL.InstallTPIK(deps)
     deps = deps or {}
     local PlaceTPIKTrackModel = deps.PlaceTPIKTrackModel or deps.PlaceTrackModel
@@ -14,47 +12,20 @@ function GCAL.InstallTPIK(deps)
         return GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
     end
 
-    -- Bone lookups share core's per-entity cache (see BoneCache in gcal_core.lua).
     local BoneCache, CachedBone = deps.BoneCache, deps.CachedBone
-    local childBoneCache = setmetatable({}, { __mode = "k" })
 
-    -- Bone index or nil. Hot loops grab BoneCache(ent) once and call CachedBone directly.
+    local SPINE = "ValveBiped.Bip01_Spine4"
+    local UPPER_ARM = { "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_R_UpperArm" }
+    local HAND = { "ValveBiped.Bip01_L_Hand", "ValveBiped.Bip01_R_Hand" }
+
+    local childBoneCache = setmetatable({}, { __mode = "k" })
+    local bodygroupIDs = {}
+
     local function GetBone(ent, name)
         if not IsValid(ent) or not name then return nil end
         local idx = CachedBone(BoneCache(ent), ent, name)
         return idx >= 0 and idx or nil
     end
-
-    local UPPER_ARM = { "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_R_UpperArm" }
-
-    -- GetBodyGroups() builds a table of every group and submodel; only the ids are needed.
-    local bodygroupIDs = {}
-    local function GetBodygroupIDs(ent)
-        local model = ent:GetModel() or ""
-        local ids = bodygroupIDs[model]
-        if not ids then
-            ids = {}
-            for _, bg in ipairs(ent:GetBodyGroups() or {}) do ids[#ids + 1] = bg.id end
-            bodygroupIDs[model] = ids
-        end
-        return ids
-    end
-
-    -- model_offset ({ [bone name] = Vector }) resolved to bone indices once per model / options.
-    local function GetCloneOffsetMap(track, model, cloneOffsets)
-        local modelName = model:GetModel() or ""
-        local cached = track.tpikCloneOffsetMap
-        if cached and cached.model == modelName and cached.offsets == cloneOffsets then return cached.map end
-
-        local map = {}
-        for boneName, boneOffset in pairs(cloneOffsets) do
-            local bone = GetBone(model, boneName)
-            if bone then map[bone] = boneOffset end
-        end
-        track.tpikCloneOffsetMap = { model = modelName, offsets = cloneOffsets, map = map }
-        return map
-    end
-    local HAND = { "ValveBiped.Bip01_L_Hand", "ValveBiped.Bip01_R_Hand" }
 
     local function GetChildren(ent, bone)
         if not IsValid(ent) or not bone or bone < 0 then return {} end
@@ -70,6 +41,17 @@ function GCAL.InstallTPIK(deps)
             cache.children[bone] = children
         end
         return children
+    end
+
+    local function GetBodygroupIDs(ent)
+        local model = ent:GetModel() or ""
+        local ids = bodygroupIDs[model]
+        if not ids then
+            ids = {}
+            for _, bg in ipairs(ent:GetBodyGroups() or {}) do ids[#ids + 1] = bg.id end
+            bodygroupIDs[model] = ids
+        end
+        return ids
     end
 
     local function GetSourceModel(track)
@@ -89,9 +71,11 @@ function GCAL.InstallTPIK(deps)
         return nil
     end
 
-    -- lock_bones / scale_bones / blend_per_bone match bone names by substring. That matching is
-    -- resolved once per track and bone name instead of running string.find every frame.
-    -- track.tpikBoneRules is cleared whenever the track's TPIK options change.
+    local function OptAdd(track, key)
+        if not GCAL.GetTPIKOptionAdd then return 0 end
+        return GCAL:GetTPIKOptionAdd(track.name, key) or 0
+    end
+
     local function GetBoneRules(track, boneName)
         local rules = track.tpikBoneRules
         if not rules then
@@ -126,12 +110,6 @@ function GCAL.InstallTPIK(deps)
         return rule
     end
 
-    local function OptAdd(track, key)
-        if not GCAL.GetTPIKOptionAdd then return 0 end
-        return GCAL:GetTPIKOptionAdd(track.name, key) or 0
-    end
-
-    -- Hidden material for the third-person model clone
     local hiddenMat = CreateMaterial("gcal_tpik_hidden", "UnlitGeneric", {
         ["$basetexture"] = "color/white",
         ["$translucent"] = "1",
@@ -139,6 +117,7 @@ function GCAL.InstallTPIK(deps)
         ["$vertexalpha"] = "1"
     })
     local hiddenMatName = hiddenMat:GetName()
+
     local armTokens = {
         "c_arm", "/arms", "_arms", "arm_", "forearm",
         "/hands", "_hands", "hand_", "glove", "sleeve", "player_shared"
@@ -166,10 +145,14 @@ function GCAL.InstallTPIK(deps)
                 if string.find(lower, token, 1, true) then hide = true; byAuto = true; break end
             end
             for _, token in ipairs(extraHide or {}) do
-                if string.find(lower, string.lower(tostring(token)), 1, true) then hide = true; byAuto = false; break end
+                if string.find(lower, string.lower(tostring(token)), 1, true) then
+                    hide = true; byAuto = false; break
+                end
             end
             for _, token in ipairs(keep or {}) do
-                if string.find(lower, string.lower(tostring(token)), 1, true) then hide = false; byAuto = false; break end
+                if string.find(lower, string.lower(tostring(token)), 1, true) then
+                    hide = false; byAuto = false; break
+                end
             end
             if hide then
                 model:SetSubMaterial(index - 1, hiddenMatName)
@@ -179,7 +162,6 @@ function GCAL.InstallTPIK(deps)
             end
         end
 
-        -- If everything got hidden, restore auto-hidden ones
         if #materials > 0 and visible == 0 and #autoHidden > 0 then
             for _, idx in ipairs(autoHidden) do model:SetSubMaterial(idx) end
             visible = #autoHidden
@@ -188,9 +170,20 @@ function GCAL.InstallTPIK(deps)
         track.thirdpersonModelHasVisibleMaterials = #materials == 0 or visible > 0
     end
 
-    -- Third-person model clone: visual copy of the source viewmodel for props
-    -- cloneShift moves the clone from the source model (placed at the eyes) to where the arms
-    -- were actually solved; cloneAngles is the frame for the clone_offset_x/y/z options.
+    local function GetCloneOffsetMap(track, model, cloneOffsets)
+        local modelName = model:GetModel() or ""
+        local cached = track.tpikCloneOffsetMap
+        if cached and cached.model == modelName and cached.offsets == cloneOffsets then return cached.map end
+
+        local map = {}
+        for boneName, boneOffset in pairs(cloneOffsets) do
+            local bone = GetBone(model, boneName)
+            if bone then map[bone] = boneOffset end
+        end
+        track.tpikCloneOffsetMap = { model = modelName, offsets = cloneOffsets, map = map }
+        return map
+    end
+
     local function PrepareClone(track, handPos, cloneShift, cloneAngles)
         local model = track.thirdpersonModel
         local source = GetSourceModel(track)
@@ -229,19 +222,18 @@ function GCAL.InstallTPIK(deps)
         model:SetCycle(track.cycle or 0)
         model:SetupBones()
 
-        -- Clone offsets: whole-clone shift + per-bone tweaks
         local cloneOffsetX = (Opt(track, "clone_offset_x") or 0) + OptAdd(track, "clone_offset_x")
         local cloneOffsetY = (Opt(track, "clone_offset_y") or 0) + OptAdd(track, "clone_offset_y")
         local cloneOffsetZ = (Opt(track, "clone_offset_z") or 0) + OptAdd(track, "clone_offset_z")
         local cloneOffsets = Opt(track, "model_offset")
         local offsetByBone = istable(cloneOffsets) and GetCloneOffsetMap(track, model, cloneOffsets) or nil
 
-        -- Whole-clone shift: follow the solved hand, then forward/right/up offsets in render-angle space
         local shift = Vector(0, 0, 0)
         if cloneShift then shift:Add(cloneShift) end
         if cloneOffsetX ~= 0 or cloneOffsetY ~= 0 or cloneOffsetZ ~= 0 then
             if cloneAngles then
-                shift:Add(cloneAngles:Forward() * cloneOffsetX + cloneAngles:Right() * cloneOffsetY + cloneAngles:Up() * cloneOffsetZ)
+                shift:Add(cloneAngles:Forward() * cloneOffsetX + cloneAngles:Right() * cloneOffsetY
+                    + cloneAngles:Up() * cloneOffsetZ)
             else
                 shift:Add(Vector(cloneOffsetX, cloneOffsetY, cloneOffsetZ))
             end
@@ -250,7 +242,6 @@ function GCAL.InstallTPIK(deps)
 
         local copies = {}
         for bone = 0, model:GetBoneCount() - 1 do
-            -- GetBoneMatrix already returns a fresh copy, safe to modify.
             local m = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
             if m then
                 copies[bone] = m
@@ -307,39 +298,7 @@ function GCAL.InstallTPIK(deps)
         return true
     end
 
-    -- Main TPIK solve
-    local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
-        local source = GetSourceModel(track)
-        if not IsValid(source) or not baseMatrices then return end
-
-        -- Reuse cached solve if already done this frame
-        if track.thirdpersonSolveFrame == FrameNumber() then
-            ApplyCached(track, ply)
-            return
-        end
-
-        local flip = GetLegacyFlipState(weapon)
-        local targetBones = GetTrackTargetBones(track, weapon, flip)
-        -- Eye angles (local and remote players alike) so the arms follow aim pitch.
-        local renderAngles = ply.EyeAngles and ply:EyeAngles() or (ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles())
-
-        -- Place source model at eye position
-        PlaceTPIKTrackModel(track, ply:EyePos(), renderAngles)
-        source:SetModelScale(GetTrackModelScale(track, weapon, flip))
-        source:SetupBones()
-
-        -- Blend factor: 0 = full animation, 1 = full rest pose
-        local blend = math.Clamp(GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1), 0, 1)
-
-        local plyCache, srcCache = BoneCache(ply), BoneCache(source)
-
-        -- Spine position for clamping
-        local spineIdx = CachedBone(plyCache, ply, "ValveBiped.Bip01_Spine4")
-        local spineMatrix = spineIdx >= 0 and baseMatrices[spineIdx] or nil
-        local spinePos = spineMatrix and spineMatrix:GetTranslation() or nil
-
-        -- Offset viewmodel bones (camera space) to player body space via shoulder
-        local offset = Vector(0, 0, 0)
+    local function GetShoulderOffset(ply, plyCache, source, srcCache, baseMatrices)
         for _, name in ipairs(UPPER_ARM) do
             local srcIdx = CachedBone(srcCache, source, name)
             local tgtIdx = CachedBone(plyCache, ply, name)
@@ -347,33 +306,126 @@ function GCAL.InstallTPIK(deps)
                 local srcM = source:GetBoneMatrix(srcIdx)
                 local tgtM = baseMatrices[tgtIdx]
                 if srcM and tgtM then
-                    offset = tgtM:GetTranslation() - srcM:GetTranslation()
-                    break
+                    return tgtM:GetTranslation() - srcM:GetTranslation()
                 end
             end
         end
+        return Vector(0, 0, 0)
+    end
 
-        -- Options
+    local function ReadSolveOptions(track, renderAngles)
         local clampRadius = (tonumber(Opt(track, "target_radius")) or 38) + OptAdd(track, "target_radius")
         local smoothing = math.Clamp((tonumber(Opt(track, "smoothing")) or 18) + OptAdd(track, "smoothing"), 0, 60)
         local smoothAlpha = smoothing > 0 and math.Clamp(1 - math.exp(-smoothing * RealFrameTime()), 0, 1) or 0
 
-        -- Per-animation offsets from RegisterTPIKOptions, plus the global convar and per-animation
-        -- cookie adjustments (cached in core).
         local adj = GCAL:GetTPIKAdjustment(track.name)
-        local tpikAdjustPos, tpikAdjustAng = adj.pos, adj.ang
-        local totalOffsetX = tpikAdjustPos.x + (tonumber(Opt(track, "offset_x")) or 0)
-        local totalOffsetY = tpikAdjustPos.y + (tonumber(Opt(track, "offset_y")) or 0)
-        local totalOffsetZ = tpikAdjustPos.z + (tonumber(Opt(track, "offset_z")) or 0)
-        local tpikPosDelta = renderAngles:Forward() * totalOffsetX + renderAngles:Right() * totalOffsetY +
+        local adjustPos = adj.pos
+        local totalOffsetX = adjustPos.x + (tonumber(Opt(track, "offset_x")) or 0)
+        local totalOffsetY = adjustPos.y + (tonumber(Opt(track, "offset_y")) or 0)
+        local totalOffsetZ = adjustPos.z + (tonumber(Opt(track, "offset_z")) or 0)
+        local posDelta = renderAngles:Forward() * totalOffsetX + renderAngles:Right() * totalOffsetY +
             renderAngles:Up() * totalOffsetZ
+
+        return clampRadius, smoothing, smoothAlpha, adj.ang, posDelta
+    end
+
+    local function SmoothBonePose(track, bone, pos, ang, alpha)
+        local cache = track.thirdpersonTPIKSmoothing
+        if not cache then
+            cache = {}
+            track.thirdpersonTPIKSmoothing = cache
+        end
+        local entry = cache[bone]
+        if not entry then
+            cache[bone] = { pos = Vector(pos.x, pos.y, pos.z), ang = Angle(ang.p, ang.y, ang.r) }
+            return pos, ang
+        end
+        local ep, ea = entry.pos, entry.ang
+        ep.x = ep.x + (pos.x - ep.x) * alpha
+        ep.y = ep.y + (pos.y - ep.y) * alpha
+        ep.z = ep.z + (pos.z - ep.z) * alpha
+        ea.p = ea.p + math.AngleDifference(ang.p, ea.p) * alpha
+        ea.y = ea.y + math.AngleDifference(ang.y, ea.y) * alpha
+        ea.r = ea.r + math.AngleDifference(ang.r, ea.r) * alpha
+        return ep, ea
+    end
+
+    local function CarryChildren(ply, parentBone, baseMatrices, finalMatrices, carried)
+        if carried[parentBone] then return end
+        carried[parentBone] = true
+        local baseParent, solvedParent = baseMatrices[parentBone], finalMatrices[parentBone]
+        local inverse = baseParent and solvedParent and baseParent:GetInverse()
+        local delta = inverse and solvedParent * inverse
+        for _, childBone in ipairs(GetChildren(ply, parentBone)) do
+            if not finalMatrices[childBone] and delta then
+                local baseChild = baseMatrices[childBone]
+                if baseChild then finalMatrices[childBone] = delta * baseChild end
+            end
+            if finalMatrices[childBone] then
+                CarryChildren(ply, childBone, baseMatrices, finalMatrices, carried)
+            end
+        end
+    end
+
+    local function GetCloneHandShift(track, ply, plyCache, source, srcCache, targetBones, sourceBones,
+                                     finalMatrices, cloneShift)
+        for _, handName in ipairs(HAND) do
+            local handBone = CachedBone(plyCache, ply, handName)
+            if handBone >= 0 and finalMatrices[handBone] then
+                local handPos = finalMatrices[handBone]:GetTranslation()
+
+                local srcHandName = handName
+                for k, boneName in ipairs(track.bones) do
+                    if (targetBones[k] or boneName) == handName then
+                        srcHandName = sourceBones and sourceBones[k] or boneName
+                        break
+                    end
+                end
+                local srcHandBone = CachedBone(srcCache, source, srcHandName)
+                local srcHandMatrix = srcHandBone >= 0 and source:GetBoneMatrix(srcHandBone) or nil
+                if srcHandMatrix then
+                    cloneShift = handPos - srcHandMatrix:GetTranslation()
+                end
+                return handPos, cloneShift
+            end
+        end
+        return nil, cloneShift
+    end
+
+    local function ApplyThirdPersonBones(track, ply, weapon, baseMatrices)
+        local source = GetSourceModel(track)
+        if not IsValid(source) or not baseMatrices then return end
+
+        if track.thirdpersonSolveFrame == FrameNumber() then
+            ApplyCached(track, ply)
+            return
+        end
+
+        local flip = GetLegacyFlipState(weapon)
+        local targetBones = GetTrackTargetBones(track, weapon, flip)
+        local renderAngles = ply.EyeAngles and ply:EyeAngles()
+            or (ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles())
+
+        PlaceTPIKTrackModel(track, ply:EyePos(), renderAngles)
+        source:SetModelScale(GetTrackModelScale(track, weapon, flip))
+        source:SetupBones()
+
+        local blend = math.Clamp(GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1), 0, 1)
+
+        local plyCache, srcCache = BoneCache(ply), BoneCache(source)
+
+        local spineIdx = CachedBone(plyCache, ply, SPINE)
+        local spineMatrix = spineIdx >= 0 and baseMatrices[spineIdx] or nil
+        local spinePos = spineMatrix and spineMatrix:GetTranslation() or nil
+
+        local offset = GetShoulderOffset(ply, plyCache, source, srcCache, baseMatrices)
+        local clampRadius, smoothing, smoothAlpha, tpikAdjustAng, tpikPosDelta = ReadSolveOptions(track, renderAngles)
 
         local finalMatrices = {}
         local carried = {}
         local boneCount = 0
         local sourceBones = track.sourceBones
 
-        -- Copy each mapped bone from source to player
         for k, boneName in ipairs(track.bones) do
             local tgtBoneName = targetBones[k] or boneName
             local tgtBone = CachedBone(plyCache, ply, tgtBoneName)
@@ -393,7 +445,6 @@ function GCAL.InstallTPIK(deps)
                 continue
             end
 
-            -- Offset, clamp, then apply user adjustment
             local pos = srcMatrix:GetTranslation() + offset
             if spinePos then
                 pos = Vector(
@@ -411,31 +462,10 @@ function GCAL.InstallTPIK(deps)
                 pos = boneBase + (pos - boneBase) * rules.scale
             end
 
-            -- Optional per-bone smoothing
             if smoothing > 0 then
-                local cache = track.thirdpersonTPIKSmoothing
-                if not cache then
-                    cache = {}
-                    track.thirdpersonTPIKSmoothing = cache
-                end
-                local entry = cache[tgtBone]
-                if not entry then
-                    cache[tgtBone] = { pos = Vector(pos.x, pos.y, pos.z), ang = Angle(ang.p, ang.y, ang.r) }
-                else
-                    local a = smoothAlpha
-                    local ep, ea = entry.pos, entry.ang
-                    ep.x = ep.x + (pos.x - ep.x) * a
-                    ep.y = ep.y + (pos.y - ep.y) * a
-                    ep.z = ep.z + (pos.z - ep.z) * a
-                    ea.p = ea.p + math.AngleDifference(ang.p, ea.p) * a
-                    ea.y = ea.y + math.AngleDifference(ang.y, ea.y) * a
-                    ea.r = ea.r + math.AngleDifference(ang.r, ea.r) * a
-                    pos = ep
-                    ang = ea
-                end
+                pos, ang = SmoothBonePose(track, tgtBone, pos, ang, smoothAlpha)
             end
 
-            -- Blend between animation pose and rest pose
             local finalBlend = rules.blend or blend
             local final = Matrix()
             final:SetTranslation(LerpVector(finalBlend, pos, tgtMatrix:GetTranslation()))
@@ -444,29 +474,13 @@ function GCAL.InstallTPIK(deps)
             boneCount = boneCount + 1
         end
 
-        -- Carry unmapped children of arm bones. The parent's delta (solved * base^-1) is the same
-        -- for every child, so it is built once per parent instead of once per child.
-        local function CarryChildren(parentBone)
-            if carried[parentBone] then return end
-            carried[parentBone] = true
-            local baseParent, solvedParent = baseMatrices[parentBone], finalMatrices[parentBone]
-            local inverse = baseParent and solvedParent and baseParent:GetInverse()
-            local delta = inverse and solvedParent * inverse
-            for _, childBone in ipairs(GetChildren(ply, parentBone)) do
-                if not finalMatrices[childBone] and delta then
-                    local baseChild = baseMatrices[childBone]
-                    if baseChild then finalMatrices[childBone] = delta * baseChild end
-                end
-                if finalMatrices[childBone] then CarryChildren(childBone) end
+        for _, name in ipairs(UPPER_ARM) do
+            local upper = CachedBone(plyCache, ply, name)
+            if upper >= 0 and finalMatrices[upper] then
+                CarryChildren(ply, upper, baseMatrices, finalMatrices, carried)
             end
         end
 
-        for _, name in ipairs(UPPER_ARM) do
-            local upper = CachedBone(plyCache, ply, name)
-            if upper >= 0 and finalMatrices[upper] then CarryChildren(upper) end
-        end
-
-        -- Apply and cache
         track.thirdpersonBoneMatrices = finalMatrices
         track.thirdpersonSolveFrame = FrameNumber()
         ApplyCached(track, ply)
@@ -477,31 +491,8 @@ function GCAL.InstallTPIK(deps)
         track.debugThirdPersonPole = "none"
         track.debugThirdPersonRootBone = track.bones[1] or nil
 
-        -- Find hand position for the clone model, and how far that hand ended up from where the
-        -- source model has it. The prop clone gets the same shift so it stays in the hand
-        -- (shoulder alignment, clamping, offsets, smoothing and blend all included).
-        local handPos = nil
-        local cloneShift = offset + tpikPosDelta
-        for _, handName in ipairs(HAND) do
-            local handBone = CachedBone(plyCache, ply, handName)
-            if handBone >= 0 and finalMatrices[handBone] then
-                handPos = finalMatrices[handBone]:GetTranslation()
-
-                local srcHandName = handName
-                for k, boneName in ipairs(track.bones) do
-                    if (targetBones[k] or boneName) == handName then
-                        srcHandName = sourceBones and sourceBones[k] or boneName
-                        break
-                    end
-                end
-                local srcHandBone = CachedBone(srcCache, source, srcHandName)
-                local srcHandMatrix = srcHandBone >= 0 and source:GetBoneMatrix(srcHandBone) or nil
-                if srcHandMatrix then
-                    cloneShift = handPos - srcHandMatrix:GetTranslation()
-                end
-                break
-            end
-        end
+        local handPos, cloneShift = GetCloneHandShift(track, ply, plyCache, source, srcCache, targetBones,
+            sourceBones, finalMatrices, offset + tpikPosDelta)
         PrepareClone(track, handPos, cloneShift, renderAngles)
     end
 

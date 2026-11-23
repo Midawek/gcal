@@ -2,7 +2,7 @@ GCAL = GCAL or {}
 GCAL.Legs = GCAL.Legs or {}
 VMLegs = VMLegs or {}
 
-local playermodelbonesupper = {
+local UPPER_BODY_BONES = {
     "ValveBiped.Bip01_L_Forearm", "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_L_Clavicle",
     "ValveBiped.Bip01_L_Hand", "ValveBiped.Bip01_Spine4", "ValveBiped.Bip01_Neck1",
     "ValveBiped.Bip01_Head1", "ValveBiped.Bip01_L_Finger4", "ValveBiped.Bip01_L_Finger41",
@@ -20,28 +20,18 @@ local playermodelbonesupper = {
 }
 
 if CLIENT then
-    local function GetMainEyePos()
-        return EyePos()
-    end
-
-    local function GetMainEyeAngles()
-        return EyeAngles()
-    end
-
     function GCAL.Legs:Update(ply)
         local track = GCAL.ActiveTracks["legs"]
         if not track or not IsValid(track.model) then return end
-        
-        local eyeAng = GetMainEyeAngles()
-        local eyePos = GetMainEyePos()
+
+        local eyeAng = EyeAngles()
+        local eyePos = EyePos()
         local velocity = ply:GetVelocity()
-        
-        -- Accurate leg positioning (Eye-relative)
+
         local legAng = Angle(0, eyeAng.y, 0)
         local forwardBoost = track.data.forwardboost or 4
         local upwardBoost = track.data.upwardboost or 0
-        
-        -- Procedural movement sway
+
         local moveSpeed = velocity:Length()
         local sway = Vector(0, 0, 0)
         if moveSpeed > 10 then
@@ -49,32 +39,25 @@ if CLIENT then
             sway.z = math.sin(t) * 0.5
             sway.x = math.cos(t * 0.5) * 0.5
         end
-        
-        -- Calculate final position (assuming model origin is at feet/ground)
-        -- We usually want to offset by a standard player height if the model is full body
-        -- But VManip legs models are usually just legs starting from hips
+
         local eyeVec = EyeVector()
         local finalPos = eyePos
             + (legAng:Forward() * forwardBoost)
             + Vector(0, 0, upwardBoost)
             + ((eyeVec * Vector(1, 1, 0)):GetNormalized() * eyeVec.z * 16)
             + sway
-            
+
         track.model:SetPos(finalPos)
         track.model:SetAngles(legAng)
-        -- track.legModel is parented and bonemerged once in VMLegs:PlayAnim, so it follows along.
     end
 end
 
--- Hook up VMLegs:PlayAnim in compat or here
 function VMLegs:PlayAnim(name)
     if not CLIENT then return false end
     local animName = "legs_" .. name
     local res = GCAL:Play(animName, "legs")
     if not res then return res end
 
-    -- GCAL:Play also returns true when the anim was suppressed or queued, so make sure
-    -- the legs track is really playing this anim before attaching a leg model.
     local track = GCAL.ActiveTracks["legs"]
     local ply = LocalPlayer()
     if not track or track.name ~= animName or not IsValid(ply) or not IsValid(track.model) then return res end
@@ -83,7 +66,8 @@ function VMLegs:PlayAnim(name)
         track.legModel:Remove()
     end
 
-    track.legModel = ClientsideModel(string.Replace(ply:GetModel(), "models/models/", "models/"), RENDERGROUP_TRANSLUCENT)
+    local legModelPath = string.Replace(ply:GetModel(), "models/models/", "models/")
+    track.legModel = ClientsideModel(legModelPath, RENDERGROUP_TRANSLUCENT)
     if not IsValid(track.legModel) then return res end
 
     track.legModel:SetPos(ply:GetPos())
@@ -103,7 +87,7 @@ function VMLegs:PlayAnim(name)
         track.legModel:SetBodygroup(i, ply:GetBodygroup(i))
     end
 
-    for _, boneName in pairs(playermodelbonesupper) do
+    for _, boneName in pairs(UPPER_BODY_BONES) do
         local bone = track.legModel:LookupBone(boneName)
         if bone ~= nil then
             track.legModel:ManipulateBoneScale(bone, Vector(0, 0, 0))

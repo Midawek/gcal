@@ -1,6 +1,3 @@
--- GCAL: GMod Compliant Armature Layer
--- Core Engine
-
 GCAL = GCAL or {}
 GCAL.Anims = GCAL.Anims or {}
 GCAL.ActiveTracks = GCAL.ActiveTracks or {}
@@ -10,7 +7,6 @@ GCAL.TPIKOptions = GCAL.TPIKOptions or {}
 GCAL.CamBoneHandlers = GCAL.CamBoneHandlers or {}
 GCAL.CamBoneHandlerOrder = GCAL.CamBoneHandlerOrder or {}
 
--- Define Groups Early
 GCAL.GROUPS = {
     LEFT_ARM = {
         "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_L_Forearm", "ValveBiped.Bip01_L_Hand",
@@ -85,7 +81,6 @@ if CLIENT then
     GCAL.InternalThirdPersonEnabled = true
     GCAL.AnimationAdjustments = GCAL.AnimationAdjustments or {}
 
-    -- gcal_thirdperson is the master switch for all thirdperson rendering.
     function GCAL:IsThirdPersonEnabled()
         return self.InternalThirdPersonEnabled == true and self.ThirdPerson ~= nil and self.ThirdPerson:GetBool()
     end
@@ -133,8 +128,6 @@ if CLIENT then
         return tonumber(value) or 0
     end
 
-    -- Combined (global convar + per-animation cookie) adjustments are read every frame for every
-    -- track, so they are cached per animation and dropped whenever one of their inputs changes.
     local adjustmentCache = {}
 
     local function InvalidateAdjustmentCache(name)
@@ -222,7 +215,6 @@ if CLIENT then
         return adjustment
     end
 
-    -- The returned tables are shared and cached: read them, do not modify them.
     function GCAL:GetAnimationAdjustment(name)
         return CachedAdjustment(self, name)
     end
@@ -262,7 +254,6 @@ local function GCAL_NormalizeLegacyCompatName(value)
     return value
 end
 
--- Recent events shown at the bottom of the debug HUD: { time = RealTime(), text, color }.
 GCAL.DebugEvents = GCAL.DebugEvents or {}
 local DEBUG_EVENT_LIMIT = 32
 local debugEventFail = Color(255, 106, 106)
@@ -286,7 +277,6 @@ local function GCAL_Log(...)
     local text = table.concat(parts, " ")
     MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), text, "\n")
 
-    -- Indented lines are console-only detail (sequence lists etc.); keep the HUD log short.
     if string.sub(text, 1, 2) ~= "  " then
         local lower = string.lower(text)
         local color = nil
@@ -311,10 +301,6 @@ function GCAL:NormalizeHand(hand)
         return "both"
     end
 
-    if hand == "left" or hand == "left_arm" or hand == "l" or hand == "second" or hand == "second_hand" or hand == "secondhand" or hand == "offhand" then
-        return "left"
-    end
-
     return "left"
 end
 
@@ -336,13 +322,6 @@ function GCAL:GetHandTrack(hand)
     return "left_arm"
 end
 
-----------------------------------------------------------------------------------------
--- Deprecations
---
--- Removed and renamed registration fields still register without erroring. Each one prints
--- a single console warning per animation + key, pointing at the addon file that registered it.
--- Renamed fields keep working through their new name; removed fields are ignored.
-----------------------------------------------------------------------------------------
 local warnedDeprecations = {}
 
 local function IsGCALSource(src)
@@ -376,7 +355,6 @@ function GCAL:WarnDeprecated(animName, key, message)
     GCAL:AddDebugEvent("deprecated '" .. tostring(key) .. "' on '" .. tostring(animName) .. "'", debugEventWarn)
 end
 
--- Moves renamed keys onto their new name and strips removed keys, warning once for each.
 local function ApplyDeprecations(name, data, renamed, removed)
     for oldKey, newKey in pairs(renamed) do
         if data[oldKey] ~= nil then
@@ -393,32 +371,65 @@ local function ApplyDeprecations(name, data, renamed, removed)
     end
 end
 
--- Valid TPIK option keys
-local TPIK_VALID_OPTIONS = {
-    sequence = "string",
-    model = "bool",
-    model_bone = "string",
-    model_max_distance = "number",
-    hide_materials = "table",
-    keep_materials = "table",
-    target_radius = "number",
-    smoothing = "number",
-    offset_x = "number",
-    offset_y = "number",
-    offset_z = "number",
-    model_offset = "table",
-    clone_offset_x = "number",
-    clone_offset_y = "number",
-    clone_offset_z = "number",
-    blend_per_bone = "table",
-    lock_bones = "table",
-    scale_bones = "table",
+local ANIM_RENAMED_FIELDS = {
+    onstart = "on_start",
+    OnStart = "on_start",
+    onfinish = "on_finish",
+    OnFinish = "on_finish",
+    oninterrupt = "on_interrupt",
+    OnInterrupt = "on_interrupt",
+    easeintime = "ease_in_time",
+    easeouttime = "ease_out_time",
+    soundvolume = "sound_volume",
+    soundlevel = "sound_level",
+    soundflags = "sound_flags",
+    blendweight = "blend_weight",
+    modelscale = "model_scale",
+    modelskin = "model_skin",
+    modelbodygroups = "model_bodygroups",
+    gunmode = "gun_mode",
+    gunbones = "gun_bones",
+    bonegroup = "bone_group",
 }
 
--- Silent spelling aliases (documented)
-local TPIK_ALIASES = {
-    anim = "sequence",
-    animation = "sequence",
+local REMOVED_ON_CYCLE = "was removed and is ignored. Poll GCAL:GetCycle(trackID) from a Think hook instead."
+local REMOVED_DELAY = "was removed and is ignored. Delay your GCAL:Play call with timer.Simple instead."
+local REMOVED_CONDITION = "was removed and is ignored. Check the condition before calling GCAL:Play, "
+    .. "or return false from the VManipPrePlayAnim hook."
+local REMOVED_SHAKE = "was removed and is ignored. Call util.ScreenShake from on_start instead."
+local REMOVED_BLEND_MODE = "was removed and is ignored (only \"normal\" was ever implemented)."
+local REMOVED_FOV = "was removed and is ignored. Change the FOV from your own CalcView hook, "
+    .. "scaled by 1 - GCAL:GetLerp(trackID)."
+local REMOVED_VM_OFFSET = "was removed and is ignored. Offset the viewmodel from your own CalcViewModelView hook instead."
+local ANIM_REMOVED_FIELDS = {
+    on_cycle = REMOVED_ON_CYCLE,
+    oncycle = REMOVED_ON_CYCLE,
+    OnCycle = REMOVED_ON_CYCLE,
+    delay_start = REMOVED_DELAY,
+    delaystart = REMOVED_DELAY,
+    play_condition = REMOVED_CONDITION,
+    playcondition = REMOVED_CONDITION,
+    condition = REMOVED_CONDITION,
+    screen_shake = REMOVED_SHAKE,
+    screenshake = REMOVED_SHAKE,
+    blend_mode = REMOVED_BLEND_MODE,
+    blendmode = REMOVED_BLEND_MODE,
+    disable_pred = "was removed and is ignored (it never had an effect).",
+    viewmodel_fov = REMOVED_FOV,
+    vm_fov = REMOVED_FOV,
+    fov = REMOVED_FOV,
+    viewmodel_offset = REMOVED_VM_OFFSET,
+    vm_offset = REMOVED_VM_OFFSET,
+}
+
+local ANIM_TPIK_FIELDS = {
+    thirdperson_model = "model",
+    thirdperson_model_bone = "model_bone",
+    thirdperson_model_max_distance = "model_max_distance",
+    thirdperson_hide_materials = "hide_materials",
+    thirdperson_keep_materials = "keep_materials",
+    thirdperson_target_radius = "target_radius",
+    thirdperson_smoothing = "smoothing",
 }
 
 local TPIK_RENAMED_OPTIONS = {
@@ -455,6 +466,32 @@ local TPIK_REMOVED_OPTIONS = {
     force_update = TPIK_REMOVED_UNUSED,
 }
 
+local TPIK_VALID_OPTIONS = {
+    sequence = "string",
+    model = "bool",
+    model_bone = "string",
+    model_max_distance = "number",
+    hide_materials = "table",
+    keep_materials = "table",
+    target_radius = "number",
+    smoothing = "number",
+    offset_x = "number",
+    offset_y = "number",
+    offset_z = "number",
+    model_offset = "table",
+    clone_offset_x = "number",
+    clone_offset_y = "number",
+    clone_offset_z = "number",
+    blend_per_bone = "table",
+    lock_bones = "table",
+    scale_bones = "table",
+}
+
+local TPIK_ALIASES = {
+    anim = "sequence",
+    animation = "sequence",
+}
+
 function GCAL:RegisterTPIKOptions(name, options)
     if not name or not istable(options) then return false end
     name = tostring(name)
@@ -467,7 +504,6 @@ function GCAL:RegisterTPIKOptions(name, options)
         end
     end
 
-    -- ignore_bones and lock_bones both left a bone at its rest pose; they are one option now.
     if input.ignore_bones ~= nil then
         self:WarnDeprecated(name, "ignore_bones", "is deprecated, use 'lock_bones' instead.")
         if istable(input.ignore_bones) then
@@ -507,19 +543,13 @@ function GCAL:GetTPIKOptions(name)
     return self.TPIKOptions and self.TPIKOptions[tostring(name or "")] or nil
 end
 
--- Cambone handler API. Signature: fn(id, track, ply, origin, angles, fov,
--- attachment, camAng, camAngInt, lerpVal, handler) -> origin, angles, fov
-
--- VManip's cambone reference angle and per-axis intensity, used when an animation sets neither.
 local DEFAULT_CAM_ANG = Angle(-79.75, 0, -90)
 local DEFAULT_CAM_INTENSITY = { 1, 1, 1 }
 
 local function DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     if not attachment or not attachment.Ang then return origin, angles, fov end
     local intensity = camAngInt or DEFAULT_CAM_INTENSITY
-    -- Scale by lerp value so cambone fades in/out with the animation
     local lerpScale = 1 - (lerpVal or 0)
-    -- VManip-style: full attachment delta scaled by intensity and lerp
     local camang = attachment.Ang - (camAng or DEFAULT_CAM_ANG)
     angles = Angle(
         angles.p + camang.p * (intensity[1] or 1) * lerpScale,
@@ -529,29 +559,28 @@ local function DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment
     return origin, angles, fov
 end
 
-function GCAL:RegisterCamBoneHandler(id, priority, fn)
-    if not id or not isfunction(fn) then return false end
-    priority = tonumber(priority) or 0
-    self.CamBoneHandlers[id] = { id = id, priority = priority, fn = fn }
-    -- Rebuild ordered list
+local function RebuildCamBoneHandlerOrder(self)
     local order = {}
     for _, handler in pairs(self.CamBoneHandlers) do order[#order + 1] = handler end
     table.sort(order, function(a, b) return a.priority < b.priority end)
     self.CamBoneHandlerOrder = order
+end
+
+function GCAL:RegisterCamBoneHandler(id, priority, fn)
+    if not id or not isfunction(fn) then return false end
+    priority = tonumber(priority) or 0
+    self.CamBoneHandlers[id] = { id = id, priority = priority, fn = fn }
+    RebuildCamBoneHandlerOrder(self)
     return true
 end
 
 function GCAL:RemoveCamBoneHandler(id)
     if not id or not self.CamBoneHandlers[id] then return false end
     self.CamBoneHandlers[id] = nil
-    local order = {}
-    for _, handler in pairs(self.CamBoneHandlers) do order[#order + 1] = handler end
-    table.sort(order, function(a, b) return a.priority < b.priority end)
-    self.CamBoneHandlerOrder = order
+    RebuildCamBoneHandlerOrder(self)
     return true
 end
 
--- Runs all registered cambone handlers in priority order
 function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
     if not track then return origin, angles, fov end
     local attachment = track.attachment
@@ -566,14 +595,11 @@ function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
     return origin, angles, fov
 end
 
--- Default VManip-compatible cambone handler at priority 0
 GCAL:RegisterCamBoneHandler("vmanip", 0,
     function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
         return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     end)
 
--- gun_mode values: "follow" (weapon bones are carried by the animated hand) or
--- "animated" (weapon bones are copied from the animation model, see gun_bones). Anything else = off.
 function GCAL:NormalizeGunMode(mode)
     if mode == true then return "follow" end
     mode = string.lower(tostring(mode or ""))
@@ -582,67 +608,6 @@ function GCAL:NormalizeGunMode(mode)
     return nil
 end
 
-local ANIM_RENAMED_FIELDS = {
-    onstart = "on_start",
-    OnStart = "on_start",
-    onfinish = "on_finish",
-    OnFinish = "on_finish",
-    oninterrupt = "on_interrupt",
-    OnInterrupt = "on_interrupt",
-    easeintime = "ease_in_time",
-    easeouttime = "ease_out_time",
-    soundvolume = "sound_volume",
-    soundlevel = "sound_level",
-    soundflags = "sound_flags",
-    blendweight = "blend_weight",
-    modelscale = "model_scale",
-    modelskin = "model_skin",
-    modelbodygroups = "model_bodygroups",
-    gunmode = "gun_mode",
-    gunbones = "gun_bones",
-    bonegroup = "bone_group",
-}
-
-local REMOVED_ON_CYCLE = "was removed and is ignored. Poll GCAL:GetCycle(trackID) from a Think hook instead."
-local REMOVED_DELAY = "was removed and is ignored. Delay your GCAL:Play call with timer.Simple instead."
-local REMOVED_CONDITION = "was removed and is ignored. Check the condition before calling GCAL:Play, or return false from the VManipPrePlayAnim hook."
-local REMOVED_SHAKE = "was removed and is ignored. Call util.ScreenShake from on_start instead."
-local REMOVED_BLEND_MODE = "was removed and is ignored (only \"normal\" was ever implemented)."
-local REMOVED_FOV = "was removed and is ignored. Change the FOV from your own CalcView hook, scaled by 1 - GCAL:GetLerp(trackID)."
-local REMOVED_VM_OFFSET = "was removed and is ignored. Offset the viewmodel from your own CalcViewModelView hook instead."
-local ANIM_REMOVED_FIELDS = {
-    on_cycle = REMOVED_ON_CYCLE,
-    oncycle = REMOVED_ON_CYCLE,
-    OnCycle = REMOVED_ON_CYCLE,
-    delay_start = REMOVED_DELAY,
-    delaystart = REMOVED_DELAY,
-    play_condition = REMOVED_CONDITION,
-    playcondition = REMOVED_CONDITION,
-    condition = REMOVED_CONDITION,
-    screen_shake = REMOVED_SHAKE,
-    screenshake = REMOVED_SHAKE,
-    blend_mode = REMOVED_BLEND_MODE,
-    blendmode = REMOVED_BLEND_MODE,
-    disable_pred = "was removed and is ignored (it never had an effect).",
-    viewmodel_fov = REMOVED_FOV,
-    vm_fov = REMOVED_FOV,
-    fov = REMOVED_FOV,
-    viewmodel_offset = REMOVED_VM_OFFSET,
-    vm_offset = REMOVED_VM_OFFSET,
-}
-
--- TPIK keys that used to be read straight off the animation data.
-local ANIM_TPIK_FIELDS = {
-    thirdperson_model = "model",
-    thirdperson_model_bone = "model_bone",
-    thirdperson_model_max_distance = "model_max_distance",
-    thirdperson_hide_materials = "hide_materials",
-    thirdperson_keep_materials = "keep_materials",
-    thirdperson_target_radius = "target_radius",
-    thirdperson_smoothing = "smoothing",
-}
-
--- lerpVal moves by (FrameTime() * 7 * speed) per frame, so a full blend lasts 1 / (7 * speed) seconds.
 local function LerpSpeedFromTime(seconds, fallbackSpeed)
     seconds = tonumber(seconds)
     if seconds and seconds > 0 then return 1 / (7 * seconds) end
@@ -655,10 +620,8 @@ function GCAL:PrepareAnimData(data, hand, name)
 
     ApplyDeprecations(name, data, ANIM_RENAMED_FIELDS, ANIM_REMOVED_FIELDS)
 
-    -- Normalize model path to prevent double "models/" prefix
     if data.model then
         local modelPath = tostring(data.model)
-        -- Remove "models/" prefix if present, it will be added back when creating ClientsideModel
         if string.StartsWith(modelPath, "models/") then
             data.model = string.sub(modelPath, 8)
         end
@@ -672,7 +635,6 @@ function GCAL:PrepareAnimData(data, hand, name)
     data.source_bones = data.source_bones or (data.source_hand and self:GetHandBones(data.source_hand)) or data.bones
     data.group_name = data.track or data.track_id or data.group_name or self:GetHandTrack(hand)
     data.block_code = data.block_code ~= nil and tobool(data.block_code) or false
-    -- Per-animation cambone toggle. nil = use global convar.
     if data.cambone ~= nil then
         data.cambone = tobool(data.cambone)
     end
@@ -683,15 +645,13 @@ function GCAL:PrepareAnimData(data, hand, name)
         data.can_interrupt = tobool(data.can_interrupt)
     end
 
-    -- ease_in_time / ease_out_time are the blend duration in seconds; resolve them onto
-    -- lerp_speed_in / lerp_speed_out once here so playback only has one value to read.
     data.lerp_speed_in = LerpSpeedFromTime(data.ease_in_time, data.lerp_speed_in)
     data.lerp_speed_out = LerpSpeedFromTime(data.ease_out_time, data.lerp_speed_out)
 
-    -- sound_volume used to double as the sound level (default 75). It is a 0-1 volume now.
     local volume = tonumber(data.sound_volume)
     if volume and volume > 1 then
-        self:WarnDeprecated(name, "sound_volume", "is now a 0-1 volume. Values above 1 are used as sound_level; set sound_level instead.")
+        self:WarnDeprecated(name, "sound_volume",
+            "is now a 0-1 volume. Values above 1 are used as sound_level; set sound_level instead.")
         if data.sound_level == nil then data.sound_level = volume end
         volume = nil
     end
@@ -709,9 +669,6 @@ local GetTPIKOptionsForAnim
 local GetTPIKSequenceName
 local ResolveTPIKSequence
 
--- Copies everything a track derives from its registered data. Shared by CreateTrack (new
--- playback) and RefreshActiveTrack (an animation re-registered while it is playing), so both
--- read the data the same way. Playback state (cycle, lerp, hold, timers, models) is not touched.
 local function ApplyAnimDataToTrack(track, data)
     local easingInName = data.easing_in or "Legacy"
     local easingOutName = data.easing_out or "Legacy"
@@ -726,12 +683,10 @@ local function ApplyAnimDataToTrack(track, data)
     track.lerpSpeedIn = data.lerp_speed_in or 1
     track.lerpSpeedOut = data.lerp_speed_out or 1
     track.legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
-    -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
     track.easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil
     track.easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil
     track.blendWeight = data.blend_weight
 
-    -- Legacy VManip animations never get thirdperson TPIK (see DEVELOPER.md).
     track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false
         and not data.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
     track.tpikOptions = GetTPIKOptionsForAnim and GetTPIKOptionsForAnim(track.name) or nil
@@ -764,14 +719,12 @@ local function ApplyAnimDataToTrack(track, data)
     track.camAngInt = data.cam_angint or DEFAULT_CAM_INTENSITY
 end
 
--- Push live-edited fields from a re-registered anim onto the active track
 local function RefreshActiveTrack(track, data)
     if not IsValid(track.model) then return end
 
     local oldTpikSeqID = track.tpikSeqID
     ApplyAnimDataToTrack(track, data)
 
-    -- Only override playback state the new registration actually sets.
     if data.locktoply ~= nil then
         track.lockZ = data.locktoply and EyePos().z or 0
     end
@@ -783,20 +736,18 @@ local function RefreshActiveTrack(track, data)
         end
     end
 
-    -- Re-resolve TPIK sequence and update model if changed
     if track.tpikSequenceRequested and ResolveTPIKSequence then
         track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, track.name, data)
-        if IsValid(track.tpikModel) and track.tpikSeqID and track.tpikSeqID ~= -1 and oldTpikSeqID ~= track.tpikSeqID then
+        if IsValid(track.tpikModel) and track.tpikSeqID and track.tpikSeqID ~= -1
+            and oldTpikSeqID ~= track.tpikSeqID then
             track.tpikModel:ResetSequence(track.tpikSeqID)
         end
     end
 
-    -- Also update thirdperson model sequence if TPIK changed
     if IsValid(track.thirdpersonModel) and oldTpikSeqID ~= track.tpikSeqID then
         track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
     end
 
-    -- Clear per-track caches so they rebuild with the new settings
     track.soundsDone = nil
     track.camAttachmentID = nil
     track.thirdpersonMaterialsConfigured = nil
@@ -805,7 +756,6 @@ local function RefreshActiveTrack(track, data)
     track.thirdpersonModelReadyFrame = nil
 end
 
--- Register or re-register an animation. Accepts GCAL:RegisterAnim(name, data) or GCAL:RegisterAnim(self, name, data)
 function GCAL:RegisterAnim(arg1, arg2, arg3)
     local name, data
     if isstring(arg1) then
@@ -817,7 +767,6 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
 
     self:PrepareAnimData(data, nil, name)
 
-    -- thirdperson_* keys on the animation data belong in RegisterTPIKOptions now.
     local movedTPIK
     for oldKey, optionKey in pairs(ANIM_TPIK_FIELDS) do
         if data[oldKey] ~= nil then
@@ -951,8 +900,6 @@ function GCAL:GetCodeBlockers(scope)
     return blockers
 end
 
--- Native equivalents to legacy VManip globals/functions
-
 function GCAL:GetGestureModel(trackID)
     local track = self:GetTrack(trackID)
     return track and track.model or nil
@@ -1023,22 +970,91 @@ if CLIENT then
     local SyncLegacyVManipFields
     local posparentcache
 
-    -- Helper function to normalize model paths and prevent double "models/" prefix
     local function NormalizeModelPath(modelPath)
         if not modelPath then return "" end
 
         modelPath = tostring(modelPath)
-
-        -- Remove any leading "models/" prefix
         if string.StartsWith(modelPath, "models/") then
-            modelPath = string.sub(modelPath, 8) -- Remove "models/"
+            modelPath = string.sub(modelPath, 8)
         end
 
-        -- Always return with "models/" prefix
         return "models/" .. modelPath
     end
 
-    -- sequenceOverride replaces anim.sequence (used for TPIK sequences) without copying the anim.
+    local function CreateTrack(name, anim)
+        local now = CurTime()
+        local track = {
+            name = name,
+            startTime = now,
+            realStartTime = now,
+            cycle = anim.startcycle or 0,
+            lerpVal = 1, -- 1 = weapon pose, 0 = full animation
+            lastLerpVal = 1,
+            model = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH),
+            lerpPeakTime = now + (anim.lerp_peak or 0.5),
+            holdTime = anim.holdtime and (now + anim.holdtime) or nil,
+            holdTimeData = anim.holdtime,
+            holdQuit = false,
+            gestureOnHold = false,
+            gesturePastHold = false,
+            loop = anim.loop or false,
+            segmentFinished = false,
+            lastSegment = false,
+            segmentCount = 0,
+            lockZ = anim.locktoply and EyePos().z or 0,
+            soundsPlayed = {},
+            legacyStarted = false,
+            poseOnlyLegacy = false,
+        }
+        ApplyAnimDataToTrack(track, anim)
+        return track
+    end
+
+    local function ApplyModelSettings(track, ent)
+        if not IsValid(ent) then return end
+        if track.modelScale then ent:SetModelScale(track.modelScale) end
+        if track.modelSkin then ent:SetSkin(track.modelSkin) end
+        if track.modelBodygroups then
+            for bg, value in pairs(track.modelBodygroups) do
+                ent:SetBodygroup(bg, value)
+            end
+        end
+    end
+
+    local function SetupSourceModels(track, anim, skipCamModel)
+        if not IsValid(track.model) then
+            GCAL_Log("Failed: Invalid model path: models/" .. tostring(anim.model))
+            return false
+        end
+        track.model:SetNoDraw(true)
+        track.model:SetupBones()
+        ApplyModelSettings(track, track.model)
+
+        if not skipCamModel and track.camboneEnabled and GCAL.CamBone:GetBool()
+            and not IsValid(track.camModel) then
+            track.camModel = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH)
+        end
+        if IsValid(track.camModel) then
+            track.camModel:SetNoDraw(true)
+            track.camModel:SetPos(vector_origin)
+            track.camModel:SetAngles(angle_zero)
+            track.camModel:SetupBones()
+            ApplyModelSettings(track, track.camModel)
+        end
+        return true
+    end
+
+    local function CreateTrackModelCopy(track, sequence)
+        local ent = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
+        if not IsValid(ent) then return nil end
+        ent:SetNoDraw(true)
+        ent:ResetSequenceInfo()
+        ent:SetPlaybackRate(1)
+        ent:ResetSequence(sequence)
+        ApplyModelSettings(track, ent)
+        return ent
+    end
+
     local function ResolveSequence(track, animName, anim, sequenceOverride)
         local explicitSequence = sequenceOverride or anim.sequence
         local candidates = {}
@@ -1200,7 +1216,6 @@ if CLIENT then
             end
         end
 
-        -- If all candidates failed, log what was attempted for debugging
         GCAL_Log("Sequence resolution failed for '" .. tostring(animName) .. "'")
         GCAL_Log("  Model: " .. tostring(track.model:GetModel()))
         GCAL_Log("  Tried candidates:")
@@ -1208,14 +1223,12 @@ if CLIENT then
             GCAL_Log("    - '" .. candidate.name .. "' from " .. candidate.reason)
         end
 
-        -- Try to get the sequence list to help debug
         if track.model.GetSequenceList then
             local sequenceList = track.model:GetSequenceList() or {}
             if #sequenceList > 0 then
                 GCAL_Log("  Model has " .. #sequenceList .. " sequences:")
                 for i, seqName in ipairs(sequenceList) do
                     GCAL_Log("    [" .. i .. "] " .. seqName)
-                    -- Try case-insensitive match as last resort
                     for _, candidate in ipairs(candidates) do
                         if string.lower(seqName) == string.lower(candidate.name) then
                             GCAL_Log("  Found case-insensitive match! Using '" .. seqName .. "'")
@@ -1256,7 +1269,7 @@ if CLIENT then
         return ResolveSequence(track, sequenceName, anim, sequenceName)
     end
 
-    local function FindLegacySurrogateAnim(name, currentAnim)
+    local function FindLegacySurrogateAnim(name)
         local target = GCAL_NormalizeLegacyCompatName(name)
         if target == "" then return nil end
 
@@ -1291,78 +1304,20 @@ if CLIENT then
         return exactMatch or partialMatch
     end
 
-    -- Build the runtime track table from a registered anim: playback state here, everything
-    -- derived from the registration in ApplyAnimDataToTrack.
-    local function CreateTrack(name, anim)
-        local now = CurTime()
-        local track = {
-            name = name,
-            startTime = now,
-            realStartTime = now,
-            cycle = anim.startcycle or 0,
-            lerpVal = 1, -- 1 = weapon pose, 0 = full animation
-            lastLerpVal = 1,
-            model = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH),
-            lerpPeakTime = now + (anim.lerp_peak or 0.5),
-            holdTime = anim.holdtime and (now + anim.holdtime) or nil,
-            holdTimeData = anim.holdtime,
-            holdQuit = false,
-            gestureOnHold = false,
-            gesturePastHold = false,
-            loop = anim.loop or false,
-            segmentFinished = false,
-            lastSegment = false,
-            segmentCount = 0,
-            lockZ = anim.locktoply and EyePos().z or 0,
-            soundsPlayed = {},
-            legacyStarted = false,
-            poseOnlyLegacy = false,
-        }
-        ApplyAnimDataToTrack(track, anim)
-        return track
-    end
-
-    -- Scale / skin / bodygroups from the registration, applied to every model a track owns.
-    local function ApplyModelSettings(track, ent)
-        if not IsValid(ent) then return end
-        if track.modelScale then ent:SetModelScale(track.modelScale) end
-        if track.modelSkin then ent:SetSkin(track.modelSkin) end
-        if track.modelBodygroups then
-            for bg, value in pairs(track.modelBodygroups) do
-                ent:SetBodygroup(bg, value)
-            end
-        end
-    end
-
-    -- Make a ClientsideModel for the source viewmodel and its cambone clone.
-    -- skipCamModel: remote (multiplayer) tracks never drive a camera, so they skip the clone.
-    local function SetupSourceModels(track, anim, skipCamModel)
-        if not IsValid(track.model) then
-            GCAL_Log("Failed: Invalid model path: models/" .. tostring(anim.model))
-            return false
-        end
-        track.model:SetNoDraw(true)
-        -- Force the model to initialize by setting up bones
-        track.model:SetupBones()
-        ApplyModelSettings(track, track.model)
-
-        if not skipCamModel and track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
-            track.camModel = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH)
-        end
+    local function StartTrackSequence(track)
+        track.model:ResetSequenceInfo()
+        track.model:SetPlaybackRate(1)
+        track.model:ResetSequence(track.seqID)
+        track.duration = math.max(track.model:SequenceDuration(track.seqID), 0.01)
         if IsValid(track.camModel) then
-            track.camModel:SetNoDraw(true)
-            -- Place at origin so the attachment is read in the model's local space
-            track.camModel:SetPos(vector_origin)
-            track.camModel:SetAngles(angle_zero)
-            track.camModel:SetupBones()
-            ApplyModelSettings(track, track.camModel)
+            track.camModel:ResetSequenceInfo()
+            track.camModel:SetPlaybackRate(1)
+            track.camModel:ResetSequence(track.seqID)
         end
-        return true
     end
 
-    -- Find a legacy surrogate animation and swap the track's model/camModel to it.
-    local function TryLegacySurrogate(track, name, anim, sequenceList)
-        local surrogate = FindLegacySurrogateAnim(name, anim)
+    local function TryLegacySurrogate(track, name)
+        local surrogate = FindLegacySurrogateAnim(name)
         if not surrogate then return false end
 
         local surrogateModel = ClientsideModel(NormalizeModelPath(surrogate.data.model), RENDERGROUP_BOTH)
@@ -1383,7 +1338,7 @@ if CLIENT then
         end
 
         local surrogateTrack = { model = surrogateModel, data = surrogate.data }
-        local seqID, _ = ResolveSequence(surrogateTrack, surrogate.name, surrogate.data)
+        local seqID = ResolveSequence(surrogateTrack, surrogate.name, surrogate.data)
         if seqID == -1 then
             if IsValid(surrogateModel) then surrogateModel:Remove() end
             if IsValid(surrogateCamModel) then surrogateCamModel:Remove() end
@@ -1397,46 +1352,30 @@ if CLIENT then
         track.seqID = seqID
         track.sequenceName = surrogate.data.sequence or surrogate.name
 
-        track.model:ResetSequenceInfo()
-        track.model:SetPlaybackRate(1)
-        track.model:ResetSequence(track.seqID)
-        track.duration = math.max(track.model:SequenceDuration(track.seqID), 0.01)
-        if IsValid(track.camModel) then
-            track.camModel:ResetSequenceInfo()
-            track.camModel:SetPlaybackRate(1)
-            track.camModel:ResetSequence(track.seqID)
-        end
-        GCAL_Log("Legacy fallback: using surrogate animation '" .. tostring(surrogate.name) .. "' for '" .. tostring(name) .. "'.")
+        StartTrackSequence(track)
+        GCAL_Log("Legacy fallback: using surrogate animation '" .. tostring(surrogate.name) ..
+            "' for '" .. tostring(name) .. "'.")
         return true
     end
 
-    -- Fall back to pose-only mode when a legacy anim has no sequences and no surrogate.
     local function UsePoseOnlyLegacy(track, name, anim)
         track.poseOnlyLegacy = true
         track.duration = math.max(anim.duration or anim.holdtime or anim.lerp_peak or 1, 0.01)
-        GCAL_Log("Legacy fallback: using pose-only mode for '" .. tostring(name) .. "' because the model reported zero sequences.")
+        GCAL_Log("Legacy fallback: using pose-only mode for '" .. tostring(name) ..
+            "' because the model reported zero sequences.")
     end
 
-    -- Resolve the firstperson sequence and prepare the source model.
     local function ResolveFirstPersonSequence(track, name, anim)
         local sequenceList = track.model.GetSequenceList and (track.model:GetSequenceList() or {}) or {}
         track.seqID, track.sequenceName = ResolveSequence(track, name, anim)
 
         if track.seqID ~= -1 then
-            track.model:ResetSequenceInfo()
-            track.model:SetPlaybackRate(1)
-            track.model:ResetSequence(track.seqID)
-            track.duration = math.max(track.model:SequenceDuration(track.seqID), 0.01)
-            if IsValid(track.camModel) then
-                track.camModel:ResetSequenceInfo()
-                track.camModel:SetPlaybackRate(1)
-                track.camModel:ResetSequence(track.seqID)
-            end
+            StartTrackSequence(track)
             return
         end
 
         if anim.legacy and #sequenceList == 0 then
-            if TryLegacySurrogate(track, name, anim, sequenceList) then return end
+            if TryLegacySurrogate(track, name) then return end
             UsePoseOnlyLegacy(track, name, anim)
             return
         end
@@ -1444,22 +1383,9 @@ if CLIENT then
         GCAL_Log("Failed: Sequence not found in model!")
         track.model:Remove()
         if IsValid(track.camModel) then track.camModel:Remove() end
-        error("GCAL_Play_NoSequence", 0) -- level 0: no file:line prefix, GCAL:Play matches this string
+        error("GCAL_Play_NoSequence", 0) -- GCAL:Play matches this exact string
     end
 
-    -- Hidden ClientsideModel copy of the source model, started on the given sequence.
-    local function CreateTrackModelCopy(track, sequence)
-        local ent = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
-        if not IsValid(ent) then return nil end
-        ent:SetNoDraw(true)
-        ent:ResetSequenceInfo()
-        ent:SetPlaybackRate(1)
-        ent:ResetSequence(sequence)
-        ApplyModelSettings(track, ent)
-        return ent
-    end
-
-    -- Resolve the TPIK sequence and build the thirdperson model + clone.
     local function SetupThirdPerson(track, name, anim)
         track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, name, anim)
         if track.tpikSeqID == -1 then
@@ -1478,7 +1404,46 @@ if CLIENT then
         track.thirdpersonModel = CreateTrackModelCopy(track, track.tpikSeqID or track.seqID)
     end
 
--- Pre-flight guard for legacy VManip animations
+    local function EmitTrackSound(ply, track, soundPath)
+        ply:EmitSound(soundPath, track.soundLevel or 75, GCAL.SoundPitch:GetInt(), track.soundVolume or 1, CHAN_AUTO,
+            track.soundFlags or 0)
+    end
+
+    local function HandleSounds(track)
+        if track.soundsDone or GCAL.MuteSounds:GetBool() then return end
+        local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
+        local sounds = track.data.sounds
+        local played = track.soundsPlayed
+
+        if not sounds or next(sounds) == nil then
+            if overridePath then
+                local ply = LocalPlayer()
+                if IsValid(ply) then
+                    EmitTrackSound(ply, track, overridePath)
+                end
+            end
+            track.soundsDone = true
+            return
+        end
+
+        local elapsed = CurTime() - track.startTime
+        local pending = false
+        for soundPath, time in pairs(sounds) do
+            if not played[soundPath] then
+                if elapsed >= time then
+                    local ply = LocalPlayer()
+                    if IsValid(ply) then
+                        EmitTrackSound(ply, track, overridePath or soundPath)
+                    end
+                    played[soundPath] = true
+                else
+                    pending = true
+                end
+            end
+        end
+        if not pending then track.soundsDone = true end
+    end
+
     local function LegacyAnimAllowed(name, trackID, anim)
         if not anim.legacy then return true end
 
@@ -1501,14 +1466,15 @@ if CLIENT then
 
         if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return false end
         local cycle = math.Round(vm:GetCycle(), 2)
-        if vm:GetSequenceActivity(vm:GetSequence()) == ACT_VM_RELOAD and (cycle < 0.99 and cycle > 0) then return false end
+        if vm:GetSequenceActivity(vm:GetSequence()) == ACT_VM_RELOAD and (cycle < 0.99 and cycle > 0) then
+            return false
+        end
         return true
     end
 
-    -- Resolve which (name, trackID) the caller asked us to play.
     local function ParsePlayArgs(arg1, arg2)
         if isstring(arg1) then return arg1, arg2 end
-        return arg2, nil -- GCAL:Play(self, "name")
+        return arg2, nil
     end
 
     function GCAL:Play(arg1, arg2)
@@ -1536,10 +1502,8 @@ if CLIENT then
         if not LegacyAnimAllowed(name, trackID, anim) then return false end
         if hook.Run("VManipPrePlayAnim", name) == false then return false end
 
-        -- New: Queue system - check if current track can be interrupted
         local existingTrack = GCAL.ActiveTracks[trackID]
         if existingTrack and not existingTrack.canInterrupt then
-            -- Cannot interrupt - add to queue instead
             GCAL_Log("Cannot interrupt current animation on track '" .. tostring(trackID) .. "', queueing instead")
             self:QueueAnim(name, trackID)
             return true
@@ -1561,7 +1525,6 @@ if CLIENT then
 
         SetupThirdPerson(track, name, anim)
 
-        -- New: Call interrupt callback on replaced track
         if GCAL.ActiveTracks[trackID] then
             local oldTrack = GCAL.ActiveTracks[trackID]
             if oldTrack.onInterruptCallback and isfunction(oldTrack.onInterruptCallback) then
@@ -1577,7 +1540,6 @@ if CLIENT then
             hook.Run("GCALCodeBlockStarted", trackID, name, track, track.blockCodeScope)
         end
 
-        -- New: Call start callback
         if track.onStartCallback and isfunction(track.onStartCallback) then
             pcall(track.onStartCallback, trackID, name, track)
         end
@@ -1630,17 +1592,12 @@ if CLIENT then
     end
 
     function GCAL:QueueAnim(name, trackID)
-        if not self:GetAnim(name) then return false end
-
         local anim = self:GetAnim(name)
+        if not anim then return false end
+
         trackID = trackID or anim.group_name or "default"
         self.QueuedAnims[trackID] = name
         return true
-    end
-
-    local function EmitTrackSound(ply, track, soundPath)
-        ply:EmitSound(soundPath, track.soundLevel or 75, GCAL.SoundPitch:GetInt(), track.soundVolume or 1, CHAN_AUTO,
-            track.soundFlags or 0)
     end
 
     function GCAL:PlaySegment(trackID, sequence, lastSegment, soundTable)
@@ -1650,7 +1607,6 @@ if CLIENT then
         if not IsValid(track.model) or track.model:LookupSequence(sequence) == -1 then return false end
         if hook.Run("GCALPrePlaySegment", trackID, track.name, sequence, lastSegment) == false then return false end
 
-        -- Apply speed to all models when resetting sequences
         local speedMultiplier = track.speed * GCAL.PlaybackSpeed:GetFloat()
         track.model:ResetSequence(sequence)
         track.model:SetPlaybackRate(speedMultiplier)
@@ -1679,7 +1635,8 @@ if CLIENT then
         if soundTable then
             for soundPath, time in pairs(soundTable) do
                 timer.Simple(time, function()
-                    if self:GetCurrentAnim(trackID) == track.name and IsValid(LocalPlayer()) and LocalPlayer():Alive() then
+                    if self:GetCurrentAnim(trackID) == track.name and IsValid(LocalPlayer())
+                        and LocalPlayer():Alive() then
                         if not GCAL.MuteSounds:GetBool() then
                             local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
                             EmitTrackSound(LocalPlayer(), track, overridePath or soundPath)
@@ -1691,43 +1648,6 @@ if CLIENT then
 
         hook.Run("GCALPlaySegment", trackID, track.name, sequence, lastSegment)
         return true
-    end
-
-    -- track.soundsDone stops the per-frame scan once every sound of this pass has played
-    -- (reset when a looping track restarts).
-    local function HandleSounds(track)
-        if track.soundsDone or GCAL.MuteSounds:GetBool() then return end
-        local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
-        local sounds = track.data.sounds
-        local played = track.soundsPlayed
-
-        if not sounds or next(sounds) == nil then
-            if overridePath then
-                local ply = LocalPlayer()
-                if IsValid(ply) then
-                    EmitTrackSound(ply, track, overridePath)
-                end
-            end
-            track.soundsDone = true
-            return
-        end
-
-        local elapsed = CurTime() - track.startTime
-        local pending = false
-        for soundPath, time in pairs(sounds) do
-            if not played[soundPath] then
-                if elapsed >= time then
-                    local ply = LocalPlayer()
-                    if IsValid(ply) then
-                        EmitTrackSound(ply, track, overridePath or soundPath)
-                    end
-                    played[soundPath] = true
-                else
-                    pending = true
-                end
-            end
-        end
-        if not pending then track.soundsDone = true end
     end
 
     SyncLegacyVManipFields = function(track)
@@ -1803,9 +1723,6 @@ if CLIENT then
         end
     end
 
-    -- Playback timing shared by local tracks (UpdateTrack) and remote multiplayer tracks
-    -- (gcal_mp.lua): loop restart, hold, cycle advance, model cycle sync, and the lerp toward or
-    -- away from the animation. Returns true when a looping track wrapped around this frame.
     local function AdvanceTrackTiming(track, now, dt)
         local looped = false
         if track.loop then
@@ -1818,7 +1735,8 @@ if CLIENT then
         end
 
         if track.holdTime then
-            if now >= track.holdTime and not track.gestureOnHold and not track.gesturePastHold and not track.holdQuit then
+            if now >= track.holdTime and not track.gestureOnHold and not track.gesturePastHold
+                and not track.holdQuit then
                 track.gestureOnHold = true
             elseif track.holdQuit and track.gestureOnHold then
                 track.gestureOnHold = false
@@ -1863,14 +1781,19 @@ if CLIENT then
         return looped
     end
 
-    -- Every field read here is initialised by CreateTrack.
+    local function FinishTrack(track, trackID)
+        if track.onFinishCallback and isfunction(track.onFinishCallback) then
+            pcall(track.onFinishCallback, trackID, track.name, track)
+        end
+        GCAL:StopTrack(trackID)
+    end
+
     local function UpdateTrack(track, trackID)
         curtime = CurTime()
 
         HandleSounds(track)
 
         if AdvanceTrackTiming(track, curtime, FrameTime()) then
-            -- Restart the sound table so sounds replay on every loop
             track.startTime = curtime
             table.Empty(track.soundsPlayed)
             track.soundsDone = nil
@@ -1891,19 +1814,11 @@ if CLIENT then
                 hook.Run("VManipSegmentFinish", track.name, track.curSegment, track.lastSegment, track.segmentCount)
             elseif track.segmented and track.lastSegment then
                 if track.lerpVal >= 1 then
-                    -- New: Call finish callback before stopping
-                    if track.onFinishCallback and isfunction(track.onFinishCallback) then
-                        pcall(track.onFinishCallback, trackID, track.name, track)
-                    end
-                    GCAL:StopTrack(trackID)
+                    FinishTrack(track, trackID)
                     return true
                 end
             elseif not track.segmented then
-                -- New: Call finish callback before stopping
-                if track.onFinishCallback and isfunction(track.onFinishCallback) then
-                    pcall(track.onFinishCallback, trackID, track.name, track)
-                end
-                GCAL:StopTrack(trackID)
+                FinishTrack(track, trackID)
                 return true
             end
         end
@@ -1923,8 +1838,7 @@ if CLIENT then
         flipmode = false,
         targetRight = false,
         targetBones = nil,
-        targetSide =
-        "left_arm"
+        targetSide = "left_arm"
     }
     local function GetLegacyFlipState(weapon)
         local validWeapon = IsValid(weapon)
@@ -1982,8 +1896,6 @@ if CLIENT then
         model:DrawModel(flags)
     end
 
-    -- Bone index cache per entity, rebuilt when the entity's model changes. LookupBone is a C call
-    -- and used to run for every bone of every track each frame. Missing bones are stored as -1.
     local boneCaches = setmetatable({}, { __mode = "k" })
     local function BoneCache(ent)
         local model = ent:GetModel() or ""
@@ -2004,9 +1916,7 @@ if CLIENT then
         return idx
     end
 
-    -- Element-wise lerp of m toward target, written into m (callers pass the fresh copy that
-    -- GetBoneMatrix returns). Unpack / SetUnpacked move all 16 values in three C calls; the old
-    -- ToTable() + Matrix(t) round trip built five tables per matrix and was ~18x slower.
+    -- Writes into m; callers pass the fresh copy GetBoneMatrix returns.
     local LerpMatrixInto
     if isfunction(FindMetaTable("VMatrix").Unpack) and isfunction(FindMetaTable("VMatrix").SetUnpacked) then
         LerpMatrixInto = function(m, target, f)
@@ -2033,15 +1943,11 @@ if CLIENT then
     local ULNA_L = "ValveBiped.Bip01_L_Ulna"
     local FOREARM_L = "ValveBiped.Bip01_L_Forearm"
 
-    -- Mirrors the lerp direction logic in UpdateTrack: true while lerpVal is heading toward the animation.
     local function IsBlendingIn(track)
         return (CurTime() < (track.lerpPeakTime or 0) or (track.segmented and not track.lastSegment))
             and (not track.gestureOnHold or track.gesturePastHold)
     end
 
-    -- Blend weight toward the weapon/rest pose for a raw lerp value (1 = rest pose, 0 = full animation).
-    -- Default is the OG VManip power curve (t ^ lerp_curve); an explicit easing_in / easing_out
-    -- uses the named GCAL.Lerp function for that direction instead.
     local function GetTrackBlendFactor(track, t, curve)
         local fn = track.easingIn
         if fn ~= track.easingOut and not IsBlendingIn(track) then
@@ -2054,7 +1960,6 @@ if CLIENT then
             factor = GCAL.Lerp.Legacy(t, 0, 1, curve or 1)
         end
 
-        -- blend_weight (0-1) caps how far the animation pulls the bones away from the rest pose.
         local weight = tonumber(track.blendWeight)
         if weight then
             factor = 1 - (1 - factor) * math.Clamp(weight, 0, 1)
@@ -2076,7 +1981,6 @@ if CLIENT then
     })
     local ApplyCachedThirdPersonBones = tpik.ApplyCachedThirdPersonBones
     local ApplyThirdPersonBones = tpik.ApplyThirdPersonBones
-    -- Exposed for gcal_mp.lua so remote players can reuse the exact same track building and TPIK solver.
     GCAL.MPInternal = {
         CreateTrack = CreateTrack,
         SetupSourceModels = SetupSourceModels,
@@ -2086,6 +1990,7 @@ if CLIENT then
         ApplyThirdPersonBones = ApplyThirdPersonBones,
         ApplyCachedThirdPersonBones = ApplyCachedThirdPersonBones
     }
+
     GCAL.WeaponBaseStrategies = GCAL.WeaponBaseStrategies or {}
 
     local function EntityHasAnyBone(ent, bones)
@@ -2099,9 +2004,6 @@ if CLIENT then
         return false
     end
 
-    -- Strategy detection runs several times per frame (firstperson, gun bones, thirdperson), so the
-    -- result is kept per weapon for a short while. The re-check covers weapons whose detect()
-    -- answer changes after deploy (e.g. MW Base creating m_ViewModel late).
     local STRATEGY_CACHE_SECONDS = 0.5
     local strategyCache = setmetatable({}, { __mode = "k" })
 
@@ -2159,9 +2061,6 @@ if CLIENT then
         return vm
     end
 
-    -- GCAL registers its own VManipVMEntity listener (gcal_compat.lua) for addons that call the
-    -- hook themselves. On the path below it never returns anything (no strategy resolveViewModel),
-    -- so hook.Run is only worth calling when someone else listens.
     local OWN_VM_ENTITY_HOOK = "GCAL_Compat_StrategyVMEntity"
     local function HasForeignVMEntityListener()
         if GAMEMODE and GAMEMODE.VManipVMEntity then return true end
@@ -2264,7 +2163,6 @@ if CLIENT then
         end
 
         local boneCount = 0
-        -- GCAL.Lerp.Legacy(t, a, b, curve) = a + (b - a) * t ^ curve; t ^ curve is the same for every element.
         local factor = (track.lerpVal or 1) ^ (track.lerpCurve or 1)
         local scaleVec = flip.targetRight and flipped or scalevec
         local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
@@ -2282,7 +2180,7 @@ if CLIENT then
 
             local m
             if factor == 0 then
-                m = gestureMatrix -- fully blended in: the gesture pose is the result
+                m = gestureMatrix
             else
                 local targetBoneMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if not targetBoneMatrix then continue end
@@ -2304,7 +2202,6 @@ if CLIENT then
     local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext,
                               skipVMSetup)
         if not IsValid(vm) or not track.bones then return end
-
         if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
 
         if thirdperson then
@@ -2327,14 +2224,11 @@ if CLIENT then
         local targetBones = GetTrackTargetBones(track, weapon, flip)
         local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then return end
-        -- vm / hands were set up by the caller; a strategy's custom arm target was not.
         if not skipVMSetup or (targetEnt ~= vm and targetEnt ~= handsEnt) then
             targetEnt:SetupBones()
         end
 
-        if track.data.legacy then
-            PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
-        elseif track.data.locktoply or track.data.assurepos then
+        if track.data.legacy or track.data.locktoply or track.data.assurepos then
             PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
         else
             PlaceTrackModel(track, vm:GetPos(), vm:GetAngles() + sourceAngleOffset)
@@ -2343,7 +2237,7 @@ if CLIENT then
         track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
         track.model:SetupBones()
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CW) end
-        if not thirdperson and not suppressSourceDraw then
+        if not suppressSourceDraw then
             DrawGShaderFriendlyModel(track.model, flags)
         end
         if flipmode then render.CullMode(MATERIAL_CULLMODE_CCW) end
@@ -2368,11 +2262,10 @@ if CLIENT then
             if not modelMatrix then continue end
 
             local m
+            -- Exactly 0, not <= 0: OutElastic overshoot gives negative factors that must still lerp.
             if blendFactor == 0 then
-                -- Fully blended in (most of an animation): the source pose is the result.
                 m = modelMatrix
             elseif blendFactor == 1 then
-                -- Fully at the rest pose (first / last frame): the target pose is the result.
                 m = targetEnt:GetBoneMatrix(targetBone)
                 if not m then continue end
             else
@@ -2393,21 +2286,6 @@ if CLIENT then
         track.debugBoneCount = boneCount
     end
 
-    ----------------------------------------------------------------------------------------
-    -- Gun bones (firstperson)
-    --
-    -- ApplyBones only writes the arm bones, so the weapon keeps its own pose while the hands
-    -- move away from it. Two opt-in modes fix that:
-    --   "follow"   - every bone below an animated arm bone is carried along with it, so the gun
-    --                stays in the grip. Viewmodels whose gun bones are not parented to the hand
-    --                fall back to moving all weapon bones rigidly with the right hand.
-    --   "animated" - the gun bone(s) are copied from the animation model like the arm bones
-    --                (gun_bones = "bone", { "bone", ... } or { ["source bone"] = "viewmodel bone" }),
-    --                and the rest of the gun is carried by them. Falls back to "follow" when
-    --                no gun bone can be matched.
-    -- The viewmodel is drawn before the hands, so this runs in PreDrawViewModel and never
-    -- writes arm bones: those stay the job of RenderTracks.
-    ----------------------------------------------------------------------------------------
     local gunBoneCache = setmetatable({}, { __mode = "k" })
     local function GetGunBoneCache(ent)
         local model = ent:GetModel() or ""
@@ -2429,7 +2307,6 @@ if CLIENT then
         return children
     end
 
-    -- Arm / body bones ("Bip01") are never written by the gun pass.
     local function IsArmBone(ent, bone)
         local cache = GetGunBoneCache(ent)
         local isArm = cache.isArm[bone]
@@ -2445,7 +2322,6 @@ if CLIENT then
         "ValveBiped.weapon_bone", "weapon_bone", "Weapon", "weapon", "tag_weapon", "j_gun", "v_weapon"
     }
 
-    -- Gun bone handling is chosen per animation through gun_mode in RegisterAnim.
     local function ResolveGunMode(track)
         return track.gunMode
     end
@@ -2480,7 +2356,6 @@ if CLIENT then
         return out
     end
 
-    -- sourceMatrix is a fresh GetBoneMatrix copy and is blended in place.
     local function BlendGunMatrix(sourceMatrix, targetMatrix, blendFactor)
         local m = blendFactor == 0 and sourceMatrix or LerpMatrixInto(sourceMatrix, targetMatrix, blendFactor)
         m:SetScale(scalevec)
@@ -2493,11 +2368,7 @@ if CLIENT then
         return newMatrix * inverse
     end
 
-    -- Move everything below parentBone by the same transform its parent went through.
-    -- solved: bones that already have a pose this pass; out: bones this pass will write.
     local function CarryGunChildren(ent, parentBone, parentOld, parentNew, solved, out)
-        -- Most arm bones only have other (already solved) arm bones below them, so the parent's
-        -- delta is built lazily, the first time an unsolved child needs it.
         local delta
         local moved = 0
         for _, child in ipairs(GetGunChildBones(ent, parentBone)) do
@@ -2523,7 +2394,7 @@ if CLIENT then
 
     local function ApplyGunBones(track, vm, weapon, renderContext, mode)
         if not IsValid(track.model) or not track.bones or not track.data then return end
-        if TrackUsesLegacyFlip(track) then return end -- legacy flip mirrors the source; arms only
+        if TrackUsesLegacyFlip(track) then return end
 
         local flip = GetLegacyFlipState(weapon)
         local targetBones = GetTrackTargetBones(track, weapon, flip)
@@ -2531,7 +2402,6 @@ if CLIENT then
         if not IsValid(targetEnt) then return end
         if targetEnt ~= vm then targetEnt:SetupBones() end
 
-        -- Same source placement as ApplyBones
         if track.data.locktoply or track.data.assurepos then
             PlaceTrackModel(track, EyePos(), EyeAngles())
         else
@@ -2542,8 +2412,7 @@ if CLIENT then
 
         local blendFactor = GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1)
 
-        -- Solve the arm bones exactly like ApplyBones does, without writing them.
-        local roots = {}                -- { ent, bone, old, new }
+        local roots = {}
         local solved = { [targetEnt] = {} }
         local rightHandOld, rightHandNew
         local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
@@ -2576,7 +2445,6 @@ if CLIENT then
         solved[vm] = solved[vm] or {}
         out[vm] = out[vm] or {}
 
-        -- "animated": copy the gun bone(s) from the animation model
         local drivenOld, drivenNew
         local gunMoved = 0
         if mode == "animated" then
@@ -2594,13 +2462,12 @@ if CLIENT then
                         roots[#roots + 1] = { vm, gunBone, gunMatrix, newMatrix }
                         gunMoved = gunMoved + 1
                         if not drivenOld then drivenOld, drivenNew = gunMatrix, newMatrix end
-                        if pair[3] then break end -- auto-detected candidate: first match wins
+                        if pair[3] then break end
                     end
                 end
             end
         end
 
-        -- Carry everything below the solved bones
         local carried = 0
         for _, root in ipairs(roots) do
             local ent = root[1]
@@ -2608,8 +2475,6 @@ if CLIENT then
             if ent == vm then carried = carried + moved end
         end
 
-        -- Rigid fallback: nothing on the viewmodel hangs off the hand (or the driven gun bone),
-        -- so move every remaining weapon bone with it instead.
         local driverOld, driverNew = drivenOld or rightHandOld, drivenNew or rightHandNew
         local rigid = false
         if carried == 0 and driverOld then
@@ -2634,14 +2499,12 @@ if CLIENT then
             end
         end
 
-        track.debugGunMode = mode .. ((mode == "animated" and gunMoved == 0) and " (no gun bone matched, following hand)" or "") ..
-            (rigid and " [rigid]" or "")
+        track.debugGunMode = mode
+            .. ((mode == "animated" and gunMoved == 0) and " (no gun bone matched, following hand)" or "")
+            .. (rigid and " [rigid]" or "")
         track.debugGunBoneCount = gunMoved + carried
     end
 
-    -- Tracks can start or stop while the per-frame loops run (callbacks, queued anims, StopTrack),
-    -- so those loops walk a snapshot of the IDs. Each loop reuses its own buffer instead of
-    -- allocating a fresh table through GCAL:GetActiveTrackIDs() every frame.
     local function SnapshotTrackIDs(buffer)
         local count = 0
         for id in pairs(GCAL.ActiveTracks) do
@@ -2653,9 +2516,6 @@ if CLIENT then
     end
     local gunTrackIDs, updateTrackIDs, renderTrackIDs = {}, {}, {}
 
-    -- The TPIK solver only reads Spine4, the mapped arm bones and everything below the upper arms,
-    -- so only those player bones are copied instead of the whole skeleton. GetBoneMatrix already
-    -- returns a fresh copy, so no extra ToTable() round trip is needed.
     local tpikBaseBones = setmetatable({}, { __mode = "k" })
     local function GetTPIKBaseBones(ply)
         local model = ply:GetModel() or ""
@@ -2685,7 +2545,6 @@ if CLIENT then
             matrices[bone] = ply:GetBoneMatrix(bone)
         end
 
-        -- Custom bone lists can map bones outside the arm trees (clavicles, spine, ...).
         local cache = BoneCache(ply)
         for _, track in pairs(tracks) do
             if track.thirdperson and track.bones then
@@ -2701,9 +2560,6 @@ if CLIENT then
     end
     GCAL.MPInternal.CollectTPIKBaseMatrices = CollectTPIKBaseMatrices
 
-    -- The gun-bones pass (PreDrawViewModel) and the arm pass (PreDrawPlayerHands / PostDrawViewModel)
-    -- run in the same frame with the same weapon and viewmodel, so they share one render context
-    -- instead of resolving the weapon base's viewmodel (resolveViewModel / VManipVMEntity) twice.
     local frameContext = { frame = -1 }
     local function GetFrameRenderContext(ply, weapon, vm, handsEnt)
         local cached = frameContext
@@ -2719,48 +2575,8 @@ if CLIENT then
         return context
     end
 
-    local lastGunBonesFrame = -1
-    hook.Add("PreDrawViewModel", "GCAL_GunBones", function(vm, ply, weapon)
-        if next(GCAL.ActiveTracks) == nil then return end
-        if not IsValid(vm) or not IsValid(weapon) or ply ~= LocalPlayer() then return end
-
-        local frame = FrameNumber()
-        if lastGunBonesFrame == frame then return end
-
-        local wanted = false
-        for id, track in pairs(GCAL.ActiveTracks) do
-            if id ~= "legs" and id ~= "legacy_left_arm" and ResolveGunMode(track) then
-                wanted = true
-                break
-            end
-        end
-        if not wanted then return end
-        lastGunBonesFrame = frame
-
-        if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
-
-        local renderContext = GetFrameRenderContext(ply, weapon, vm, ply:GetHands())
-        local targetVM = renderContext.vm
-        if not IsValid(targetVM) then return end
-        targetVM:SetupBones()
-
-        for _, id in ipairs(SnapshotTrackIDs(gunTrackIDs)) do
-            local track = GCAL.ActiveTracks[id]
-            if track and id ~= "legs" and id ~= "legacy_left_arm" then
-                local mode = ResolveGunMode(track)
-                if mode then
-                    ApplyGunBones(track, targetVM, weapon, renderContext, mode)
-                else
-                    track.debugGunMode = nil
-                    track.debugGunBoneCount = nil
-                end
-            end
-        end
-    end)
-
     local function ProcessQueuedTracks()
         if not next(GCAL.QueuedAnims) then return end
-        -- Snapshot the idle entries first: GCAL:Play can queue again while we iterate.
         local ready
         for queuedTrackID, queuedName in pairs(GCAL.QueuedAnims) do
             if not GCAL.ActiveTracks[queuedTrackID] then
@@ -2770,7 +2586,6 @@ if CLIENT then
         end
         if not ready then return end
 
-        -- One-shot consumption (like legacy VManip): an unplayable entry is dropped, not retried every frame.
         for _, entry in ipairs(ready) do
             local queuedTrackID, queuedName = entry[1], entry[2]
             if GCAL.QueuedAnims[queuedTrackID] == queuedName and not GCAL.ActiveTracks[queuedTrackID] then
@@ -2786,8 +2601,6 @@ if CLIENT then
         if lastTrackUpdateFrame == frame then return false end
         lastTrackUpdateFrame = frame
 
-        -- Like OG VManip / VMLegs: drop the legacy gesture and legs when the player dies,
-        -- so a held or looping one does not carry over into the next life.
         local ply = LocalPlayer()
         if IsValid(ply) and not ply:Alive() then
             if GCAL.ActiveTracks["legacy_left_arm"] then GCAL:StopTrack("legacy_left_arm") end
@@ -2812,25 +2625,15 @@ if CLIENT then
         return true
     end
 
-    -- Keep tracks advancing when nothing is rendering them (no viewmodel, vehicles, remote
-    -- view entities, ARC9-hosted TPIK). UpdateTracksForFrame dedupes per frame.
-    hook.Add("Think", "GCAL_ThinkUpdateTracks", function()
-        UpdateTracksForFrame()
-    end)
-
     local lastHandsRenderFrame = -1
     local lastVMRenderFrame = -1
     local renderTracksBusy = false
     local renderTracksBusyFrame = -1
     local function RenderTracks(hands, vm, ply, weapon, flags, fromHandsHook)
         local frame = FrameNumber()
-        -- Re-entrancy guard, scoped to the frame so an error mid-render cannot leave it stuck forever.
         if renderTracksBusy and renderTracksBusyFrame == frame then return end
         if not IsValid(vm) then return end
-        -- One pass per frame, whichever hook comes first. The base gamemode's PostDrawViewModel
-        -- runs after the "VManip" hook and calls PreDrawPlayerHands from inside it, so both hooks
-        -- fire every frame; running the pass twice animated, drew and blended everything twice
-        -- (the second blend against bones the first had already moved).
+        -- One pass per frame: GM:PostDrawViewModel calls PreDrawPlayerHands, so both hooks fire.
         if lastHandsRenderFrame == frame or lastVMRenderFrame == frame then return end
         if fromHandsHook then
             lastHandsRenderFrame = frame
@@ -2843,7 +2646,6 @@ if CLIENT then
 
         UpdateTracksForFrame()
 
-        -- Nothing playing: leave the hands / viewmodel bones to the engine.
         if next(GCAL.ActiveTracks) == nil then
             renderTracksBusy = false
             return
@@ -2931,13 +2733,56 @@ if CLIENT then
         end
     end
 
+    local lastGunBonesFrame = -1
+    hook.Add("PreDrawViewModel", "GCAL_GunBones", function(vm, ply, weapon)
+        if next(GCAL.ActiveTracks) == nil then return end
+        if not IsValid(vm) or not IsValid(weapon) or ply ~= LocalPlayer() then return end
+
+        local frame = FrameNumber()
+        if lastGunBonesFrame == frame then return end
+
+        local wanted = false
+        for id, track in pairs(GCAL.ActiveTracks) do
+            if id ~= "legs" and id ~= "legacy_left_arm" and ResolveGunMode(track) then
+                wanted = true
+                break
+            end
+        end
+        if not wanted then return end
+        lastGunBonesFrame = frame
+
+        if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
+
+        local renderContext = GetFrameRenderContext(ply, weapon, vm, ply:GetHands())
+        local targetVM = renderContext.vm
+        if not IsValid(targetVM) then return end
+        targetVM:SetupBones()
+
+        for _, id in ipairs(SnapshotTrackIDs(gunTrackIDs)) do
+            local track = GCAL.ActiveTracks[id]
+            if track and id ~= "legs" and id ~= "legacy_left_arm" then
+                local mode = ResolveGunMode(track)
+                if mode then
+                    ApplyGunBones(track, targetVM, weapon, renderContext, mode)
+                else
+                    track.debugGunMode = nil
+                    track.debugGunBoneCount = nil
+                end
+            end
+        end
+    end)
+
+    hook.Add("Think", "GCAL_ThinkUpdateTracks", function()
+        UpdateTracksForFrame()
+    end)
+
     hook.Add("PreDrawPlayerHands", "GCAL_RenderHands", function(hands, vm, ply, weapon, flags)
         RenderTracks(hands, vm, ply, weapon, flags, true)
     end)
 
-    -- Must stay named "VManip": MW Base calls hook.GetTable().PostDrawViewModel.VManip(vm, ply, weapon)
-    -- directly from mg_viewmodel's BuildBonePositions callback to apply arm bones.
+    -- Removes a hook left by older versions on lua refresh.
     hook.Remove("PostDrawViewModel", "GCAL_RenderVM")
+    -- Name must stay "VManip": MW Base calls hook.GetTable().PostDrawViewModel.VManip directly.
     hook.Add("PostDrawViewModel", "VManip", function(vm, ply, weapon, flags)
         RenderTracks(nil, vm, ply, weapon, flags, false)
     end)
@@ -2985,7 +2830,82 @@ if CLIENT then
         end
     end)
 
-    -- Debug HUD (gcal_debug 1): center-left, no background, shadowed text.
+    hook.Add("NeedsDepthPass", "GCAL_VManipCamAttachment", function()
+        if next(GCAL.ActiveTracks) == nil or not GCAL.CamBone:GetBool() then return end
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not ply:Alive() then return end
+
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if not IsValid(track.camModel) then continue end
+
+            if track.camAttachmentID == nil then
+                local attachments = track.camModel:GetAttachments() or {}
+                track.camAttachmentID = attachments[1] and attachments[1].id or false
+            end
+            if track.camAttachmentID then
+                track.camModel:SetupBones()
+                track.attachment = track.camModel:GetAttachment(track.camAttachmentID)
+            end
+        end
+    end)
+
+    local inCalcView = false
+    hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, znear, zfar)
+        if inCalcView or next(GCAL.ActiveTracks) == nil then return end
+        if not GCAL.CamBone:GetBool() then return end
+        if ply:GetViewEntity() ~= ply then return end
+        if ply:ShouldDrawLocalPlayer() then return end
+
+        local needsView = false
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if track.attachment and (track.lerpVal or 1) < 1 then
+                needsView = true; break
+            end
+        end
+        if not needsView then return end
+
+        inCalcView = true
+        local ok, composed = pcall(hook.Run, "CalcView", ply, origin, angles, fov, znear, zfar)
+        inCalcView = false
+        if not ok then
+            ErrorNoHaltWithStack(composed)
+            composed = {}
+        end
+        if not istable(composed) then composed = {} end
+        local baseOrigin = composed.origin or origin
+        local baseAngles = composed.angles or angles
+        local baseFov = composed.fov or fov
+
+        local newOrigin, newAngles, newFov = baseOrigin, baseAngles, baseFov
+        for trackID, track in pairs(GCAL.ActiveTracks) do
+            if trackID == "legs" then continue end
+            if not track.attachment then continue end
+            newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
+        end
+
+        local view = {}
+        for k, v in pairs(composed) do view[k] = v end
+        view.origin = newOrigin
+        view.angles = newAngles
+        view.fov = newFov
+        return view
+    end)
+
+    -- Removes a hook left by older versions on lua refresh.
+    hook.Remove("CalcViewModelView", "GCAL_ViewModelOffset")
+
+    hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)
+        if VManip and VManip:IsActive() and not ply:ShouldDrawLocalPlayer() then
+            ucmd:RemoveKey(IN_RELOAD)
+        end
+    end)
+
+    hook.Add("TFA_PreReload", "GCAL_VManipPreventTFAReload", function()
+        if VManip and VManip:IsActive() then return "no" end
+    end)
+
     surface.CreateFont("GCAL_DebugTitle", { font = "Roboto", size = 18, weight = 700, antialias = true })
     surface.CreateFont("GCAL_DebugText", { font = "Consolas", size = 14, weight = 500, antialias = true })
 
@@ -3005,8 +2925,6 @@ if CLIENT then
     local hudBarCycle = Color(93, 210, 180)
     local hudBarBlend = Color(255, 214, 102)
 
-    -- Rows are rebuilt every frame into reused tables, then drawn vertically centred.
-    -- kind: "title" (text, subtitle, tag, color) / "text" / "bar" / "gap"
     local hudRows = {}
     local hudTrackIDs = {}
     local hudRowCount = 0
@@ -3079,13 +2997,15 @@ if CLIENT then
             info[#info + 1] = "sounds " .. table.Count(track.soundsPlayed or {}) .. "/" .. table.Count(data.sounds)
         end
         if track.segmented then
-            info[#info + 1] = "segment " .. tostring((track.segmentCount or 0) + 1) .. (track.lastSegment and " (last)" or "")
+            info[#info + 1] = "segment " .. tostring((track.segmentCount or 0) + 1)
+                .. (track.lastSegment and " (last)" or "")
         end
         if track.holdTimeData then
             info[#info + 1] = "hold " .. FormatSeconds(track.holdTimeData) .. (track.holdQuit and " (released)" or "")
         end
         if track.debugGunMode then
-            info[#info + 1] = "gun " .. tostring(track.debugGunMode) .. " [" .. tostring(track.debugGunBoneCount or 0) .. "]"
+            info[#info + 1] = "gun " .. tostring(track.debugGunMode)
+                .. " [" .. tostring(track.debugGunBoneCount or 0) .. "]"
         end
         HudText(table.concat(info, "  ·  "), hudText, 1)
 
@@ -3103,8 +3023,6 @@ if CLIENT then
         HudRow("gap")
     end
 
-    -- surface.* directly: draw.SimpleText re-sets the font and measures the text on every call.
-    -- Only measures (GetTextSize) when the caller needs the width.
     local hudFont
     local function DrawShadowText(text, font, x, y, color, measure)
         if font ~= hudFont then
@@ -3123,13 +3041,12 @@ if CLIENT then
 
     hook.Add("HUDPaint", "GCAL_DebugHUD", function()
         if not GCAL.Debug:GetBool() then return end
-        hudFont = nil -- other HUD code may have changed the font since last frame
+        hudFont = nil
 
         local now = CurTime()
         local real = RealTime()
         hudRowCount = 0
 
-        -- Header
         local ply = LocalPlayer()
         local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
         HudRow("title", "GCAL debug", string.format("%d anims · %d tracks", table.Count(GCAL.Anims or {}),
@@ -3150,7 +3067,6 @@ if CLIENT then
         if #toggles > 0 then HudText("on: " .. table.concat(toggles, " "), hudDim) end
         HudRow("gap")
 
-        -- Tracks, sorted so the list doesn't jump around
         local ids = SnapshotTrackIDs(hudTrackIDs)
         table.sort(ids, function(a, b) return tostring(a) < tostring(b) end)
         if #ids == 0 then
@@ -3162,7 +3078,6 @@ if CLIENT then
             if track then AddTrackRows(ids[i], track, now) end
         end
 
-        -- Recent events (debug log + deprecations)
         local events = GCAL.DebugEvents
         local shown = false
         for i = #events, math.max(1, #events - 7), -1 do
@@ -3176,7 +3091,6 @@ if CLIENT then
             end
         end
 
-        -- Measure, then draw vertically centred on the left edge.
         local height = 0
         for i = 1, hudRowCount do
             local kind = hudRows[i].kind
@@ -3216,6 +3130,16 @@ if CLIENT then
         end
     end)
 
+    local consoleTitle = Color(93, 210, 180)
+    local consoleText = Color(236, 242, 255)
+    local consoleWarn = Color(255, 176, 93)
+    local consoleError = Color(255, 106, 106)
+    local consoleDelta = Color(200, 220, 255)
+
+    local function TrackLine(label, value)
+        MsgC(consoleText, " - " .. label .. ": " .. tostring(value) .. "\n")
+    end
+
     concommand.Add("gcal_list_anims", function()
         local names = {}
 
@@ -3224,15 +3148,15 @@ if CLIENT then
         end
 
         table.sort(names)
-        MsgC(Color(93, 210, 180), "[GCAL] Registered animations (" .. #names .. "):\n")
+        MsgC(consoleTitle, "[GCAL] Registered animations (" .. #names .. "):\n")
 
         for _, name in ipairs(names) do
             local anim = GCAL.Anims[name] or {}
-            MsgC(Color(236, 242, 255), " - " .. name .. " [" .. tostring(anim.group_name or "default") .. "]\n")
+            MsgC(consoleText, " - " .. name .. " [" .. tostring(anim.group_name or "default") .. "]\n")
         end
     end)
 
-    local function GCAL_AnimAutocomplete(command, args)
+    local function AnimAutocomplete(command, args)
         local needle = string.lower(string.Trim(args or ""))
         local matches = {}
 
@@ -3252,34 +3176,32 @@ if CLIENT then
         local trackID = args[2]
 
         if not name or name == "" then
-            MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_play <animation> [track]\n")
+            MsgC(consoleWarn, "[GCAL] Usage: gcal_play <animation> [track]\n")
             return
         end
 
         if not GCAL.Anims[name] then
-            MsgC(Color(255, 106, 106), "[GCAL] Unknown animation: " .. tostring(name) .. "\n")
+            MsgC(consoleError, "[GCAL] Unknown animation: " .. tostring(name) .. "\n")
             return
         end
 
         if GCAL.IsAnimEnabled and not GCAL:IsAnimEnabled(name) then
-            MsgC(Color(255, 176, 93), "[GCAL] Animation is disabled: " .. tostring(name) .. "\n")
+            MsgC(consoleWarn, "[GCAL] Animation is disabled: " .. tostring(name) .. "\n")
             return
         end
 
         if GCAL:Play(name, trackID) then
-            MsgC(Color(93, 210, 180),
+            MsgC(consoleTitle,
                 "[GCAL] Playing " .. tostring(name) .. (trackID and (" on " .. tostring(trackID)) or "") .. "\n")
         else
-            MsgC(Color(255, 106, 106), "[GCAL] Could not play " .. tostring(name) .. "\n")
+            MsgC(consoleError, "[GCAL] Could not play " .. tostring(name) .. "\n")
         end
-    end, GCAL_AnimAutocomplete, "Play a registered GCAL animation. Usage: gcal_play <animation> [track]")
+    end, AnimAutocomplete, "Play a registered GCAL animation. Usage: gcal_play <animation> [track]")
 
-    -- gcal_debug_sequences <animation>            -> checks a registered animation's model + sequence
-    -- gcal_debug_sequences <model.mdl> [sequence]  -> checks any model, optionally one sequence
     concommand.Add("gcal_debug_sequences", function(_, _, args)
         local target = args[1]
         if not target or target == "" then
-            MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_debug_sequences <animation> | <model.mdl> [sequence]\n")
+            MsgC(consoleWarn, "[GCAL] Usage: gcal_debug_sequences <animation> | <model.mdl> [sequence]\n")
             return
         end
 
@@ -3287,29 +3209,29 @@ if CLIENT then
         local anim = GCAL.Anims[target]
         if anim then
             if not anim.model then
-                MsgC(Color(255, 106, 106), "[GCAL] Animation has no model: " .. tostring(target) .. "\n")
+                MsgC(consoleError, "[GCAL] Animation has no model: " .. tostring(target) .. "\n")
                 return
             end
             modelPath = anim.model
             sequenceName = anim.sequence or target
-            MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for animation " .. tostring(target) .. "\n")
-            MsgC(Color(236, 242, 255), " - explicit sequence: " .. tostring(anim.sequence or "<none>") .. "\n")
+            MsgC(consoleTitle, "[GCAL] Sequence debug for animation " .. tostring(target) .. "\n")
+            MsgC(consoleText, " - explicit sequence: " .. tostring(anim.sequence or "<none>") .. "\n")
         elseif string.EndsWith(string.lower(target), ".mdl") then
             modelPath = target
             sequenceName = args[2]
-            MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for model " .. tostring(target) .. "\n")
+            MsgC(consoleTitle, "[GCAL] Sequence debug for model " .. tostring(target) .. "\n")
         else
-            MsgC(Color(255, 106, 106), "[GCAL] Unknown animation (and not a .mdl path): " .. tostring(target) .. "\n")
+            MsgC(consoleError, "[GCAL] Unknown animation (and not a .mdl path): " .. tostring(target) .. "\n")
             return
         end
 
         local normalizedPath = NormalizeModelPath(modelPath)
-        MsgC(Color(236, 242, 255), " - model: " .. normalizedPath .. "\n")
+        MsgC(consoleText, " - model: " .. normalizedPath .. "\n")
 
         local model = ClientsideModel(normalizedPath, RENDERGROUP_BOTH)
         if not IsValid(model) then
-            MsgC(Color(255, 106, 106), "[GCAL] Could not create model: " .. normalizedPath .. "\n")
-            MsgC(Color(255, 176, 93), "   ! Check that the file exists at: garrysmod/" .. normalizedPath .. "\n")
+            MsgC(consoleError, "[GCAL] Could not create model: " .. normalizedPath .. "\n")
+            MsgC(consoleWarn, "   ! Check that the file exists at: garrysmod/" .. normalizedPath .. "\n")
             return
         end
 
@@ -3317,79 +3239,74 @@ if CLIENT then
         model:SetupBones()
 
         local sequenceList = model.GetSequenceList and (model:GetSequenceList() or {}) or {}
-        MsgC(Color(236, 242, 255), " - sequences (" .. tostring(#sequenceList) .. "):\n")
+        MsgC(consoleText, " - sequences (" .. tostring(#sequenceList) .. "):\n")
 
         if #sequenceList == 0 then
-            MsgC(Color(255, 176, 93), "   ! Model loaded with zero sequences. It is a prop/ragdoll without animations,\n")
-            MsgC(Color(255, 176, 93), "     failed to load completely, or is missing its .vvd/.vtx files.\n")
+            MsgC(consoleWarn, "   ! Model loaded with zero sequences. It is a prop/ragdoll without animations,\n")
+            MsgC(consoleWarn, "     failed to load completely, or is missing its .vvd/.vtx files.\n")
             model:Remove()
             return
         end
 
         for i, name in ipairs(sequenceList) do
-            MsgC(Color(236, 242, 255), "   [" .. i .. "] " .. tostring(name) .. "\n")
+            MsgC(consoleText, "   [" .. i .. "] " .. tostring(name) .. "\n")
         end
 
         if sequenceName and sequenceName ~= "" then
             local seqID = model:LookupSequence(sequenceName)
             if seqID ~= -1 then
-                MsgC(Color(93, 210, 180), " ✓ Sequence '" .. sequenceName .. "' found (ID: " .. seqID .. ")\n")
-                MsgC(Color(236, 242, 255), "   - Duration: " .. model:SequenceDuration(seqID) .. " seconds\n")
+                MsgC(consoleTitle, " ✓ Sequence '" .. sequenceName .. "' found (ID: " .. seqID .. ")\n")
+                MsgC(consoleText, "   - Duration: " .. model:SequenceDuration(seqID) .. " seconds\n")
             else
-                MsgC(Color(255, 106, 106), " ✗ Sequence '" .. sequenceName .. "' NOT FOUND\n")
+                MsgC(consoleError, " ✗ Sequence '" .. sequenceName .. "' NOT FOUND\n")
                 local lowerTarget = string.lower(sequenceName)
                 for _, name in ipairs(sequenceList) do
                     if string.lower(name) == lowerTarget then
-                        MsgC(Color(255, 176, 93), "   ! Case-insensitive match: '" .. name .. "'. Fix the case in your registration.\n")
+                        MsgC(consoleWarn,
+                            "   ! Case-insensitive match: '" .. name .. "'. Fix the case in your registration.\n")
                     end
                 end
             end
         end
 
         model:Remove()
-    end, GCAL_AnimAutocomplete,
-        "Print the sequences of a registered animation's model, or of any model. Usage: gcal_debug_sequences <animation> | <model.mdl> [sequence]")
+    end, AnimAutocomplete,
+        "Print the sequences of a registered animation's model, or of any model. "
+            .. "Usage: gcal_debug_sequences <animation> | <model.mdl> [sequence]")
 
     concommand.Add("gcal_debug_track", function(_, _, args)
         local trackID = args[1] or "legacy_left_arm"
         local track = GCAL.ActiveTracks[trackID]
 
         if not track then
-            MsgC(Color(255, 176, 93), "[GCAL] No active track: " .. tostring(trackID) .. "\n")
+            MsgC(consoleWarn, "[GCAL] No active track: " .. tostring(trackID) .. "\n")
             return
         end
 
-        MsgC(Color(93, 210, 180), "[GCAL] Track debug for " .. tostring(trackID) .. "\n")
-        MsgC(Color(236, 242, 255), " - anim: " .. tostring(track.name) .. "\n")
-        MsgC(Color(236, 242, 255), " - model: " .. tostring(track.data and track.data.model or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255), " - sequence: " .. tostring(track.sequenceName or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255), " - seqID: " .. tostring(track.seqID) .. "\n")
-        MsgC(Color(236, 242, 255), " - cycle: " .. tostring(math.Round(track.cycle or 0, 4)) .. "\n")
-        MsgC(Color(236, 242, 255), " - lerp: " .. tostring(math.Round(track.lerpVal or 0, 4)) .. "\n")
-        MsgC(Color(236, 242, 255), " - blockCode: " .. tostring(track.blockCode or false) .. "\n")
-        MsgC(Color(236, 242, 255), " - blockCodeScope: " .. tostring(track.blockCodeScope or "<global>") .. "\n")
-        MsgC(Color(236, 242, 255), " - poseOnlyLegacy: " .. tostring(track.poseOnlyLegacy or false) .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson: " .. tostring(track.thirdperson or false) .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson root bone: " .. tostring(track.debugThirdPersonRootBone or "<not cached>") .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson mode: " .. tostring(track.debugThirdPersonMode or "<not evaluated>") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson host: " .. tostring(track.debugThirdPersonHost or "gcal") .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson model: " .. tostring(track.debugThirdPersonModel or "<not rendered>") .. "\n")
-        MsgC(Color(236, 242, 255), " - thirdperson model valid: " .. tostring(IsValid(track.thirdpersonModel)) .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson model visible materials: " .. tostring(track.thirdpersonModelHasVisibleMaterials) .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson model ready frame: " .. tostring(track.thirdpersonModelReadyFrame or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson model draw frame: " .. tostring(track.debugThirdPersonModelDrawFrame or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255),
-            " - thirdperson model distance: " .. tostring(track.debugThirdPersonModelDistance or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255), " - last arm target entity: " .. tostring(track.debugTargetEntity or "<none>") .. "\n")
-        MsgC(Color(236, 242, 255), " - debugBoneCount: " .. tostring(track.debugBoneCount or 0) .. "\n")
-        MsgC(Color(236, 242, 255), " - gun mode: " .. tostring(track.debugGunMode or "off") .. "\n")
-        MsgC(Color(236, 242, 255), " - gun bones moved: " .. tostring(track.debugGunBoneCount or 0) .. "\n")
+        MsgC(consoleTitle, "[GCAL] Track debug for " .. tostring(trackID) .. "\n")
+        TrackLine("anim", track.name)
+        TrackLine("model", track.data and track.data.model or "<none>")
+        TrackLine("sequence", track.sequenceName or "<none>")
+        TrackLine("seqID", track.seqID)
+        TrackLine("cycle", math.Round(track.cycle or 0, 4))
+        TrackLine("lerp", math.Round(track.lerpVal or 0, 4))
+        TrackLine("blockCode", track.blockCode or false)
+        TrackLine("blockCodeScope", track.blockCodeScope or "<global>")
+        TrackLine("poseOnlyLegacy", track.poseOnlyLegacy or false)
+        TrackLine("thirdperson", track.thirdperson or false)
+        TrackLine("thirdperson root bone", track.debugThirdPersonRootBone or "<not cached>")
+        TrackLine("thirdperson mode", track.debugThirdPersonMode or "<not evaluated>")
+        TrackLine("thirdperson host", track.debugThirdPersonHost or "gcal")
+        TrackLine("thirdperson model", track.debugThirdPersonModel or "<not rendered>")
+        TrackLine("thirdperson model valid", IsValid(track.thirdpersonModel))
+        TrackLine("thirdperson model visible materials", track.thirdpersonModelHasVisibleMaterials)
+        TrackLine("thirdperson model ready frame", track.thirdpersonModelReadyFrame or "<none>")
+        TrackLine("thirdperson model draw frame", track.debugThirdPersonModelDrawFrame or "<none>")
+        TrackLine("thirdperson model distance", track.debugThirdPersonModelDistance or "<none>")
+        TrackLine("last arm target entity", track.debugTargetEntity or "<none>")
+        TrackLine("debugBoneCount", track.debugBoneCount or 0)
+        TrackLine("gun mode", track.debugGunMode or "off")
+        TrackLine("gun bones moved", track.debugGunBoneCount or 0)
 
         local ply = LocalPlayer()
         local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
@@ -3399,19 +3316,19 @@ if CLIENT then
         vm = renderContext.vm
 
         if not IsValid(vm) then
-            MsgC(Color(255, 176, 93), " - no valid viewmodel entity\n")
+            MsgC(consoleWarn, " - no valid viewmodel entity\n")
             return
         end
 
-        MsgC(Color(236, 242, 255), " - weapon strategy: " .. tostring(renderContext.strategy_id) .. "\n")
+        TrackLine("weapon strategy", renderContext.strategy_id)
 
         local flip = GetLegacyFlipState(weapon)
         if IsValid(weapon) then
-            MsgC(Color(236, 242, 255), " - weapon class: " .. tostring(weapon:GetClass()) .. "\n")
-            MsgC(Color(236, 242, 255), " - ViewModelFlipDefault: " .. tostring(flip.lefty) .. "\n")
-            MsgC(Color(236, 242, 255), " - ViewModelFlip: " .. tostring(flip.flippedNow) .. "\n")
-            MsgC(Color(236, 242, 255), " - flipmode: " .. tostring(flip.flipmode) .. "\n")
-            MsgC(Color(236, 242, 255), " - legacy target side: " .. tostring(flip.targetSide) .. "\n")
+            TrackLine("weapon class", weapon:GetClass())
+            TrackLine("ViewModelFlipDefault", flip.lefty)
+            TrackLine("ViewModelFlip", flip.flippedNow)
+            TrackLine("flipmode", flip.flipmode)
+            TrackLine("legacy target side", flip.targetSide)
         end
 
         vm:SetupBones()
@@ -3425,11 +3342,11 @@ if CLIENT then
 
         local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then
-            MsgC(Color(255, 176, 93), " - no valid arm target entity\n")
+            MsgC(consoleWarn, " - no valid arm target entity\n")
             return
         end
 
-        MsgC(Color(236, 242, 255), " - arm target entity: " .. tostring(targetEnt) .. "\n")
+        TrackLine("arm target entity", targetEnt)
 
         local matched = 0
         local samples = 0
@@ -3440,13 +3357,11 @@ if CLIENT then
             end
             local targetBone = targetEnt:LookupBone(targetBoneName)
             local sourceBoneName = track.sourceBones and track.sourceBones[k] or boneName
-            sourceBoneName = sourceBoneName == "ValveBiped.Bip01_L_Ulna" and "ValveBiped.Bip01_L_Forearm" or
-                sourceBoneName
+            if sourceBoneName == ULNA_L then sourceBoneName = FOREARM_L end
             local modelBone = IsValid(track.model) and track.model:LookupBone(sourceBoneName) or nil
             if targetBone ~= nil and targetBone >= 0 and modelBone ~= nil and modelBone >= 0 then
                 matched = matched + 1
-                MsgC(Color(236, 242, 255),
-                    "   * " .. tostring(targetBoneName) .. " <- " .. tostring(sourceBoneName) .. "\n")
+                MsgC(consoleText, "   * " .. tostring(targetBoneName) .. " <- " .. tostring(sourceBoneName) .. "\n")
 
                 if samples < 3 then
                     local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
@@ -3455,18 +3370,15 @@ if CLIENT then
                         local targetPos = targetMatrix:GetTranslation()
                         local sourcePos = sourceMatrix:GetTranslation()
                         local delta = sourcePos - targetPos
-                        MsgC(
-                            Color(200, 220, 255),
-                            "     source-target delta: " ..
-                            string.format("%.3f, %.3f, %.3f", delta.x, delta.y, delta.z) .. "\n"
-                        )
+                        MsgC(consoleDelta, "     source-target delta: "
+                            .. string.format("%.3f, %.3f, %.3f", delta.x, delta.y, delta.z) .. "\n")
                         samples = samples + 1
                     end
                 end
             end
         end
 
-        MsgC(Color(236, 242, 255), " - matched bones: " .. tostring(matched) .. "\n")
+        TrackLine("matched bones", matched)
     end, nil, "Debug an active GCAL track. Usage: gcal_debug_track [track]")
 
     concommand.Add("gcal_stop", function(_, _, args)
@@ -3474,7 +3386,7 @@ if CLIENT then
 
         if trackID and trackID ~= "" then
             GCAL:StopTrack(trackID)
-            MsgC(Color(93, 210, 180), "[GCAL] Stopped track " .. tostring(trackID) .. "\n")
+            MsgC(consoleTitle, "[GCAL] Stopped track " .. tostring(trackID) .. "\n")
             return
         end
 
@@ -3484,95 +3396,8 @@ if CLIENT then
             stopped = stopped + 1
         end
 
-        MsgC(Color(93, 210, 180), "[GCAL] Stopped " .. tostring(stopped) .. " active track(s)\n")
+        MsgC(consoleTitle, "[GCAL] Stopped " .. tostring(stopped) .. " active track(s)\n")
     end, nil, "Stop one GCAL track, or every active track when no track is provided. Usage: gcal_stop [track]")
-
-    hook.Add("NeedsDepthPass", "GCAL_VManipCamAttachment", function()
-        if next(GCAL.ActiveTracks) == nil or not GCAL.CamBone:GetBool() then return end
-        local ply = LocalPlayer()
-        if not IsValid(ply) or not ply:Alive() then return end
-
-        for trackID, track in pairs(GCAL.ActiveTracks) do
-            if trackID == "legs" then continue end
-            if not IsValid(track.camModel) then continue end
-
-            -- GetAttachments() builds a new table, so the first attachment id is looked up once
-            -- per track (false = the model has none).
-            if track.camAttachmentID == nil then
-                local attachments = track.camModel:GetAttachments() or {}
-                track.camAttachmentID = attachments[1] and attachments[1].id or false
-            end
-            if track.camAttachmentID then
-                track.camModel:SetupBones()
-                track.attachment = track.camModel:GetAttachment(track.camAttachmentID)
-            end
-        end
-    end)
-
-    local inCalcView = false
-    hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, znear, zfar)
-        if inCalcView or next(GCAL.ActiveTracks) == nil then return end
-        -- Skip unless a track drives the camera (cambone attachment),
-        -- to avoid suppressing other CalcView hooks
-        if not GCAL.CamBone:GetBool() then return end
-        if ply:GetViewEntity() ~= ply then return end
-
-        -- In third-person, skip GCAL camera adjustments without blocking other mods
-        if ply:ShouldDrawLocalPlayer() then return end
-
-        local needsView = false
-        for trackID, track in pairs(GCAL.ActiveTracks) do
-            if trackID == "legs" then continue end
-            -- cambone is scaled by (1 - lerpVal): at lerpVal 1 it changes nothing.
-            if track.attachment and (track.lerpVal or 1) < 1 then
-                needsView = true; break
-            end
-        end
-        if not needsView then return end
-
-        -- Compose with other mods' CalcView, then layer cambone on top
-        inCalcView = true
-        local ok, composed = pcall(hook.Run, "CalcView", ply, origin, angles, fov, znear, zfar)
-        inCalcView = false
-        if not ok then
-            ErrorNoHaltWithStack(composed)
-            composed = {}
-        end
-        if not istable(composed) then composed = {} end
-        local baseOrigin = composed.origin or origin
-        local baseAngles = composed.angles or angles
-        local baseFov = composed.fov or fov
-
-        local newOrigin, newAngles, newFov = baseOrigin, baseAngles, baseFov
-        for trackID, track in pairs(GCAL.ActiveTracks) do
-            if trackID == "legs" then continue end
-            if not track.attachment then continue end
-            newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
-        end
-
-        -- Keep drawviewer / znear / zfar / ortho etc. from the composed view. A shallow copy is
-        -- enough (only origin / angles / fov are replaced) and avoids table.Copy deep-copying
-        -- every Vector / Angle each frame.
-        local view = {}
-        for k, v in pairs(composed) do view[k] = v end
-        view.origin = newOrigin
-        view.angles = newAngles
-        view.fov = newFov
-        return view
-    end)
-
-    -- viewmodel_offset was removed; drop the hook left behind by an older version on lua refresh.
-    hook.Remove("CalcViewModelView", "GCAL_ViewModelOffset")
-
-    hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)
-        if VManip and VManip:IsActive() and not ply:ShouldDrawLocalPlayer() then
-            ucmd:RemoveKey(IN_RELOAD)
-        end
-    end)
-
-    hook.Add("TFA_PreReload", "GCAL_VManipPreventTFAReload", function()
-        if VManip and VManip:IsActive() then return "no" end
-    end)
 
     net.Receive("VManip_SimplePlay", function()
         local anim = net.ReadString()
@@ -3628,7 +3453,6 @@ if SERVER then
         return true
     end
 
-    -- A nil / empty trackID stops every track on the receiving clients.
     function GCAL:StopTrack(trackID, recipients)
         net.Start("GCAL_Stop")
         net.WriteString(trackID or "")

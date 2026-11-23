@@ -1,22 +1,19 @@
 --[[
-   █████████    █████████    █████████   █████      
-  ███▒▒▒▒▒███  ███▒▒▒▒▒███  ███▒▒▒▒▒███ ▒▒███       
- ███     ▒▒▒  ███     ▒▒▒  ▒███    ▒███  ▒███       
-▒███         ▒███          ▒███████████  ▒███       
-▒███    █████▒███          ▒███▒▒▒▒▒███  ▒███       
+   █████████    █████████    █████████   █████
+  ███▒▒▒▒▒███  ███▒▒▒▒▒███  ███▒▒▒▒▒███ ▒▒███
+ ███     ▒▒▒  ███     ▒▒▒  ▒███    ▒███  ▒███
+▒███         ▒███          ▒███████████  ▒███
+▒███    █████▒███          ▒███▒▒▒▒▒███  ▒███
 ▒▒███  ▒▒███ ▒▒███     ███ ▒███    ▒███  ▒███      █
  ▒▒█████████  ▒▒█████████  █████   █████ ███████████
-  ▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒▒ 
-                                                    
-                                                    
-                                                    
+  ▒▒▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒   ▒▒▒▒▒ ▒▒▒▒▒▒▒▒▒▒▒
+
         Garry's Mod Compliant Armature Layer
-    Loking at the code? You can find it on github!
+    Looking at the code? You can find it on github!
     https://github.com/Midawek/gcal
     Looking on how to make a gcal addon? Please use the wiki!
     https://midawek.xyz/gcal/wiki
 ]]
-
 
 if SERVER then
     AddCSLuaFile("gcal/gcal_lerp.lua")
@@ -28,7 +25,6 @@ if SERVER then
     AddCSLuaFile("gcal/gcal_mp.lua")
 end
 
--- Kept script-local so error diagnostics and conflict detection share one source.
 local conflictingWorkshopAddons = {
     ["2155366756"] = "VManip (Base)",
     ["3262499127"] = "Chen's VManip Patch",
@@ -39,7 +35,6 @@ local conflictingWorkshopAddons = {
     ["3714993549"] = "Vmanip (Lite)",
     ["349050451"] = "Chuck's Weaponry 2.0",
     ["3627079098"] = "VManip Legs Fix"
-    -- ["1234567890"] = "Example Addon"
 }
 
 local function GCAL_MatchesOwnPath(value)
@@ -122,8 +117,6 @@ local function GCAL_ErrorFrameDetails(stack)
     return firstFrame, externalFrame
 end
 
--- engine.GetAddons() lists every mounted addon; the result is cached for a while because an
--- error that repeats every frame would otherwise rebuild it every frame.
 local mountedConflictCache, mountedConflictExpires = nil, 0
 local function GCAL_MountedConflictLabels()
     if not CLIENT or not engine or not engine.GetAddons then return {} end
@@ -143,12 +136,11 @@ local function GCAL_MountedConflictLabels()
     return mounted
 end
 
--- The same error usually repeats every frame. The engine already prints each one, so GCAL's
--- attribution report is printed once per distinct message (capped so the table stays small).
 local reportedErrors, reportedErrorCount = {}, 0
 local MAX_REPORTED_ERRORS = 64
 
 local gcalLastErrorNotice = 0
+
 hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, stack, addonName, addonID)
     local conflictLabel, conflictID = GCAL_KnownConflictLabel(addonName, addonID)
     if not conflictLabel and not GCAL_IsOwnLuaError(errorMessage, stack, addonName) then return end
@@ -213,7 +205,8 @@ end)
 if CLIENT then
     GCAL = GCAL or {}
     if not GetConVar("gcal_conflict_popup") then
-        CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
+        CreateClientConVar("gcal_conflict_popup", "1", true, false,
+            "Show GCAL's conflict warning popup when incompatible addons are detected.")
     end
 
     function GCAL:RegisterConflictingWorkshopAddon(workshopID, label)
@@ -374,7 +367,9 @@ if CLIENT then
             surface.SetDrawColor(accent.r, accent.g, accent.b, 50 + a * 90)
             surface.DrawOutlinedRect(0, 0, w, h, 1)
             draw.RoundedBox(2, 8, 8, 3, h - 16, Color(accent.r, accent.g, accent.b, 160 + a * 60))
-            draw.SimpleText(btn.GCALText or "", "GCAL.Menu.Body", 19, h * 0.5 - 1, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText(
+                btn.GCALText or "", "GCAL.Menu.Body", 19, h * 0.5 - 1, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER
+            )
         end
 
         local lines = {
@@ -466,7 +461,10 @@ if CLIENT then
             end
 
             DrawPrideTitle(self, "GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15)
-            draw.SimpleText("Conflicting addons can break GCAL in unexpected ways!", "GCAL.Menu.Subtitle", titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+            draw.SimpleText(
+                "Conflicting addons can break GCAL in unexpected ways!", "GCAL.Menu.Subtitle",
+                titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP
+            )
 
             local pillText = tostring((hasLegacyFile and 1 or 0) + #mountedConflicts) .. " detected"
             draw.RoundedBox(5, w - 124, 18, 98, 22, Color(colWarn.r, colWarn.g, colWarn.b, 26))
@@ -518,7 +516,9 @@ if CLIENT then
                 end
 
                 row.Paint = function(self, w, h)
-                    draw.RoundedBox(5, 0, 0, w, h, Color(colPanelSoft.r, colPanelSoft.g, colPanelSoft.b, 150))
+                    draw.RoundedBox(
+                        5, 0, 0, w, h, Color(colPanelSoft.r, colPanelSoft.g, colPanelSoft.b, 150)
+                    )
                     surface.SetDrawColor(self.GCALAccent.r, self.GCALAccent.g, self.GCALAccent.b, 48)
                     surface.DrawOutlinedRect(0, 0, w, h, 1)
                     draw.RoundedBox(2, 8, 8, 3, h - 16, Color(self.GCALAccent.r, self.GCALAccent.g, self.GCALAccent.b, 110))
@@ -543,7 +543,10 @@ if CLIENT then
                 return
             end
 
-            gui.OpenURL("https://steamcommunity.com/profiles/" .. steamID64 .. "/myworkshopfiles?appid=4000&browsefilter=mysubscriptions")
+            gui.OpenURL(
+                "https://steamcommunity.com/profiles/" .. steamID64 ..
+                    "/myworkshopfiles?appid=4000&browsefilter=mysubscriptions"
+            )
         end
 
         local closeButton = vgui.Create("DButton", frame)
@@ -644,7 +647,6 @@ if CLIENT then
         AddPrideChatLine("You are welcome here. You belong here. Be yourself.")
     end)
 
-    -- Conflict Detection Notice
     timer.Simple(1, function()
         local mountedConflicts = GetMountedConflictingWorkshopAddons()
         local hasLegacyFile = file.Exists("autorun/client/cl_vmanip.lua", "LUA")
@@ -652,7 +654,7 @@ if CLIENT then
         if hasLegacyFile or #mountedConflicts > 0 then
             local msg = "!!! GCAL WARNING: Conflicting Workshop addons detected! !!!"
             local msg2 = "Please disable the conflicting Workshop addons. Info in the popup."
-            
+
             MsgC(Color(255, 0, 0), msg .. "\n")
             MsgC(Color(255, 255, 255), msg2 .. "\n")
 
@@ -661,13 +663,19 @@ if CLIENT then
                 for _, addon in ipairs(mountedConflicts) do
                     displays[#displays + 1] = addon.display
                 end
-                MsgC(Color(255, 176, 93), "[GCAL] Conflicting mounted Workshop addons: " .. table.concat(displays, ", ") .. "\n")
+                MsgC(
+                    Color(255, 176, 93),
+                    "[GCAL] Conflicting mounted Workshop addons: " .. table.concat(displays, ", ") .. "\n"
+                )
             end
 
             if ConflictPopupEnabled() then
                 TryShowConflictPopup(hasLegacyFile, mountedConflicts)
             else
-                MsgC(Color(151, 163, 177), "[GCAL] Conflict popup is disabled. Run gcal_conflict_popup 1 to show it again on startup.\n")
+                MsgC(
+                    Color(151, 163, 177),
+                    "[GCAL] Conflict popup is disabled. Run gcal_conflict_popup 1 to show it again on startup.\n"
+                )
             end
         end
     end)
@@ -676,8 +684,7 @@ end
 if SERVER then
     util.AddNetworkString("GCAL_Play")
     util.AddNetworkString("GCAL_Stop")
-    
-    -- Backward compatibility networking
+
     util.AddNetworkString("VManip_SimplePlay")
     util.AddNetworkString("VManip_StopHold")
 

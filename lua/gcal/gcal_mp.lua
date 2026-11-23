@@ -1,14 +1,3 @@
--- GCAL multiplayer TPIK layer.
---
--- Runs on top of the existing GCAL core without changing how local playback works:
---   * The local client announces its own track start/stop/hold-quit (via the existing
---     GCALTrackStarted / GCALTrackStopped / GCALHoldQuit hooks) to the server.
---   * The server relays that to every other client together with the player entity.
---   * Every other client builds a lightweight "remote track" for that player and feeds it
---     through the very same TPIK solver (GCAL.MPInternal.ApplyThirdPersonBones) that the
---     local player uses, so both look identical.
--- Remote tracks live in their own table and never touch GCAL.ActiveTracks.
-
 GCAL = GCAL or {}
 
 local NET_NAME = "GCAL_MP_Sync"
@@ -18,7 +7,6 @@ local MAX_STRING = 96
 if SERVER then
     util.AddNetworkString(NET_NAME)
 
-    -- Token bucket per player so a client can't spam the relay.
     local BUCKET_MAX, BUCKET_REGEN = 20, 10
 
     net.Receive(NET_NAME, function(_, ply)
@@ -57,10 +45,6 @@ if SERVER then
     return
 end
 
-----------------------------------------------------------------------------------------------
--- CLIENT
-----------------------------------------------------------------------------------------------
-
 GCAL.MPEnabled = CreateClientConVar("gcal_mp_tpik", "1", true, false,
     "Render other players' GCAL TPIK animations (multiplayer).")
 
@@ -72,8 +56,6 @@ local function Send(op, trackID, name)
     if op == OP_START then net.WriteString(name) end
     net.SendToServer()
 end
-
--- Announce local track events -------------------------------------------------------------
 
 hook.Add("GCALTrackStarted", "GCAL_MP_Announce", function(trackID, name, track)
     if trackID == "legs" or not track or not track.thirdperson then return end
@@ -93,13 +75,17 @@ hook.Add("GCALHoldQuit", "GCAL_MP_Announce", function(trackID)
     Send(OP_HOLDQUIT, tostring(trackID))
 end)
 
--- Remote tracks ---------------------------------------------------------------------------
+local MAX_TRACKS_PER_PLAYER = 4
+local SEGMENT_STOP_TIMEOUT = 30
+local TRACK_MAX_LIFETIME = 120
 
-local remoteTracks = {} -- [ply][trackID] = track
+local TRACK_MODEL_KEYS = { "model", "camModel", "tpikModel", "thirdpersonModel", "legModel" }
+
+local remoteTracks = {}
 
 local function DestroyTrack(track)
     if not track then return end
-    for _, key in ipairs({ "model", "camModel", "tpikModel", "thirdpersonModel", "legModel" }) do
+    for _, key in ipairs(TRACK_MODEL_KEYS) do
         if IsValid(track[key]) then track[key]:Remove() end
     end
 end
@@ -130,9 +116,8 @@ local function StartRemoteTrack(ply, trackID, name)
 
     RemoveRemoteTrack(ply, trackID)
 
-    -- Cap how many tracks one player can hold on us.
     local tracks = remoteTracks[ply]
-    if tracks and table.Count(tracks) >= 4 then return end
+    if tracks and table.Count(tracks) >= MAX_TRACKS_PER_PLAYER then return end
 
     local track = I.CreateTrack(name, anim)
     if not track or not IsValid(track.model) then DestroyTrack(track) return end
@@ -174,25 +159,20 @@ net.Receive(NET_NAME, function()
     end
 end)
 
--- Per-track update: the core timing (GCAL.MPInternal.AdvanceTrackTiming), minus sounds,
--- callbacks, legacy VManip sync and anything that would touch the local player's tracks.
 local function UpdateRemoteTrack(track)
-    local curtime = CurTime()
-    GCAL.MPInternal.AdvanceTrackTiming(track, curtime, FrameTime())
+    local curTime = CurTime()
+    GCAL.MPInternal.AdvanceTrackTiming(track, curTime, FrameTime())
 
     if track.cycle >= 1 and not track.loop then
         if track.segmented then
-            -- Segment progression isn't synced: wait for the owner's stop message,
-            -- with a failsafe so a lost packet can't leave an arm stuck forever.
             track.segmentFinished = true
-            track.segmentFinishTime = track.segmentFinishTime or curtime
-            return curtime - track.segmentFinishTime > 30
+            track.segmentFinishTime = track.segmentFinishTime or curTime
+            return curTime - track.segmentFinishTime > SEGMENT_STOP_TIMEOUT
         end
         return true
     end
 
-    -- Failsafe for held / looping animations whose stop message never arrived.
-    if curtime - track.realStartTime > 120 then return true end
+    if curTime - track.realStartTime > TRACK_MAX_LIFETIME then return true end
 
     return false
 end
@@ -216,8 +196,6 @@ end)
 hook.Add("EntityRemoved", "GCAL_MP_Cleanup", function(ent)
     if remoteTracks[ent] then RemoveAllRemoteTracks(ent) end
 end)
-
--- Rendering -------------------------------------------------------------------------------
 
 local MAX_DRAW_DIST_SQR = 2000 * 2000
 
