@@ -2004,6 +2004,32 @@ if CLIENT then
         return idx
     end
 
+    -- Element-wise lerp of m toward target, written into m (callers pass the fresh copy that
+    -- GetBoneMatrix returns). Unpack / SetUnpacked move all 16 values in three C calls; the old
+    -- ToTable() + Matrix(t) round trip built five tables per matrix and was ~18x slower.
+    local LerpMatrixInto
+    if isfunction(FindMetaTable("VMatrix").Unpack) and isfunction(FindMetaTable("VMatrix").SetUnpacked) then
+        LerpMatrixInto = function(m, target, f)
+            local a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16 = m:Unpack()
+            local b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15, b16 = target:Unpack()
+            m:SetUnpacked(
+                a1 + (b1 - a1) * f, a2 + (b2 - a2) * f, a3 + (b3 - a3) * f, a4 + (b4 - a4) * f,
+                a5 + (b5 - a5) * f, a6 + (b6 - a6) * f, a7 + (b7 - a7) * f, a8 + (b8 - a8) * f,
+                a9 + (b9 - a9) * f, a10 + (b10 - a10) * f, a11 + (b11 - a11) * f, a12 + (b12 - a12) * f,
+                a13 + (b13 - a13) * f, a14 + (b14 - a14) * f, a15 + (b15 - a15) * f, a16 + (b16 - a16) * f)
+            return m
+        end
+    else
+        LerpMatrixInto = function(m, target, f)
+            local mt, tt = m:ToTable(), target:ToTable()
+            for i = 1, 4 do
+                local mi, ti = mt[i], tt[i]
+                for j = 1, 4 do mi[j] = mi[j] + (ti[j] - mi[j]) * f end
+            end
+            return Matrix(mt)
+        end
+    end
+
     local ULNA_L = "ValveBiped.Bip01_L_Ulna"
     local FOREARM_L = "ValveBiped.Bip01_L_Forearm"
 
@@ -2252,23 +2278,20 @@ if CLIENT then
             if targetBone < 0 then continue end
 
             local gestureMatrix = track.model:GetBoneMatrix(sourceBone)
-            local targetBoneMatrix = gestureMatrix and targetEnt:GetBoneMatrix(targetBone)
-            if targetBoneMatrix then
-                local gestureTable = gestureMatrix:ToTable()
-                local targetTable = targetBoneMatrix:ToTable()
+            if not gestureMatrix then continue end
 
-                for i = 1, 4 do
-                    local gi, ti = gestureTable[i], targetTable[i]
-                    for j = 1, 4 do
-                        gi[j] = gi[j] + (ti[j] - gi[j]) * factor
-                    end
-                end
-
-                local m = Matrix(gestureTable)
-                m:SetScale(scaleVec)
-                targetEnt:SetBoneMatrix(targetBone, m)
-                boneCount = boneCount + 1
+            local m
+            if factor == 0 then
+                m = gestureMatrix -- fully blended in: the gesture pose is the result
+            else
+                local targetBoneMatrix = targetEnt:GetBoneMatrix(targetBone)
+                if not targetBoneMatrix then continue end
+                m = LerpMatrixInto(gestureMatrix, targetBoneMatrix, factor)
             end
+
+            m:SetScale(scaleVec)
+            targetEnt:SetBoneMatrix(targetBone, m)
+            boneCount = boneCount + 1
         end
 
         if IsValid(handsEnt) and handsEnt ~= targetEnt then
@@ -2355,16 +2378,7 @@ if CLIENT then
             else
                 local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if not targetMatrix then continue end
-
-                local mTable = modelMatrix:ToTable()
-                local targetTable = targetMatrix:ToTable()
-                for i = 1, 4 do
-                    local mi, ti = mTable[i], targetTable[i]
-                    for j = 1, 4 do
-                        mi[j] = mi[j] + (ti[j] - mi[j]) * blendFactor
-                    end
-                end
-                m = Matrix(mTable)
+                m = LerpMatrixInto(modelMatrix, targetMatrix, blendFactor)
             end
 
             m:SetScale(scaleVec)
@@ -2466,17 +2480,9 @@ if CLIENT then
         return out
     end
 
+    -- sourceMatrix is a fresh GetBoneMatrix copy and is blended in place.
     local function BlendGunMatrix(sourceMatrix, targetMatrix, blendFactor)
-        local mTable = sourceMatrix:ToTable()
-        local targetTable = targetMatrix:ToTable()
-        for i = 1, 4 do
-            local mi, ti = mTable[i], targetTable[i]
-            for j = 1, 4 do
-                mi[j] = mi[j] + (ti[j] - mi[j]) * blendFactor
-            end
-        end
-
-        local m = Matrix(mTable)
+        local m = blendFactor == 0 and sourceMatrix or LerpMatrixInto(sourceMatrix, targetMatrix, blendFactor)
         m:SetScale(scalevec)
         return m
     end
@@ -2490,12 +2496,16 @@ if CLIENT then
     -- Move everything below parentBone by the same transform its parent went through.
     -- solved: bones that already have a pose this pass; out: bones this pass will write.
     local function CarryGunChildren(ent, parentBone, parentOld, parentNew, solved, out)
-        local delta = GunDelta(parentOld, parentNew)
-        if not delta then return 0 end
-
+        -- Most arm bones only have other (already solved) arm bones below them, so the parent's
+        -- delta is built lazily, the first time an unsolved child needs it.
+        local delta
         local moved = 0
         for _, child in ipairs(GetGunChildBones(ent, parentBone)) do
             if not solved[child] then
+                if delta == nil then
+                    delta = GunDelta(parentOld, parentNew) or false
+                end
+                if not delta then return moved end
                 local childOld = ent:GetBoneMatrix(child)
                 if childOld then
                     local childNew = delta * childOld
@@ -2817,10 +2827,14 @@ if CLIENT then
         -- Re-entrancy guard, scoped to the frame so an error mid-render cannot leave it stuck forever.
         if renderTracksBusy and renderTracksBusyFrame == frame then return end
         if not IsValid(vm) then return end
+        -- One pass per frame, whichever hook comes first. The base gamemode's PostDrawViewModel
+        -- runs after the "VManip" hook and calls PreDrawPlayerHands from inside it, so both hooks
+        -- fire every frame; running the pass twice animated, drew and blended everything twice
+        -- (the second blend against bones the first had already moved).
+        if lastHandsRenderFrame == frame or lastVMRenderFrame == frame then return end
         if fromHandsHook then
             lastHandsRenderFrame = frame
         else
-            if lastHandsRenderFrame == frame or lastVMRenderFrame == frame then return end
             lastVMRenderFrame = frame
         end
 
@@ -3089,13 +3103,27 @@ if CLIENT then
         HudRow("gap")
     end
 
-    local function DrawShadowText(text, font, x, y, color)
-        draw.SimpleText(text, font, x + 1, y + 1, hudShadow)
-        return draw.SimpleText(text, font, x, y, color)
+    -- surface.* directly: draw.SimpleText re-sets the font and measures the text on every call.
+    -- Only measures (GetTextSize) when the caller needs the width.
+    local hudFont
+    local function DrawShadowText(text, font, x, y, color, measure)
+        if font ~= hudFont then
+            surface.SetFont(font)
+            hudFont = font
+        end
+        surface.SetTextColor(hudShadow.r, hudShadow.g, hudShadow.b, hudShadow.a)
+        surface.SetTextPos(x + 1, y + 1)
+        surface.DrawText(text)
+        surface.SetTextColor(color.r, color.g, color.b, color.a or 255)
+        surface.SetTextPos(x, y)
+        surface.DrawText(text)
+        if measure then return (surface.GetTextSize(text)) end
+        return 0
     end
 
     hook.Add("HUDPaint", "GCAL_DebugHUD", function()
         if not GCAL.Debug:GetBool() then return end
+        hudFont = nil -- other HUD code may have changed the font since last frame
 
         local now = CurTime()
         local real = RealTime()
@@ -3161,9 +3189,9 @@ if CLIENT then
             local row = hudRows[i]
             local kind = row.kind
             if kind == "title" then
-                local w = DrawShadowText(tostring(row.a), "GCAL_DebugTitle", x, y, row.d or hudTitle)
+                local w = DrawShadowText(tostring(row.a), "GCAL_DebugTitle", x, y, row.d or hudTitle, row.b ~= nil)
                 if row.b then
-                    local w2 = DrawShadowText(tostring(row.b), "GCAL_DebugText", x + w + 8, y + 3, hudText)
+                    local w2 = DrawShadowText(tostring(row.b), "GCAL_DebugText", x + w + 8, y + 3, hudText, row.c ~= nil)
                     if row.c then
                         DrawShadowText("[" .. row.c .. "]", "GCAL_DebugText", x + w + w2 + 14, y + 3, hudDim)
                     end
@@ -3495,7 +3523,8 @@ if CLIENT then
         local needsView = false
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
-            if track.attachment then
+            -- cambone is scaled by (1 - lerpVal): at lerpVal 1 it changes nothing.
+            if track.attachment and (track.lerpVal or 1) < 1 then
                 needsView = true; break
             end
         end
