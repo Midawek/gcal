@@ -138,7 +138,7 @@ local function StartRemoteTrack(ply, trackID, name)
     if not track or not IsValid(track.model) then DestroyTrack(track) return end
 
     local ok = pcall(function()
-        if not I.SetupSourceModels(track, anim) then error("setup") end
+        if not I.SetupSourceModels(track, anim, true) then error("setup") end
         I.ResolveFirstPersonSequence(track, name, anim)
         I.SetupThirdPerson(track, name, anim)
     end)
@@ -146,9 +146,6 @@ local function StartRemoteTrack(ply, trackID, name)
         DestroyTrack(track)
         return
     end
-
-    -- The cam model is only used for first-person camera shake.
-    if IsValid(track.camModel) then track.camModel:Remove() track.camModel = nil end
 
     track.remoteTrackID = trackID
     remoteTracks[ply] = remoteTracks[ply] or {}
@@ -177,61 +174,11 @@ net.Receive(NET_NAME, function()
     end
 end)
 
--- Per-track update: same timing logic as the core UpdateTrack, minus sounds, callbacks,
--- legacy VManip sync and anything that would touch the local player's tracks.
+-- Per-track update: the core timing (GCAL.MPInternal.AdvanceTrackTiming), minus sounds,
+-- callbacks, legacy VManip sync and anything that would touch the local player's tracks.
 local function UpdateRemoteTrack(track)
     local curtime = CurTime()
-    local dt = FrameTime()
-
-    if track.loop then
-        if track.cycle >= 1 then
-            track.lerpPeakTime = curtime + track.lerpPeak
-            track.cycle = 0
-        end
-        if track.holdQuit then track.loop = false end
-    end
-
-    if track.holdTime then
-        if curtime >= track.holdTime and not track.gestureOnHold and not track.gesturePastHold and not track.holdQuit then
-            track.gestureOnHold = true
-        elseif track.holdQuit and track.gestureOnHold then
-            track.gestureOnHold = false
-            track.gesturePastHold = true
-            track.lerpPeakTime = curtime + track.lerpPeak - (track.holdTimeData or 0)
-        end
-    end
-
-    local speedMultiplier = track.speed * GCAL.PlaybackSpeed:GetFloat()
-    if not track.gestureOnHold then
-        track.cycle = track.cycle + dt * speedMultiplier
-    end
-
-    if not track.poseOnlyLegacy then
-        if IsValid(track.model) then
-            track.model:SetCycle(track.cycle)
-            track.model:InvalidateBoneCache()
-        end
-        if IsValid(track.tpikModel) then
-            track.tpikModel:SetPlaybackRate(speedMultiplier)
-            track.tpikModel:SetCycle(track.cycle)
-            track.tpikModel:InvalidateBoneCache()
-        end
-        if IsValid(track.thirdpersonModel) then
-            track.thirdpersonModel:SetPlaybackRate(speedMultiplier)
-            track.thirdpersonModel:SetCycle(track.cycle)
-            track.thirdpersonModel:InvalidateBoneCache()
-        end
-    end
-
-    if (curtime < track.lerpPeakTime or (track.segmented and not track.lastSegment))
-        and (not track.gestureOnHold or track.gesturePastHold)
-    then
-        track.lerpVal = math.Clamp((track.lerpVal or 1) - (dt * 7) * track.lerpSpeedIn, 0, 1)
-    elseif not track.loop and (not track.gestureOnHold or track.gesturePastHold) then
-        if not track.segmented or track.lastSegment then
-            track.lerpVal = math.Clamp((track.lerpVal or 1) + (dt * 7) * track.lerpSpeedOut, 0, 1)
-        end
-    end
+    GCAL.MPInternal.AdvanceTrackTiming(track, curtime, FrameTime())
 
     if track.cycle >= 1 and not track.loop then
         if track.segmented then

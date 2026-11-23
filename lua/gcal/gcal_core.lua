@@ -481,16 +481,17 @@ end
 -- Cambone handler API. Signature: fn(id, track, ply, origin, angles, fov,
 -- attachment, camAng, camAngInt, lerpVal, handler) -> origin, angles, fov
 
-local default_properang = Angle(-79.75, 0, -90)
-local default_intensity = { 1, 1, 1 }
+-- VManip's cambone reference angle and per-axis intensity, used when an animation sets neither.
+local DEFAULT_CAM_ANG = Angle(-79.75, 0, -90)
+local DEFAULT_CAM_INTENSITY = { 1, 1, 1 }
 
 local function DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
     if not attachment or not attachment.Ang then return origin, angles, fov end
-    local intensity = camAngInt or default_intensity
+    local intensity = camAngInt or DEFAULT_CAM_INTENSITY
     -- Scale by lerp value so cambone fades in/out with the animation
     local lerpScale = 1 - (lerpVal or 0)
     -- VManip-style: full attachment delta scaled by intensity and lerp
-    local camang = attachment.Ang - (camAng or default_properang)
+    local camang = attachment.Ang - (camAng or DEFAULT_CAM_ANG)
     angles = Angle(
         angles.p + camang.p * (intensity[1] or 1) * lerpScale,
         angles.y + camang.y * (intensity[2] or 1) * lerpScale,
@@ -526,8 +527,8 @@ function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
     if not track then return origin, angles, fov end
     local attachment = track.attachment
     if not attachment or not attachment.Ang then return origin, angles, fov end
-    local camAng = track.camAng or default_properang
-    local camAngInt = track.camAngInt or default_intensity
+    local camAng = track.camAng or DEFAULT_CAM_ANG
+    local camAngInt = track.camAngInt or DEFAULT_CAM_INTENSITY
     local lerpVal = track.lerpVal or 1
     for _, handler in ipairs(self.CamBoneHandlerOrder) do
         origin, angles, fov = handler.fn(handler.id, track, ply, origin, angles, fov, attachment, camAng, camAngInt,
@@ -671,36 +672,76 @@ function GCAL:PrepareAnimData(data, hand, name)
     return data
 end
 
-local defaultCamAng = Angle(-79.750, 0, -90)
-local defaultCamIntensity = { 1, 1, 1 }
 local GetTPIKOptionsForAnim
 local GetTPIKSequenceName
 local ResolveTPIKSequence
 
--- Push live-edited fields from a re-registered anim onto the active track
-local function RefreshActiveTrack(track, data)
-    if not IsValid(track.model) then return end
+-- Copies everything a track derives from its registered data. Shared by CreateTrack (new
+-- playback) and RefreshActiveTrack (an animation re-registered while it is playing), so both
+-- read the data the same way. Playback state (cycle, lerp, hold, timers, models) is not touched.
+local function ApplyAnimDataToTrack(track, data)
+    local easingInName = data.easing_in or "Legacy"
+    local easingOutName = data.easing_out or "Legacy"
+
     track.data = data
     track.bones = data.bones or GCAL.GROUPS.LEFT_ARM
     track.sourceBones = data.source_bones or data.bones or GCAL.GROUPS.LEFT_ARM
     track.speed = data.speed or 1
 
-    -- Check for legacy matrix lerp based on easing mode
-    local easingInName = data.easing_in or "Legacy"
-    local easingOutName = data.easing_out or "Legacy"
-    local legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
-
-    -- Legacy VManip animations never get thirdperson TPIK (see DEVELOPER.md).
-    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false and not data.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
+    track.lerpPeak = data.lerp_peak or 0.5
     track.lerpCurve = data.lerp_curve or 1
-    track.legacyMatrixLerp = legacyMatrixLerp
     track.lerpSpeedIn = data.lerp_speed_in or 1
     track.lerpSpeedOut = data.lerp_speed_out or 1
+    track.legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
     -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
     track.easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil
     track.easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil
-    track.lerpPeak = data.lerp_peak or 0.5
+    track.blendWeight = data.blend_weight
 
+    -- Legacy VManip animations never get thirdperson TPIK (see DEVELOPER.md).
+    track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false
+        and not data.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
+    track.tpikOptions = GetTPIKOptionsForAnim and GetTPIKOptionsForAnim(track.name) or nil
+    track.tpikSequenceRequested = GetTPIKSequenceName and GetTPIKSequenceName(track.name) or nil
+    track.tpikBoneRules = nil
+
+    track.canInterrupt = data.can_interrupt ~= false
+    track.onStartCallback = data.on_start
+    track.onFinishCallback = data.on_finish
+    track.onInterruptCallback = data.on_interrupt
+
+    track.viewmodelFov = data.viewmodel_fov
+    track.viewmodelOffset = data.viewmodel_offset
+
+    track.soundVolume = data.sound_volume or 1
+    track.soundLevel = data.sound_level or 75
+    track.soundFlags = data.sound_flags or 0
+
+    track.gunMode = data.gun_mode
+    track.gunBones = data.gun_bones
+    track.gunBonePairs = nil
+
+    track.modelScale = data.model_scale
+    track.modelSkin = data.model_skin
+    track.modelBodygroups = data.model_bodygroups
+
+    track.blockCode = data.block_code or false
+    track.blockCodeScope = data.block_code_scope
+    track.preventQuit = data.preventquit or false
+    track.segmented = data.segmented or false
+    track.camboneEnabled = (data.cambone == nil) or tobool(data.cambone)
+    track.camAng = data.cam_ang or DEFAULT_CAM_ANG
+    track.camAngInt = data.cam_angint or DEFAULT_CAM_INTENSITY
+end
+
+-- Push live-edited fields from a re-registered anim onto the active track
+local function RefreshActiveTrack(track, data)
+    if not IsValid(track.model) then return end
+
+    local oldTpikSeqID = track.tpikSeqID
+    ApplyAnimDataToTrack(track, data)
+
+    -- Only override playback state the new registration actually sets.
     if data.locktoply ~= nil then
         track.lockZ = data.locktoply and EyePos().z or 0
     end
@@ -711,39 +752,6 @@ local function RefreshActiveTrack(track, data)
             track.holdTime = track.startTime + data.holdtime
         end
     end
-
-    -- Update callbacks
-    track.canInterrupt = data.can_interrupt ~= false
-    track.onStartCallback = data.on_start
-    track.onFinishCallback = data.on_finish
-    track.onInterruptCallback = data.on_interrupt
-
-    -- Update visual effects
-    track.viewmodelFov = data.viewmodel_fov
-    track.viewmodelOffset = data.viewmodel_offset
-
-    -- Update sound settings
-    track.soundVolume = data.sound_volume or 1
-    track.soundLevel = data.sound_level or 75
-    track.soundFlags = data.sound_flags or 0
-
-    -- Update blend settings
-    track.blendWeight = data.blend_weight
-
-    -- Update gun bone settings
-    track.gunMode = data.gun_mode
-    track.gunBones = data.gun_bones
-    track.gunBonePairs = nil
-
-    -- Update model settings
-    track.modelScale = data.model_scale
-    track.modelSkin = data.model_skin
-    track.modelBodygroups = data.model_bodygroups
-
-    -- Update TPIK options
-    local oldTpikSeqID = track.tpikSeqID
-    track.tpikOptions = GetTPIKOptionsForAnim and GetTPIKOptionsForAnim(track.name) or nil
-    track.tpikSequenceRequested = GetTPIKSequenceName and GetTPIKSequenceName(track.name) or nil
 
     -- Re-resolve TPIK sequence and update model if changed
     if track.tpikSequenceRequested and ResolveTPIKSequence then
@@ -758,17 +766,7 @@ local function RefreshActiveTrack(track, data)
         track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
     end
 
-    -- Update other control flags
-    track.blockCode = data.block_code or false
-    track.blockCodeScope = data.block_code_scope
-    track.preventQuit = data.preventquit or false
-    track.segmented = data.segmented or false
-    track.camboneEnabled = (data.cambone == nil) or tobool(data.cambone)
-    track.camAng = data.cam_ang or defaultCamAng
-    track.camAngInt = data.cam_angint or defaultCamIntensity
-
-    -- Clear thirdperson cache to force rebuild with new settings
-    track.tpikBoneRules = nil
+    -- Clear per-track caches so they rebuild with the new settings
     track.soundsDone = nil
     track.camAttachmentID = nil
     track.thirdpersonMaterialsConfigured = nil
@@ -989,8 +987,6 @@ if CLIENT then
     local curtime = 0
     local scalevec = Vector(1, 1, 1)
     local scaleflipvec = Vector(1, 1, -1)
-    local properang = Angle(-79.750, 0, -90)
-    local tableintensity = { 1, 1, 1 }
     local angleFlip = Angle(180, 0, 0)
     local angleZero = Angle(0, 0, 0)
 
@@ -1012,7 +1008,9 @@ if CLIENT then
         return "models/" .. modelPath
     end
 
-    local function ResolveSequence(track, animName, anim)
+    -- sequenceOverride replaces anim.sequence (used for TPIK sequences) without copying the anim.
+    local function ResolveSequence(track, animName, anim, sequenceOverride)
+        local explicitSequence = sequenceOverride or anim.sequence
         local candidates = {}
         local seen = {}
 
@@ -1028,7 +1026,7 @@ if CLIENT then
         end
 
         AddCandidate(animName, "animation name")
-        AddCandidate(anim.sequence, "explicit sequence")
+        AddCandidate(explicitSequence, "explicit sequence")
 
         if anim.legacy then
             local lowerAnimName = string.lower(tostring(animName or ""))
@@ -1116,9 +1114,9 @@ if CLIENT then
                 end
 
                 AddNormalizedTarget(animName)
-                AddNormalizedTarget(anim.sequence)
+                AddNormalizedTarget(explicitSequence)
                 AddTokenSubsequenceTargets(animName, AddNormalizedTarget)
-                AddTokenSubsequenceTargets(anim.sequence, AddNormalizedTarget)
+                AddTokenSubsequenceTargets(explicitSequence, AddNormalizedTarget)
 
                 if string.StartsWith(modelBaseName, "c_vmanip") then
                     AddNormalizedTarget(string.sub(modelBaseName, 9))
@@ -1225,9 +1223,7 @@ if CLIENT then
         sequenceName = sequenceName and tostring(sequenceName) or ""
         if sequenceName == "" then return track.seqID, track.sequenceName end
 
-        local tpikAnim = table.Copy(anim)
-        tpikAnim.sequence = sequenceName
-        return ResolveSequence(track, sequenceName, tpikAnim)
+        return ResolveSequence(track, sequenceName, anim, sequenceName)
     end
 
     local function FindLegacySurrogateAnim(name, currentAnim)
@@ -1265,86 +1261,52 @@ if CLIENT then
         return exactMatch or partialMatch
     end
 
-    -- Build the runtime track table from a registered anim.
+    -- Build the runtime track table from a registered anim: playback state here, everything
+    -- derived from the registration in ApplyAnimDataToTrack.
     local function CreateTrack(name, anim)
-        local easingInName = anim.easing_in or "Legacy"
-        local easingOutName = anim.easing_out or "Legacy"
-        local legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
-
-        return {
+        local now = CurTime()
+        local track = {
             name = name,
-            data = anim,
-            startTime = CurTime(),
-            realStartTime = CurTime(),
+            startTime = now,
+            realStartTime = now,
             cycle = anim.startcycle or 0,
             lerpVal = 1, -- 1 = weapon pose, 0 = full animation
+            lastLerpVal = 1,
             model = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH),
-            camboneEnabled = (anim.cambone == nil) or tobool(anim.cambone),
-            camModel = nil,
-            speed = anim.speed or 1,
-            lerpSpeedIn = anim.lerp_speed_in or 1,
-            lerpSpeedOut = anim.lerp_speed_out or 1,
-            -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
-            easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil,
-            easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil,
-            lerpPeak = anim.lerp_peak or 0.5,
-            lerpPeakTime = CurTime() + (anim.lerp_peak or 0.5),
-            legacyMatrixLerp = legacyMatrixLerp,
-            lerpCurve = anim.lerp_curve or 1,
-            holdTime = anim.holdtime and (CurTime() + anim.holdtime) or nil,
+            lerpPeakTime = now + (anim.lerp_peak or 0.5),
+            holdTime = anim.holdtime and (now + anim.holdtime) or nil,
             holdTimeData = anim.holdtime,
             holdQuit = false,
             gestureOnHold = false,
             gesturePastHold = false,
-            blockCode = anim.block_code or false,
-            blockCodeScope = anim.block_code_scope,
-            preventQuit = anim.preventquit or false,
             loop = anim.loop or false,
-            segmented = anim.segmented or false,
             segmentFinished = false,
-            curSegment = nil,
             lastSegment = false,
             segmentCount = 0,
-            camAng = anim.cam_ang or properang,
-            camAngInt = anim.cam_angint or tableintensity,
             lockZ = anim.locktoply and EyePos().z or 0,
-            attachment = nil,
-            bones = anim.bones or GCAL.GROUPS.LEFT_ARM,
-            sourceBones = anim.source_bones or anim.bones or GCAL.GROUPS.LEFT_ARM,
             soundsPlayed = {},
-            -- Legacy VManip animations never get thirdperson TPIK (see DEVELOPER.md).
-            thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and anim.thirdperson ~= false and not anim.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(name)),
-            tpikOptions = GetTPIKOptionsForAnim(name),
-            tpikSequenceRequested = GetTPIKSequenceName(name),
-            lastLerpVal = 1,
             legacyStarted = false,
             poseOnlyLegacy = false,
-            -- New: Callbacks
-            canInterrupt = anim.can_interrupt ~= false,
-            onStartCallback = anim.on_start,
-            onFinishCallback = anim.on_finish,
-            onInterruptCallback = anim.on_interrupt,
-            -- New: Visual effects
-            viewmodelFov = anim.viewmodel_fov,
-            viewmodelOffset = anim.viewmodel_offset,
-            -- New: Sound settings
-            soundVolume = anim.sound_volume or 1,
-            soundLevel = anim.sound_level or 75,
-            soundFlags = anim.sound_flags or 0,
-            -- New: Blend settings
-            blendWeight = anim.blend_weight,
-            -- Gun bone handling
-            gunMode = anim.gun_mode,
-            gunBones = anim.gun_bones,
-            -- New: Model settings
-            modelScale = anim.model_scale,
-            modelSkin = anim.model_skin,
-            modelBodygroups = anim.model_bodygroups,
         }
+        ApplyAnimDataToTrack(track, anim)
+        return track
+    end
+
+    -- Scale / skin / bodygroups from the registration, applied to every model a track owns.
+    local function ApplyModelSettings(track, ent)
+        if not IsValid(ent) then return end
+        if track.modelScale then ent:SetModelScale(track.modelScale) end
+        if track.modelSkin then ent:SetSkin(track.modelSkin) end
+        if track.modelBodygroups then
+            for bg, value in pairs(track.modelBodygroups) do
+                ent:SetBodygroup(bg, value)
+            end
+        end
     end
 
     -- Make a ClientsideModel for the source viewmodel and its cambone clone.
-    local function SetupSourceModels(track, anim)
+    -- skipCamModel: remote (multiplayer) tracks never drive a camera, so they skip the clone.
+    local function SetupSourceModels(track, anim, skipCamModel)
         if not IsValid(track.model) then
             GCAL_Log("Failed: Invalid model path: models/" .. tostring(anim.model))
             return false
@@ -1352,21 +1314,9 @@ if CLIENT then
         track.model:SetNoDraw(true)
         -- Force the model to initialize by setting up bones
         track.model:SetupBones()
+        ApplyModelSettings(track, track.model)
 
-        -- Apply model manipulation parameters
-        if track.modelScale then
-            track.model:SetModelScale(track.modelScale)
-        end
-        if track.modelSkin then
-            track.model:SetSkin(track.modelSkin)
-        end
-        if track.modelBodygroups then
-            for bg, value in pairs(track.modelBodygroups) do
-                track.model:SetBodygroup(bg, value)
-            end
-        end
-
-        if track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
+        if not skipCamModel and track.camboneEnabled and GCAL.CamBone:GetBool() and not IsValid(track.camModel) then
             track.camModel = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH)
         end
         if IsValid(track.camModel) then
@@ -1375,19 +1325,7 @@ if CLIENT then
             track.camModel:SetPos(vector_origin)
             track.camModel:SetAngles(angle_zero)
             track.camModel:SetupBones()
-
-            -- Apply model manipulation to camModel
-            if track.modelScale then
-                track.camModel:SetModelScale(track.modelScale)
-            end
-            if track.modelSkin then
-                track.camModel:SetSkin(track.modelSkin)
-            end
-            if track.modelBodygroups then
-                for bg, value in pairs(track.modelBodygroups) do
-                    track.camModel:SetBodygroup(bg, value)
-                end
-            end
+            ApplyModelSettings(track, track.camModel)
         end
         return true
     end
@@ -1479,6 +1417,18 @@ if CLIENT then
         error("GCAL_Play_NoSequence", 0) -- level 0: no file:line prefix, GCAL:Play matches this string
     end
 
+    -- Hidden ClientsideModel copy of the source model, started on the given sequence.
+    local function CreateTrackModelCopy(track, sequence)
+        local ent = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
+        if not IsValid(ent) then return nil end
+        ent:SetNoDraw(true)
+        ent:ResetSequenceInfo()
+        ent:SetPlaybackRate(1)
+        ent:ResetSequence(sequence)
+        ApplyModelSettings(track, ent)
+        return ent
+    end
+
     -- Resolve the TPIK sequence and build the thirdperson model + clone.
     local function SetupThirdPerson(track, name, anim)
         track.tpikSeqID, track.tpikSequenceName = ResolveTPIKSequence(track, name, anim)
@@ -1491,49 +1441,11 @@ if CLIENT then
         if not track.thirdperson then return end
 
         if track.tpikSeqID ~= track.seqID or track.tpikSequenceRequested then
-            track.tpikModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
-            if IsValid(track.tpikModel) then
-                track.tpikModel:SetNoDraw(true)
-                track.tpikModel:ResetSequenceInfo()
-                track.tpikModel:SetPlaybackRate(1)
-                track.tpikModel:ResetSequence(track.tpikSeqID)
-                track.tpikModel:SetCycle(track.cycle)
-
-                -- Apply model manipulation to tpikModel
-                if track.modelScale then
-                    track.tpikModel:SetModelScale(track.modelScale)
-                end
-                if track.modelSkin then
-                    track.tpikModel:SetSkin(track.modelSkin)
-                end
-                if track.modelBodygroups then
-                    for bg, value in pairs(track.modelBodygroups) do
-                        track.tpikModel:SetBodygroup(bg, value)
-                    end
-                end
-            end
+            track.tpikModel = CreateTrackModelCopy(track, track.tpikSeqID)
+            if track.tpikModel then track.tpikModel:SetCycle(track.cycle) end
         end
 
-        track.thirdpersonModel = ClientsideModel(track.model:GetModel(), RENDERGROUP_BOTH)
-        if IsValid(track.thirdpersonModel) then
-            track.thirdpersonModel:SetNoDraw(true)
-            track.thirdpersonModel:ResetSequenceInfo()
-            track.thirdpersonModel:SetPlaybackRate(1)
-            track.thirdpersonModel:ResetSequence(track.tpikSeqID or track.seqID)
-
-            -- Apply model manipulation to thirdpersonModel
-            if track.modelScale then
-                track.thirdpersonModel:SetModelScale(track.modelScale)
-            end
-            if track.modelSkin then
-                track.thirdpersonModel:SetSkin(track.modelSkin)
-            end
-            if track.modelBodygroups then
-                for bg, value in pairs(track.modelBodygroups) do
-                    track.thirdpersonModel:SetBodygroup(bg, value)
-                end
-            end
-        end
+        track.thirdpersonModel = CreateTrackModelCopy(track, track.tpikSeqID or track.seqID)
     end
 
 -- Pre-flight guard for legacy VManip animations
@@ -1830,7 +1742,7 @@ if CLIENT then
             VManip.AssurePos = false
             VManip.LockToPly = false
             VManip.LockZ = 0
-            VManip.Cam_Ang = properang
+            VManip.Cam_Ang = DEFAULT_CAM_ANG
             VManip.Cam_AngInt = nil
             VManip.StartCycle = 0
             VManip.CurGesture = nil
@@ -1861,42 +1773,36 @@ if CLIENT then
         end
     end
 
-    -- Every field read here is initialised by CreateTrack.
-    local function UpdateTrack(track, trackID)
-        local dt = FrameTime()
-
-        curtime = CurTime()
-
-        HandleSounds(track)
-
+    -- Playback timing shared by local tracks (UpdateTrack) and remote multiplayer tracks
+    -- (gcal_mp.lua): loop restart, hold, cycle advance, model cycle sync, and the lerp toward or
+    -- away from the animation. Returns true when a looping track wrapped around this frame.
+    local function AdvanceTrackTiming(track, now, dt)
+        local looped = false
         if track.loop then
             if track.cycle >= 1 then
-                track.lerpPeakTime = curtime + track.lerpPeak
+                track.lerpPeakTime = now + track.lerpPeak
                 track.cycle = 0
-                -- Restart the sound table so sounds replay on every loop
-                track.startTime = curtime
-                table.Empty(track.soundsPlayed)
-                track.soundsDone = nil
+                looped = true
             end
             if track.holdQuit then track.loop = false end
         end
 
         if track.holdTime then
-            if curtime >= track.holdTime and not track.gestureOnHold and not track.gesturePastHold and not track.holdQuit then
+            if now >= track.holdTime and not track.gestureOnHold and not track.gesturePastHold and not track.holdQuit then
                 track.gestureOnHold = true
             elseif track.holdQuit and track.gestureOnHold then
                 track.gestureOnHold = false
                 track.gesturePastHold = true
-                track.lerpPeakTime = curtime + track.lerpPeak - (track.holdTimeData or 0)
+                track.lerpPeakTime = now + track.lerpPeak - (track.holdTimeData or 0)
             end
         end
 
+        local speedMultiplier = track.speed * GCAL.PlaybackSpeed:GetFloat()
         if not track.gestureOnHold then
-            track.cycle = track.cycle + dt * track.speed * GCAL.PlaybackSpeed:GetFloat()
+            track.cycle = track.cycle + dt * speedMultiplier
         end
 
         if not track.poseOnlyLegacy then
-            local speedMultiplier = track.speed * GCAL.PlaybackSpeed:GetFloat()
             if IsValid(track.model) then
                 track.model:SetCycle(track.cycle)
                 track.model:InvalidateBoneCache()
@@ -1917,12 +1823,27 @@ if CLIENT then
             end
         end
 
-        if (curtime < track.lerpPeakTime or (track.segmented and not track.lastSegment)) and (not track.gestureOnHold or track.gesturePastHold) then
-            track.lerpVal = math.Clamp((track.lerpVal or 1) - (dt * 7) * track.lerpSpeedIn, 0, 1)
-        elseif not track.loop and (not track.gestureOnHold or track.gesturePastHold) then
-            if not track.segmented or track.lastSegment then
-                track.lerpVal = math.Clamp((track.lerpVal or 1) + (dt * 7) * track.lerpSpeedOut, 0, 1)
-            end
+        local notHeld = not track.gestureOnHold or track.gesturePastHold
+        if (now < track.lerpPeakTime or (track.segmented and not track.lastSegment)) and notHeld then
+            track.lerpVal = math.Clamp(track.lerpVal - (dt * 7) * track.lerpSpeedIn, 0, 1)
+        elseif not track.loop and notHeld and (not track.segmented or track.lastSegment) then
+            track.lerpVal = math.Clamp(track.lerpVal + (dt * 7) * track.lerpSpeedOut, 0, 1)
+        end
+
+        return looped
+    end
+
+    -- Every field read here is initialised by CreateTrack.
+    local function UpdateTrack(track, trackID)
+        curtime = CurTime()
+
+        HandleSounds(track)
+
+        if AdvanceTrackTiming(track, curtime, FrameTime()) then
+            -- Restart the sound table so sounds replay on every loop
+            track.startTime = curtime
+            table.Empty(track.soundsPlayed)
+            track.soundsDone = nil
         end
 
         if trackID == "legacy_left_arm" then
@@ -2056,22 +1977,6 @@ if CLIENT then
     local ULNA_L = "ValveBiped.Bip01_L_Ulna"
     local FOREARM_L = "ValveBiped.Bip01_L_Forearm"
 
-    local function BoneLocalMatrix(ent, bone, worldMatrix, worldMatrices)
-        local parent = ent:GetBoneParent(bone)
-        if not parent or parent < 0 then
-            return Matrix(worldMatrix:ToTable()), parent
-        end
-
-        local parentMatrix = worldMatrices and worldMatrices[parent] or ent:GetBoneMatrix(parent)
-        if not parentMatrix then
-            return Matrix(worldMatrix:ToTable()), parent
-        end
-
-        local parentInverse = Matrix(parentMatrix:ToTable())
-        parentInverse:Invert()
-        return parentInverse * worldMatrix, parent
-    end
-
     -- Mirrors the lerp direction logic in UpdateTrack: true while lerpVal is heading toward the animation.
     local function IsBlendingIn(track)
         return (CurTime() < (track.lerpPeakTime or 0) or (track.segmented and not track.lastSegment))
@@ -2105,7 +2010,6 @@ if CLIENT then
     include("gcal/gcal_tpik.lua")
     local tpik = GCAL.InstallTPIK({
         GetTrackBlendFactor = GetTrackBlendFactor,
-        BoneLocalMatrix = BoneLocalMatrix,
         PlaceTrackModel = PlaceTrackModel,
         PlaceTPIKTrackModel = PlaceTPIKTrackModel,
         GetLegacyFlipState = GetLegacyFlipState,
@@ -2122,6 +2026,7 @@ if CLIENT then
         SetupSourceModels = SetupSourceModels,
         ResolveFirstPersonSequence = ResolveFirstPersonSequence,
         SetupThirdPerson = SetupThirdPerson,
+        AdvanceTrackTiming = AdvanceTrackTiming,
         ApplyThirdPersonBones = ApplyThirdPersonBones,
         ApplyCachedThirdPersonBones = ApplyCachedThirdPersonBones
     }

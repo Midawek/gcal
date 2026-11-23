@@ -62,12 +62,7 @@ if CLIENT then
             
         track.model:SetPos(finalPos)
         track.model:SetAngles(legAng)
-        
-        -- Update the internal player model for the legs
-        if IsValid(track.legModel) then
-            track.legModel:SetParent(track.model)
-            track.legModel:AddEffects(EF_BONEMERGE)
-        end
+        -- track.legModel is parented and bonemerged once in VMLegs:PlayAnim, so it follows along.
     end
 end
 
