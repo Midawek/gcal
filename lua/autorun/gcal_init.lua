@@ -122,8 +122,12 @@ local function GCAL_ErrorFrameDetails(stack)
     return firstFrame, externalFrame
 end
 
+-- engine.GetAddons() lists every mounted addon; the result is cached for a while because an
+-- error that repeats every frame would otherwise rebuild it every frame.
+local mountedConflictCache, mountedConflictExpires = nil, 0
 local function GCAL_MountedConflictLabels()
     if not CLIENT or not engine or not engine.GetAddons then return {} end
+    if mountedConflictCache and RealTime() < mountedConflictExpires then return mountedConflictCache end
 
     local mounted = {}
     for _, addon in ipairs(engine.GetAddons()) do
@@ -135,13 +139,27 @@ local function GCAL_MountedConflictLabels()
     end
 
     table.sort(mounted)
+    mountedConflictCache, mountedConflictExpires = mounted, RealTime() + 30
     return mounted
 end
+
+-- The same error usually repeats every frame. The engine already prints each one, so GCAL's
+-- attribution report is printed once per distinct message (capped so the table stays small).
+local reportedErrors, reportedErrorCount = {}, 0
+local MAX_REPORTED_ERRORS = 64
 
 local gcalLastErrorNotice = 0
 hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, stack, addonName, addonID)
     local conflictLabel, conflictID = GCAL_KnownConflictLabel(addonName, addonID)
-    if not GCAL_IsOwnLuaError(errorMessage, stack, addonName) and not conflictLabel then return end
+    if not conflictLabel and not GCAL_IsOwnLuaError(errorMessage, stack, addonName) then return end
+
+    local errorKey = tostring(realm) .. "\0" .. tostring(errorMessage)
+    if reportedErrors[errorKey] then return end
+    if reportedErrorCount >= MAX_REPORTED_ERRORS then
+        reportedErrors, reportedErrorCount = {}, 0
+    end
+    reportedErrors[errorKey] = true
+    reportedErrorCount = reportedErrorCount + 1
 
     local firstFrame, externalFrame = GCAL_ErrorFrameDetails(stack)
     local mountedConflicts = GCAL_MountedConflictLabels()

@@ -2133,6 +2133,20 @@ if CLIENT then
         return vm
     end
 
+    -- GCAL registers its own VManipVMEntity listener (gcal_compat.lua) for addons that call the
+    -- hook themselves. On the path below it never returns anything (no strategy resolveViewModel),
+    -- so hook.Run is only worth calling when someone else listens.
+    local OWN_VM_ENTITY_HOOK = "GCAL_Compat_StrategyVMEntity"
+    local function HasForeignVMEntityListener()
+        if GAMEMODE and GAMEMODE.VManipVMEntity then return true end
+        local listeners = hook.GetTable and hook.GetTable().VManipVMEntity
+        if not listeners then return false end
+        for name in pairs(listeners) do
+            if name ~= OWN_VM_ENTITY_HOOK then return true end
+        end
+        return false
+    end
+
     function GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
         local strategy = self:GetWeaponBaseStrategy(ply, weapon)
         local context = {
@@ -2147,7 +2161,7 @@ if CLIENT then
         if strategy and strategy.resolveViewModel then
             local resolved = strategy.resolveViewModel(ply, weapon, vm, handsEnt, context)
             if IsValid(resolved) then context.vm = resolved end
-        elseif hook.GetTable and hook.GetTable().VManipVMEntity then
+        elseif HasForeignVMEntityListener() then
             local resolved = hook.Run("VManipVMEntity", ply, weapon)
             if IsValid(resolved) then
                 context.strategy_id = "hook"
@@ -2852,11 +2866,11 @@ if CLIENT then
     end
 
     local function RenderThirdPersonTracks(ply, methodOverride, forcedWeapon)
+        if next(GCAL.ActiveTracks) == nil or ply ~= LocalPlayer() then return end
         if not GCAL:IsThirdPersonEnabled() then return end
-        if ply ~= LocalPlayer() or not IsValid(ply) or not ply:Alive() then return end
+        if not IsValid(ply) or not ply:Alive() then return end
         local viewEntity = ply.GetViewEntity and ply:GetViewEntity() or ply
         if not ply:ShouldDrawLocalPlayer() and viewEntity == ply then return end
-        if next(GCAL.ActiveTracks) == nil then return end
 
         local weapon = IsValid(forcedWeapon) and forcedWeapon or ply:GetActiveWeapon()
         local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
@@ -2919,6 +2933,7 @@ if CLIENT then
     end)
 
     hook.Add("ARC9_TPIK_PostSolve", "GCAL_RenderARC9ThirdPerson", function(weapon, ply)
+        if next(GCAL.ActiveTracks) == nil or ply ~= LocalPlayer() then return end
         local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
         if not strategy then return end
         if GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy) ~= "arc9_tpik" then return end
@@ -2927,7 +2942,8 @@ if CLIENT then
     end)
 
     hook.Add("PostPlayerDraw", "GCAL_RenderThirdPersonModels", function(ply)
-        if ply ~= LocalPlayer() or not GCAL:IsThirdPersonEnabled() then return end
+        if next(GCAL.ActiveTracks) == nil or ply ~= LocalPlayer() then return end
+        if not GCAL:IsThirdPersonEnabled() then return end
 
         for _, track in pairs(GCAL.ActiveTracks) do
             local model = track.thirdpersonModel
@@ -2944,10 +2960,10 @@ if CLIENT then
     end)
 
     hook.Add("PreDrawViewModels", "GCAL_RenderLegs", function()
-        local ply = LocalPlayer()
-        if not IsValid(ply) or not ply:Alive() or ply:ShouldDrawLocalPlayer() then return end
         local track = GCAL.ActiveTracks["legs"]
         if not track or not GCAL.Legs then return end
+        local ply = LocalPlayer()
+        if not IsValid(ply) or not ply:Alive() or ply:ShouldDrawLocalPlayer() then return end
         GCAL.Legs:Update(ply)
         if IsValid(track.model) then
             track.model:SetupBones()
@@ -3444,7 +3460,7 @@ if CLIENT then
     end, nil, "Stop one GCAL track, or every active track when no track is provided. Usage: gcal_stop [track]")
 
     hook.Add("NeedsDepthPass", "GCAL_VManipCamAttachment", function()
-        if not GCAL.CamBone:GetBool() then return end
+        if next(GCAL.ActiveTracks) == nil or not GCAL.CamBone:GetBool() then return end
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() then return end
 
@@ -3467,15 +3483,15 @@ if CLIENT then
 
     local inCalcView = false
     hook.Add("CalcView", "GCAL_VManipCam", function(ply, origin, angles, fov, znear, zfar)
-        if inCalcView then return end
+        if inCalcView or next(GCAL.ActiveTracks) == nil then return end
+        -- Skip unless a track drives the camera (cambone attachment),
+        -- to avoid suppressing other CalcView hooks
+        if not GCAL.CamBone:GetBool() then return end
         if ply:GetViewEntity() ~= ply then return end
 
         -- In third-person, skip GCAL camera adjustments without blocking other mods
         if ply:ShouldDrawLocalPlayer() then return end
 
-        -- Skip unless a track drives the camera (cambone attachment),
-        -- to avoid suppressing other CalcView hooks
-        if not GCAL.CamBone:GetBool() then return end
         local needsView = false
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
@@ -3505,8 +3521,11 @@ if CLIENT then
             newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
         end
 
-        -- Keep drawviewer / znear / zfar / ortho etc. from the composed view
-        local view = istable(composed) and table.Copy(composed) or {}
+        -- Keep drawviewer / znear / zfar / ortho etc. from the composed view. A shallow copy is
+        -- enough (only origin / angles / fov are replaced) and avoids table.Copy deep-copying
+        -- every Vector / Angle each frame.
+        local view = {}
+        for k, v in pairs(composed) do view[k] = v end
         view.origin = newOrigin
         view.angles = newAngles
         view.fov = newFov
