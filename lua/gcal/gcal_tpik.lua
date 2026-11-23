@@ -26,6 +26,34 @@ function GCAL.InstallTPIK(deps)
     end
 
     local UPPER_ARM = { "ValveBiped.Bip01_L_UpperArm", "ValveBiped.Bip01_R_UpperArm" }
+
+    -- GetBodyGroups() builds a table of every group and submodel; only the ids are needed.
+    local bodygroupIDs = {}
+    local function GetBodygroupIDs(ent)
+        local model = ent:GetModel() or ""
+        local ids = bodygroupIDs[model]
+        if not ids then
+            ids = {}
+            for _, bg in ipairs(ent:GetBodyGroups() or {}) do ids[#ids + 1] = bg.id end
+            bodygroupIDs[model] = ids
+        end
+        return ids
+    end
+
+    -- model_offset ({ [bone name] = Vector }) resolved to bone indices once per model / options.
+    local function GetCloneOffsetMap(track, model, cloneOffsets)
+        local modelName = model:GetModel() or ""
+        local cached = track.tpikCloneOffsetMap
+        if cached and cached.model == modelName and cached.offsets == cloneOffsets then return cached.map end
+
+        local map = {}
+        for boneName, boneOffset in pairs(cloneOffsets) do
+            local bone = GetBone(model, boneName)
+            if bone then map[bone] = boneOffset end
+        end
+        track.tpikCloneOffsetMap = { model = modelName, offsets = cloneOffsets, map = map }
+        return map
+    end
     local HAND = { "ValveBiped.Bip01_L_Hand", "ValveBiped.Bip01_R_Hand" }
 
     local function GetChildren(ent, bone)
@@ -195,8 +223,8 @@ function GCAL.InstallTPIK(deps)
         model:SetAngles(source:GetAngles())
         model:SetModelScale(track.modelScale or 1)
         model:SetSkin(source:GetSkin())
-        for _, bg in ipairs(source:GetBodyGroups() or {}) do
-            model:SetBodygroup(bg.id, source:GetBodygroup(bg.id))
+        for _, id in ipairs(GetBodygroupIDs(source)) do
+            model:SetBodygroup(id, source:GetBodygroup(id))
         end
         model:SetCycle(track.cycle or 0)
         model:SetupBones()
@@ -206,6 +234,7 @@ function GCAL.InstallTPIK(deps)
         local cloneOffsetY = (Opt(track, "clone_offset_y") or 0) + OptAdd(track, "clone_offset_y")
         local cloneOffsetZ = (Opt(track, "clone_offset_z") or 0) + OptAdd(track, "clone_offset_z")
         local cloneOffsets = Opt(track, "model_offset")
+        local offsetByBone = istable(cloneOffsets) and GetCloneOffsetMap(track, model, cloneOffsets) or nil
 
         -- Whole-clone shift: follow the solved hand, then forward/right/up offsets in render-angle space
         local shift = Vector(0, 0, 0)
@@ -221,22 +250,19 @@ function GCAL.InstallTPIK(deps)
 
         local copies = {}
         for bone = 0, model:GetBoneCount() - 1 do
-            local src = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
-            if src then
-                copies[bone] = Matrix(src:ToTable())
-                local m = copies[bone]
+            -- GetBoneMatrix already returns a fresh copy, safe to modify.
+            local m = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
+            if m then
+                copies[bone] = m
                 local pos = m:GetTranslation()
                 if hasShift then
                     pos = pos + shift
                     m:SetTranslation(pos)
                 end
-                if cloneOffsets then
-                    local boneName = model:GetBoneName(bone)
-                    local boneOffset = cloneOffsets[boneName]
-                    if boneOffset then
-                        pos = pos + boneOffset
-                        m:SetTranslation(pos)
-                    end
+                local boneOffset = offsetByBone and offsetByBone[bone]
+                if boneOffset then
+                    pos = pos + boneOffset
+                    m:SetTranslation(pos)
                 end
                 model:SetBoneMatrix(bone, m)
                 model:SetBonePosition(bone, pos, m:GetAngles())
@@ -418,20 +444,18 @@ function GCAL.InstallTPIK(deps)
             boneCount = boneCount + 1
         end
 
-        -- Carry unmapped children of arm bones
+        -- Carry unmapped children of arm bones. The parent's delta (solved * base^-1) is the same
+        -- for every child, so it is built once per parent instead of once per child.
         local function CarryChildren(parentBone)
             if carried[parentBone] then return end
             carried[parentBone] = true
+            local baseParent, solvedParent = baseMatrices[parentBone], finalMatrices[parentBone]
+            local inverse = baseParent and solvedParent and baseParent:GetInverse()
+            local delta = inverse and solvedParent * inverse
             for _, childBone in ipairs(GetChildren(ply, parentBone)) do
-                if not finalMatrices[childBone] then
-                    local baseParent = baseMatrices[parentBone]
+                if not finalMatrices[childBone] and delta then
                     local baseChild = baseMatrices[childBone]
-                    local solvedParent = finalMatrices[parentBone]
-                    if baseParent and baseChild and solvedParent then
-                        local inv = Matrix(baseParent:ToTable())
-                        inv:Invert()
-                        finalMatrices[childBone] = solvedParent * inv * baseChild
-                    end
+                    if baseChild then finalMatrices[childBone] = delta * baseChild end
                 end
                 if finalMatrices[childBone] then CarryChildren(childBone) end
             end
@@ -447,7 +471,7 @@ function GCAL.InstallTPIK(deps)
         track.thirdpersonSolveFrame = FrameNumber()
         ApplyCached(track, ply)
 
-        track.debugTargetEntity = tostring(ply)
+        track.debugTargetEntity = ply
         track.debugBoneCount = boneCount
         track.debugThirdPersonMode = "direct"
         track.debugThirdPersonPole = "none"

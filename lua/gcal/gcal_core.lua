@@ -1707,8 +1707,8 @@ if CLIENT then
                 if IsValid(ply) then
                     EmitTrackSound(ply, track, overridePath)
                 end
-                track.soundsDone = true
             end
+            track.soundsDone = true
             return
         end
 
@@ -2219,7 +2219,9 @@ if CLIENT then
         local targetRig = flip.targetBones
         local targetEnt = GCAL:ResolveArmTarget(renderContext, targetRig)
         if not IsValid(targetEnt) then return end
-        targetEnt:SetupBones()
+        if not skipVMSetup or (targetEnt ~= vm and targetEnt ~= handsEnt) then
+            targetEnt:SetupBones()
+        end
 
         local boneCount = 0
         -- GCAL.Lerp.Legacy(t, a, b, curve) = a + (b - a) * t ^ curve; t ^ curve is the same for every element.
@@ -2258,7 +2260,7 @@ if CLIENT then
         if IsValid(handsEnt) and handsEnt ~= targetEnt then
             handsEnt:InvalidateBoneCache()
         end
-        track.debugTargetEntity = tostring(targetEnt)
+        track.debugTargetEntity = targetEnt
         track.debugBoneCount = boneCount
     end
 
@@ -2288,7 +2290,8 @@ if CLIENT then
         local targetBones = GetTrackTargetBones(track, weapon, flip)
         local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
         if not IsValid(targetEnt) then return end
-        if not skipVMSetup then
+        -- vm / hands were set up by the caller; a strategy's custom arm target was not.
+        if not skipVMSetup or (targetEnt ~= vm and targetEnt ~= handsEnt) then
             targetEnt:SetupBones()
         end
 
@@ -2331,6 +2334,10 @@ if CLIENT then
             if blendFactor == 0 then
                 -- Fully blended in (most of an animation): the source pose is the result.
                 m = modelMatrix
+            elseif blendFactor == 1 then
+                -- Fully at the rest pose (first / last frame): the target pose is the result.
+                m = targetEnt:GetBoneMatrix(targetBone)
+                if not m then continue end
             else
                 local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if not targetMatrix then continue end
@@ -2354,7 +2361,7 @@ if CLIENT then
         if IsValid(handsEnt) and handsEnt ~= targetEnt then
             handsEnt:InvalidateBoneCache()
         end
-        track.debugTargetEntity = tostring(targetEnt)
+        track.debugTargetEntity = targetEnt
         track.debugBoneCount = boneCount
     end
 
@@ -2461,8 +2468,8 @@ if CLIENT then
     end
 
     local function GunDelta(oldMatrix, newMatrix)
-        local inverse = Matrix(oldMatrix:ToTable())
-        if not inverse:Invert() then return nil end
+        local inverse = oldMatrix:GetInverse()
+        if not inverse then return nil end
         return newMatrix * inverse
     end
 
@@ -2787,18 +2794,16 @@ if CLIENT then
 
         renderTracksBusy = true
         renderTracksBusyFrame = frame
-        local handsEnt = IsValid(hands) and hands or (IsValid(ply) and ply:GetHands() or nil)
-        if IsValid(handsEnt) then
-            handsEnt:SetupBones()
-        end
 
         UpdateTracksForFrame()
 
+        -- Nothing playing: leave the hands / viewmodel bones to the engine.
         if next(GCAL.ActiveTracks) == nil then
             renderTracksBusy = false
             return
         end
 
+        local handsEnt = IsValid(hands) and hands or (IsValid(ply) and ply:GetHands() or nil)
         local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
         vm = renderContext.vm
 
