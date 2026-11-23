@@ -262,6 +262,20 @@ local function GCAL_NormalizeLegacyCompatName(value)
     return value
 end
 
+-- Recent events shown at the bottom of the debug HUD: { time = RealTime(), text, color }.
+GCAL.DebugEvents = GCAL.DebugEvents or {}
+local DEBUG_EVENT_LIMIT = 32
+local debugEventFail = Color(255, 106, 106)
+local debugEventWarn = Color(255, 176, 93)
+local debugEventInfo = Color(236, 242, 255)
+
+function GCAL:AddDebugEvent(text, color)
+    if not CLIENT then return end
+    local events = GCAL.DebugEvents
+    events[#events + 1] = { time = RealTime(), text = tostring(text), color = color or debugEventInfo }
+    if #events > DEBUG_EVENT_LIMIT then table.remove(events, 1) end
+end
+
 local function GCAL_Log(...)
     if not CLIENT or not GCAL.Debug:GetBool() then return end
     local count = select("#", ...)
@@ -269,7 +283,21 @@ local function GCAL_Log(...)
     for i = 1, count do
         parts[i] = tostring(select(i, ...))
     end
-    MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), table.concat(parts, " "), "\n")
+    local text = table.concat(parts, " ")
+    MsgC(Color(255, 255, 0), "[GCAL DEBUG] ", Color(255, 255, 255), text, "\n")
+
+    -- Indented lines are console-only detail (sequence lists etc.); keep the HUD log short.
+    if string.sub(text, 1, 2) ~= "  " then
+        local lower = string.lower(text)
+        local color = nil
+        if string.find(lower, "fail", 1, true) or string.find(lower, "not found", 1, true) then
+            color = debugEventFail
+        elseif string.find(lower, "warning", 1, true) or string.find(lower, "suppressed", 1, true)
+            or string.find(lower, "cannot", 1, true) or string.find(lower, "fallback", 1, true) then
+            color = debugEventWarn
+        end
+        GCAL:AddDebugEvent(text, color)
+    end
 end
 
 function GCAL:NormalizeHand(hand)
@@ -345,6 +373,7 @@ function GCAL:WarnDeprecated(animName, key, message)
         Color(239, 243, 248), "'" .. tostring(key) .. "' on '" .. tostring(animName) .. "' " .. message,
         Color(151, 163, 177), " (" .. DeprecationCallerLocation() .. ")\n"
     )
+    GCAL:AddDebugEvent("deprecated '" .. tostring(key) .. "' on '" .. tostring(animName) .. "'", debugEventWarn)
 end
 
 -- Moves renamed keys onto their new name and strips removed keys, warning once for each.
@@ -2903,24 +2932,220 @@ if CLIENT then
         end
     end)
 
+    -- Debug HUD (gcal_debug 1): center-left, no background, shadowed text.
+    surface.CreateFont("GCAL_DebugTitle", { font = "Roboto", size = 18, weight = 700, antialias = true })
+    surface.CreateFont("GCAL_DebugText", { font = "Consolas", size = 14, weight = 500, antialias = true })
+
+    local HUD_X = 24
+    local HUD_LINE = 15
+    local HUD_EVENT_SECONDS = 12
+
+    local hudShadow = Color(0, 0, 0, 220)
+    local hudTitle = Color(93, 210, 180)
+    local hudTrack = Color(255, 214, 102)
+    local hudText = Color(236, 242, 255)
+    local hudDim = Color(151, 163, 177)
+    local hudGood = Color(120, 220, 140)
+    local hudWarn = Color(255, 176, 93)
+    local hudBad = Color(255, 106, 106)
+    local hudBarBack = Color(255, 255, 255, 40)
+    local hudBarCycle = Color(93, 210, 180)
+    local hudBarBlend = Color(255, 214, 102)
+
+    -- Rows are rebuilt every frame into reused tables, then drawn vertically centred.
+    -- kind: "title" (text, subtitle, tag, color) / "text" / "bar" / "gap"
+    local hudRows = {}
+    local hudTrackIDs = {}
+    local hudRowCount = 0
+
+    local function HudRow(kind, a, b, c, d)
+        hudRowCount = hudRowCount + 1
+        local row = hudRows[hudRowCount]
+        if not row then
+            row = {}
+            hudRows[hudRowCount] = row
+        end
+        row.kind, row.a, row.b, row.c, row.d = kind, a, b, c, d
+    end
+
+    local function HudText(text, color, indent) HudRow("text", text, color or hudText, indent or 0) end
+
+    local function Flag(list, cond, text)
+        if cond then list[#list + 1] = text end
+    end
+
+    local function FormatSeconds(value)
+        return string.format("%.2fs", value or 0)
+    end
+
+    local function TrackPhase(track, now)
+        if track.gestureOnHold then return "hold", hudWarn end
+        if track.segmented and not track.lastSegment then return "segment", hudWarn end
+        if track.loop then return "loop", hudGood end
+        if now < (track.lerpPeakTime or 0) then return "in", hudGood end
+        return "out", hudDim
+    end
+
+    local function AddTrackRows(trackID, track, now)
+        local data = track.data or {}
+        local kind = data.legacy and "legacy" or "gcal"
+        HudRow("title", trackID, track.name or "?", kind, hudTrack)
+
+        local modelPath = data.model or (IsValid(track.model) and track.model:GetModel()) or "<none>"
+        HudText("model  " .. tostring(modelPath), IsValid(track.model) and hudText or hudBad, 1)
+
+        local seqText
+        if track.poseOnlyLegacy then
+            seqText = "seq    <pose only, model has no sequences>"
+        elseif track.seqID == nil or track.seqID == -1 then
+            seqText = "seq    <not found>"
+        else
+            seqText = "seq    " .. tostring(track.sequenceName) .. " (#" .. tostring(track.seqID) .. ")"
+        end
+        HudText(seqText, (track.seqID == -1 or track.seqID == nil) and not track.poseOnlyLegacy and hudBad or hudText, 1)
+
+        if track.tpikSequenceName and track.tpikSequenceName ~= track.sequenceName then
+            HudText("tpik   " .. tostring(track.tpikSequenceName) .. " (#" .. tostring(track.tpikSeqID) .. ")", hudText, 1)
+        end
+
+        local duration = track.duration or 0
+        local speed = (track.speed or 1) * GCAL.PlaybackSpeed:GetFloat()
+        local cycle = track.cycle or 0
+        HudRow("bar", math.Clamp(cycle, 0, 1), hudBarCycle, string.format("cycle %.3f  %s / %s  x%.2f",
+            cycle, FormatSeconds(cycle * duration / math.max(speed, 0.001)),
+            FormatSeconds(duration / math.max(speed, 0.001)), speed))
+
+        local blend = 1 - (track.lerpVal or 1)
+        local phase, phaseColor = TrackPhase(track, now)
+        HudRow("bar", math.Clamp(blend, 0, 1), hudBarBlend, string.format("blend %.2f  %s  weight %.2f",
+            blend, phase, track.blendWeight or 1), phaseColor)
+
+        local info = {}
+        info[#info + 1] = "bones " .. tostring(track.debugBoneCount or 0)
+        if data.sounds and next(data.sounds) then
+            info[#info + 1] = "sounds " .. table.Count(track.soundsPlayed or {}) .. "/" .. table.Count(data.sounds)
+        end
+        if track.segmented then
+            info[#info + 1] = "segment " .. tostring((track.segmentCount or 0) + 1) .. (track.lastSegment and " (last)" or "")
+        end
+        if track.holdTimeData then
+            info[#info + 1] = "hold " .. FormatSeconds(track.holdTimeData) .. (track.holdQuit and " (released)" or "")
+        end
+        if track.debugGunMode then
+            info[#info + 1] = "gun " .. tostring(track.debugGunMode) .. " [" .. tostring(track.debugGunBoneCount or 0) .. "]"
+        end
+        HudText(table.concat(info, "  ·  "), hudText, 1)
+
+        local flags = {}
+        Flag(flags, track.thirdperson, IsValid(track.thirdpersonModel) and "tpik" or "tpik (no model)")
+        Flag(flags, IsValid(track.camModel), track.attachment and "cambone" or "cambone (no attachment)")
+        Flag(flags, data.locktoply, "locktoply")
+        Flag(flags, data.assurepos, "assurepos")
+        Flag(flags, track.canInterrupt == false, "no-interrupt")
+        Flag(flags, track.preventQuit, "prevent-quit")
+        Flag(flags, track.blockCode, "blocks " .. tostring(track.blockCodeScope or "all code"))
+        Flag(flags, GCAL.QueuedAnims[trackID] ~= nil, "queued: " .. tostring(GCAL.QueuedAnims[trackID]))
+        if #flags > 0 then HudText(table.concat(flags, "  "), hudWarn, 1) end
+
+        HudRow("gap")
+    end
+
+    local function DrawShadowText(text, font, x, y, color)
+        draw.SimpleText(text, font, x + 1, y + 1, hudShadow)
+        return draw.SimpleText(text, font, x, y, color)
+    end
+
     hook.Add("HUDPaint", "GCAL_DebugHUD", function()
         if not GCAL.Debug:GetBool() then return end
-        local x, y = 50, 50
-        draw.SimpleText("--- GCAL DEBUG HUD ---", "DermaDefault", x, y, Color(255, 255, 0))
-        y = y + 20
-        draw.SimpleText("Active Tracks: " .. table.Count(GCAL.ActiveTracks), "DermaDefault", x, y, Color(255, 255, 255))
-        y = y + 20
-        for id, track in pairs(GCAL.ActiveTracks) do
-            draw.SimpleText("Track: " .. id, "DermaDefault", x + 10, y, Color(0, 255, 0))
-            y = y + 15
-            draw.SimpleText(" - Anim: " .. tostring(track.name), "DermaDefault", x + 20, y, Color(200, 255, 200))
-            y = y + 15
-            draw.SimpleText(" - Cycle: " .. math.Round(track.cycle, 3), "DermaDefault", x + 20, y, Color(200, 255, 200))
-            y = y + 15
-            draw.SimpleText(" - Lerp: " .. math.Round(track.lerpVal, 3), "DermaDefault", x + 20, y, Color(200, 255, 200))
-            y = y + 15
-            draw.SimpleText(" - Bones: " .. (track.debugBoneCount or 0), "DermaDefault", x + 20, y, Color(200, 255, 200))
-            y = y + 20
+
+        local now = CurTime()
+        local real = RealTime()
+        hudRowCount = 0
+
+        -- Header
+        local ply = LocalPlayer()
+        local weapon = IsValid(ply) and ply:GetActiveWeapon() or nil
+        HudRow("title", "GCAL debug", string.format("%d anims · %d tracks", table.Count(GCAL.Anims or {}),
+            table.Count(GCAL.ActiveTracks)), nil, hudTitle)
+        if IsValid(weapon) then
+            local strategy = GCAL:GetWeaponBaseStrategy(ply, weapon)
+            local flip = GetLegacyFlipState(weapon)
+            HudText("weapon " .. weapon:GetClass() .. "  base " .. tostring(strategy and strategy.id or "default")
+                .. (flip.flipmode and "  flipped" or ""), hudDim)
+        else
+            HudText("weapon <none>", hudDim)
+        end
+        local toggles = {}
+        Flag(toggles, GCAL.ThirdPerson and GCAL.ThirdPerson:GetBool(), "tpik")
+        Flag(toggles, GCAL.CamBone:GetBool(), "cambone")
+        Flag(toggles, GCAL.MuteSounds:GetBool(), "muted")
+        Flag(toggles, GCAL.PlaybackSpeed:GetFloat() ~= 1, string.format("speed x%.2f", GCAL.PlaybackSpeed:GetFloat()))
+        if #toggles > 0 then HudText("on: " .. table.concat(toggles, " "), hudDim) end
+        HudRow("gap")
+
+        -- Tracks, sorted so the list doesn't jump around
+        local ids = SnapshotTrackIDs(hudTrackIDs)
+        table.sort(ids, function(a, b) return tostring(a) < tostring(b) end)
+        if #ids == 0 then
+            HudText("no active tracks", hudDim)
+            HudRow("gap")
+        end
+        for i = 1, #ids do
+            local track = GCAL.ActiveTracks[ids[i]]
+            if track then AddTrackRows(ids[i], track, now) end
+        end
+
+        -- Recent events (debug log + deprecations)
+        local events = GCAL.DebugEvents
+        local shown = false
+        for i = #events, math.max(1, #events - 7), -1 do
+            local event = events[i]
+            if real - event.time <= HUD_EVENT_SECONDS then
+                if not shown then
+                    HudRow("title", "recent events", nil, nil, hudTitle)
+                    shown = true
+                end
+                HudText(string.format("%5.1fs  %s", real - event.time, event.text), event.color)
+            end
+        end
+
+        -- Measure, then draw vertically centred on the left edge.
+        local height = 0
+        for i = 1, hudRowCount do
+            local kind = hudRows[i].kind
+            height = height + ((kind == "title" and 20) or (kind == "gap" and 6) or (kind == "bar" and 17) or HUD_LINE)
+        end
+
+        local x = HUD_X
+        local y = math.max(8, math.floor(ScrH() * 0.5 - height * 0.5))
+        for i = 1, hudRowCount do
+            local row = hudRows[i]
+            local kind = row.kind
+            if kind == "title" then
+                local w = DrawShadowText(tostring(row.a), "GCAL_DebugTitle", x, y, row.d or hudTitle)
+                if row.b then
+                    local w2 = DrawShadowText(tostring(row.b), "GCAL_DebugText", x + w + 8, y + 3, hudText)
+                    if row.c then
+                        DrawShadowText("[" .. row.c .. "]", "GCAL_DebugText", x + w + w2 + 14, y + 3, hudDim)
+                    end
+                end
+                y = y + 20
+            elseif kind == "gap" then
+                y = y + 6
+            elseif kind == "bar" then
+                local bx, barWidth = x + 12, 120
+                surface.SetDrawColor(hudShadow)
+                surface.DrawRect(bx + 1, y + 6, barWidth, 3)
+                surface.SetDrawColor(hudBarBack)
+                surface.DrawRect(bx, y + 5, barWidth, 3)
+                surface.SetDrawColor(row.b)
+                surface.DrawRect(bx, y + 5, math.floor(barWidth * row.a), 3)
+                DrawShadowText(row.c, "GCAL_DebugText", bx + barWidth + 8, y, row.d or hudText)
+                y = y + 17
+            else
+                DrawShadowText(row.a, "GCAL_DebugText", x + row.c * 12, y, row.b)
+                y = y + HUD_LINE
+            end
         end
     end)
 

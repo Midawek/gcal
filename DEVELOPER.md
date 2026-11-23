@@ -1032,7 +1032,7 @@ If an animation does not play:
 - Run `gcal_debug_sequences <animation>` and confirm the model exposes the sequence you expect.
 - Check that `model` is relative to `models/`, for example `myaddon/c_tool.mdl`, not `models/myaddon/c_tool.mdl`.
 - Confirm the target track is not already occupied if your addon is intentionally avoiding replacement with `GCAL:IsTrackActive`.
-- Enable `gcal_debug 1` and watch the HUD for active track, cycle, lerp, and bone counts.
+- Enable `gcal_debug 1` and watch the HUD on the left of the screen. For each active track it shows the model, the resolved sequence (red when not found), cycle and blend bars with timing and phase (in / out / hold / loop / segment), bones moved, sounds played, segment and hold state, gun mode, and flags such as TPIK, cambone, no-interrupt, block_code and queued anims. Below that it lists the last few debug messages and deprecation warnings, colour-coded.
 
 If the hand does not move:
 
@@ -1051,7 +1051,7 @@ If thirdperson looks wrong:
 
 Use these console commands during development:
 
-- `gcal_debug 1`: Enables the real-time HUD and console logging.
+- `gcal_debug 1`: Enables the real-time HUD (tracks, weapon base, recent events) and console logging. Your own addon can push lines into the HUD event list with `GCAL:AddDebugEvent(text, color)`.
 - `gcal_playback_speed <multiplier>`: Changes global GCAL playback speed. The menu exposes this as a slider from `0.1` to `3`.
 - `gcal_mute_sounds 1`: Mutes sounds emitted by GCAL animations.
 - `gcal_sound_pitch <pitch>`: Changes GCAL animation sound pitch. The menu uses `75`, `100`, and `140` presets.
