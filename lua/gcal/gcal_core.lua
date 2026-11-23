@@ -2677,6 +2677,24 @@ if CLIENT then
     end
     GCAL.MPInternal.CollectTPIKBaseMatrices = CollectTPIKBaseMatrices
 
+    -- The gun-bones pass (PreDrawViewModel) and the arm pass (PreDrawPlayerHands / PostDrawViewModel)
+    -- run in the same frame with the same weapon and viewmodel, so they share one render context
+    -- instead of resolving the weapon base's viewmodel (resolveViewModel / VManipVMEntity) twice.
+    local frameContext = { frame = -1 }
+    local function GetFrameRenderContext(ply, weapon, vm, handsEnt)
+        local cached = frameContext
+        local frame = FrameNumber()
+        if cached.frame == frame and cached.ply == ply and cached.weapon == weapon
+            and cached.inputVM == vm and cached.handsEnt == handsEnt then
+            return cached.context
+        end
+
+        local context = GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
+        cached.frame, cached.ply, cached.weapon, cached.inputVM, cached.handsEnt, cached.context =
+            frame, ply, weapon, vm, handsEnt, context
+        return context
+    end
+
     local lastGunBonesFrame = -1
     hook.Add("PreDrawViewModel", "GCAL_GunBones", function(vm, ply, weapon)
         if next(GCAL.ActiveTracks) == nil then return end
@@ -2697,7 +2715,7 @@ if CLIENT then
 
         if type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
 
-        local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, ply:GetHands())
+        local renderContext = GetFrameRenderContext(ply, weapon, vm, ply:GetHands())
         local targetVM = renderContext.vm
         if not IsValid(targetVM) then return end
         targetVM:SetupBones()
@@ -2804,7 +2822,7 @@ if CLIENT then
         end
 
         local handsEnt = IsValid(hands) and hands or (IsValid(ply) and ply:GetHands() or nil)
-        local renderContext = GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)
+        local renderContext = GetFrameRenderContext(ply, weapon, vm, handsEnt)
         vm = renderContext.vm
 
         if IsValid(vm) then vm:SetupBones() end
