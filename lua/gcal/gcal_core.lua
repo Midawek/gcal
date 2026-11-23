@@ -125,13 +125,18 @@ if CLIENT then
 
         name = tostring(name or "")
         local values = self.AnimationAdjustments[name]
-        if values and values[field] ~= nil then return tonumber(values[field]) or 0 end
-
-        if cookie and cookie.GetNumber then
-            return cookie.GetNumber(self:AnimationAdjustmentCookieKey(name, field), 0)
+        if not values then
+            values = {}
+            self.AnimationAdjustments[name] = values
         end
 
-        return 0
+        local value = values[field]
+        if value == nil then
+            value = cookie and cookie.GetNumber and cookie.GetNumber(self:AnimationAdjustmentCookieKey(name, field), 0) or 0
+            values[field] = value
+        end
+
+        return tonumber(value) or 0
     end
 
     function GCAL:SetAnimationAdjustmentValue(name, field, value)

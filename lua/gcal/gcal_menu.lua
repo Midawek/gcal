@@ -288,11 +288,13 @@ local function AnimEnabled(name)
         return not GCAL.Menu.DisabledAnims[name]
     end
 
+    local enabled = true
     if cookie and cookie.GetNumber then
-        return cookie.GetNumber(AnimCookieKey(name), 1) ~= 0
+        enabled = cookie.GetNumber(AnimCookieKey(name), 1) ~= 0
     end
 
-    return true
+    GCAL.Menu.DisabledAnims[name] = not enabled
+    return enabled
 end
 
 function GCAL:IsAnimEnabled(name)
@@ -315,11 +317,13 @@ local function AnimTPIKEnabled(name)
         return not GCAL.Menu.DisabledTPIK[name]
     end
 
+    local enabled = true
     if cookie and cookie.GetNumber then
-        return cookie.GetNumber(AnimTPIKCookieKey(name), 1) ~= 0
+        enabled = cookie.GetNumber(AnimTPIKCookieKey(name), 1) ~= 0
     end
 
-    return true
+    GCAL.Menu.DisabledTPIK[name] = not enabled
+    return enabled
 end
 
 function GCAL:IsAnimTPIKEnabled(name)
@@ -345,12 +349,13 @@ local function AnimSoundOverride(name)
         return GCAL.Menu.SoundOverrides[name] ~= "" and GCAL.Menu.SoundOverrides[name] or nil
     end
 
+    local value = ""
     if cookie and cookie.GetString then
-        local value = cookie.GetString(AnimSoundCookieKey(name), "")
-        return value ~= "" and value or nil
+        value = cookie.GetString(AnimSoundCookieKey(name), "")
     end
 
-    return nil
+    GCAL.Menu.SoundOverrides[name] = value
+    return value ~= "" and value or nil
 end
 
 function GCAL:GetAnimSoundOverride(name)
