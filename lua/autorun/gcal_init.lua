@@ -24,11 +24,8 @@ if SERVER then
     AddCSLuaFile("gcal/gcal_core.lua")
     AddCSLuaFile("gcal/gcal_compat.lua")
     AddCSLuaFile("gcal/gcal_legs.lua")
-    AddCSLuaFile("gcal/gcal_base_anims.lua")
     AddCSLuaFile("gcal/gcal_menu.lua")
     AddCSLuaFile("gcal/gcal_mp.lua")
-    AddCSLuaFile("gcal/gcal_debug_menu.lua")
-    AddCSLuaFile("autorun/client/gcal_menu_autorun.lua")
 end
 
 -- Kept script-local so error diagnostics and conflict detection share one source.
@@ -194,34 +191,6 @@ hook.Add("OnLuaError", "GCAL_UnhandledException", function(errorMessage, realm, 
         end
     end
 end)
-
-if CLIENT then
-    concommand.Add("gcal_debug_unhandled_error", function(_, _, args)
-        if string.lower(tostring(args[1] or "")) == "conflict" then
-            local workshopID = "2155366756"
-            local label = conflictingWorkshopAddons[workshopID]
-            MsgC(Color(255, 176, 93), "[GCAL] Triggering a synthetic known-conflict attribution report.\n")
-            hook.Run(
-                "OnLuaError",
-                "Synthetic GCAL conflict-correlation test. No addon actually failed.",
-                "client",
-                {
-                    {File = "addons/gcal/lua/autorun/gcal_init.lua", Line = 1, Function = "debug_test"},
-                    {File = "addons/vmanip/lua/autorun/client/cl_vmanip.lua", Line = 1, Function = "debug_test"}
-                },
-                label,
-                workshopID
-            )
-            return
-        end
-
-        MsgC(Color(255, 176, 93), "[GCAL] Triggering a deliberate clientside Lua error for handler testing.\n")
-
-        timer.Simple(0, function()
-            error("Deliberate GCAL unhandled-error test. This error is expected.")
-        end)
-    end, nil, "Test GCAL error reporting. Use 'gcal_debug_unhandled_error conflict' to simulate known-conflict attribution.")
-end
 
 if CLIENT then
     GCAL = GCAL or {}
@@ -610,9 +579,7 @@ if CLIENT then
     include("gcal/gcal_compat.lua")
     include("gcal/gcal_mp.lua")
     include("gcal/gcal_legs.lua")
-    include("gcal/gcal_base_anims.lua")
-    include("gcal/gcal_debug_menu.lua")
-    
+
     print("GCAL (Client) Initialized! :3")
 
     timer.Simple(1, function()
@@ -686,23 +653,6 @@ if CLIENT then
             end
         end
     end)
-
-    concommand.Add("gcal_debug_conflict_popup", function()
-        local mountedConflicts = GetMountedConflictingWorkshopAddons()
-        local hasLegacyFile = file.Exists("autorun/client/cl_vmanip.lua", "LUA")
-
-        if not hasLegacyFile and #mountedConflicts == 0 then
-            mountedConflicts = {
-                {
-                    id = "debug",
-                    label = "Forced debug preview",
-                    display = "Forced debug preview [not a real conflict]"
-                }
-            }
-        end
-
-        TryShowConflictPopup(hasLegacyFile, mountedConflicts)
-    end, nil, "Force-open the GCAL conflict popup for debugging.")
 end
 
 if SERVER then
@@ -717,8 +667,7 @@ if SERVER then
     include("gcal/gcal_core.lua")
     include("gcal/gcal_compat.lua")
     include("gcal/gcal_mp.lua")
-    include("gcal/gcal_base_anims.lua")
-    
+
     print("GCAL (Server) Initialized! :3")
 
     concommand.Add("gcal_menu_open", function(ply)

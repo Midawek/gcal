@@ -72,10 +72,6 @@ if CLIENT then
         "Global GCAL thirdperson TPIK roll offset.")
     GCAL.TPIKTargetRadiusAdd = CreateClientConVar("gcal_tpik_target_radius_add", "0", true, false,
         "Global GCAL thirdperson TPIK target radius adjustment.")
-    GCAL.TPIKPoleSourceAdd = CreateClientConVar("gcal_tpik_pole_source_add", "0", true, false,
-        "Global GCAL thirdperson TPIK source pole blend adjustment.")
-    GCAL.TPIKPoleNativeAdd = CreateClientConVar("gcal_tpik_pole_native_add", "0", true, false,
-        "Global GCAL thirdperson TPIK native pole blend adjustment.")
     GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false,
         "Global GCAL thirdperson TPIK smoothing adjustment.")
     GCAL.CamBone = CreateClientConVar("gcal_cambone", "1", true, false,
@@ -108,8 +104,6 @@ if CLIENT then
         tpik_ang_y = true,
         tpik_ang_r = true,
         tpik_target_radius_add = true,
-        tpik_pole_source_add = true,
-        tpik_pole_native_add = true,
         tpik_smoothing_add = true,
         clone_offset_x = true,
         clone_offset_y = true,
@@ -509,11 +503,7 @@ function GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)
     local camAng = track.camAng or default_properang
     local camAngInt = track.camAngInt or default_intensity
     local lerpVal = track.lerpVal or 1
-    local handlers = self.CamBoneHandlerOrder
-    if #handlers == 0 then
-        return DefaultCamBoneHandler(track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
-    end
-    for _, handler in ipairs(handlers) do
+    for _, handler in ipairs(self.CamBoneHandlerOrder) do
         origin, angles, fov = handler.fn(handler.id, track, ply, origin, angles, fov, attachment, camAng, camAngInt,
             lerpVal, handler)
     end
@@ -798,8 +788,6 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
         end
     end
 end
-
-GCAL.RegisterAnim = GCAL.RegisterAnim
 
 function GCAL:RegisterHandAnim(name, hand, data)
     if not name or not data then return end
@@ -2960,159 +2948,81 @@ if CLIENT then
         end
     end, GCAL_AnimAutocomplete, "Play a registered GCAL animation. Usage: gcal_play <animation> [track]")
 
+    -- gcal_debug_sequences <animation>            -> checks a registered animation's model + sequence
+    -- gcal_debug_sequences <model.mdl> [sequence]  -> checks any model, optionally one sequence
     concommand.Add("gcal_debug_sequences", function(_, _, args)
-            local name = args[1]
-            if not name or name == "" then
-                MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_debug_sequences <animation>\n")
-                return
-            end
+        local target = args[1]
+        if not target or target == "" then
+            MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_debug_sequences <animation> | <model.mdl> [sequence]\n")
+            return
+        end
 
-            local anim = GCAL.Anims[name]
-            if not anim then
-                MsgC(Color(255, 106, 106), "[GCAL] Unknown animation: " .. tostring(name) .. "\n")
-                return
-            end
-
+        local modelPath, sequenceName
+        local anim = GCAL.Anims[target]
+        if anim then
             if not anim.model then
-                MsgC(Color(255, 106, 106), "[GCAL] Animation has no model: " .. tostring(name) .. "\n")
+                MsgC(Color(255, 106, 106), "[GCAL] Animation has no model: " .. tostring(target) .. "\n")
                 return
             end
-
-            local normalizedPath = NormalizeModelPath(anim.model)
-            MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for " .. tostring(name) .. "\n")
-            MsgC(Color(236, 242, 255), " - model (original): " .. tostring(anim.model) .. "\n")
-            MsgC(Color(236, 242, 255), " - model (normalized): " .. normalizedPath .. "\n")
+            modelPath = anim.model
+            sequenceName = anim.sequence or target
+            MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for animation " .. tostring(target) .. "\n")
             MsgC(Color(236, 242, 255), " - explicit sequence: " .. tostring(anim.sequence or "<none>") .. "\n")
+        elseif string.EndsWith(string.lower(target), ".mdl") then
+            modelPath = target
+            sequenceName = args[2]
+            MsgC(Color(93, 210, 180), "[GCAL] Sequence debug for model " .. tostring(target) .. "\n")
+        else
+            MsgC(Color(255, 106, 106), "[GCAL] Unknown animation (and not a .mdl path): " .. tostring(target) .. "\n")
+            return
+        end
 
-            local model = ClientsideModel(normalizedPath, RENDERGROUP_BOTH)
-            if not IsValid(model) then
-                MsgC(Color(255, 106, 106), "[GCAL] Could not create model: " .. normalizedPath .. "\n")
-                MsgC(Color(255, 176, 93), "   ! Check that the file exists at: garrysmod/" .. normalizedPath .. "\n")
-                return
-            end
+        local normalizedPath = NormalizeModelPath(modelPath)
+        MsgC(Color(236, 242, 255), " - model: " .. normalizedPath .. "\n")
 
-            model:SetNoDraw(true)
-            model:SetupBones()
+        local model = ClientsideModel(normalizedPath, RENDERGROUP_BOTH)
+        if not IsValid(model) then
+            MsgC(Color(255, 106, 106), "[GCAL] Could not create model: " .. normalizedPath .. "\n")
+            MsgC(Color(255, 176, 93), "   ! Check that the file exists at: garrysmod/" .. normalizedPath .. "\n")
+            return
+        end
 
-            local sequenceList = model.GetSequenceList and (model:GetSequenceList() or {}) or {}
-            MsgC(Color(236, 242, 255), " - sequences (" .. tostring(#sequenceList) .. "):\n")
+        model:SetNoDraw(true)
+        model:SetupBones()
 
-            if #sequenceList == 0 then
-                MsgC(Color(255, 176, 93),
-                    "   ! Model loaded with zero sequences!\n")
-                MsgC(Color(255, 176, 93),
-                    "   ! This usually means:\n")
-                MsgC(Color(255, 176, 93),
-                    "     - The model is a prop/ragdoll without animations\n")
-                MsgC(Color(255, 176, 93),
-                    "     - The model failed to load completely\n")
-                MsgC(Color(255, 176, 93),
-                    "     - The .mdl file is missing associated .vvd/.vtx files\n")
+        local sequenceList = model.GetSequenceList and (model:GetSequenceList() or {}) or {}
+        MsgC(Color(236, 242, 255), " - sequences (" .. tostring(#sequenceList) .. "):\n")
+
+        if #sequenceList == 0 then
+            MsgC(Color(255, 176, 93), "   ! Model loaded with zero sequences. It is a prop/ragdoll without animations,\n")
+            MsgC(Color(255, 176, 93), "     failed to load completely, or is missing its .vvd/.vtx files.\n")
+            model:Remove()
+            return
+        end
+
+        for i, name in ipairs(sequenceList) do
+            MsgC(Color(236, 242, 255), "   [" .. i .. "] " .. tostring(name) .. "\n")
+        end
+
+        if sequenceName and sequenceName ~= "" then
+            local seqID = model:LookupSequence(sequenceName)
+            if seqID ~= -1 then
+                MsgC(Color(93, 210, 180), " ✓ Sequence '" .. sequenceName .. "' found (ID: " .. seqID .. ")\n")
+                MsgC(Color(236, 242, 255), "   - Duration: " .. model:SequenceDuration(seqID) .. " seconds\n")
             else
-                for _, sequenceName in ipairs(sequenceList) do
-                    MsgC(Color(236, 242, 255), "   * " .. tostring(sequenceName) .. "\n")
-                end
-
-                -- Check if the registered sequence exists
-                local targetSeq = anim.sequence or name
-                local seqID = model:LookupSequence(targetSeq)
-
-                if seqID ~= -1 then
-                    MsgC(Color(93, 210, 180), " ✓ Sequence '" .. targetSeq .. "' found! (ID: " .. seqID .. ")\n")
-                    local duration = model:SequenceDuration(seqID)
-                    MsgC(Color(236, 242, 255), "   - Duration: " .. duration .. " seconds\n")
-                else
-                    MsgC(Color(255, 106, 106), " ✗ Sequence '" .. targetSeq .. "' NOT FOUND!\n")
-
-                    -- Try case-insensitive match
-                    local lowerTarget = string.lower(targetSeq)
-                    for _, seqName in ipairs(sequenceList) do
-                        if string.lower(seqName) == lowerTarget then
-                            MsgC(Color(255, 176, 93), "   ! Found case-insensitive match: '" .. seqName .. "'\n")
-                            MsgC(Color(255, 176, 93), "   ! Update your animation to use the correct case\n")
-                        end
+                MsgC(Color(255, 106, 106), " ✗ Sequence '" .. sequenceName .. "' NOT FOUND\n")
+                local lowerTarget = string.lower(sequenceName)
+                for _, name in ipairs(sequenceList) do
+                    if string.lower(name) == lowerTarget then
+                        MsgC(Color(255, 176, 93), "   ! Case-insensitive match: '" .. name .. "'. Fix the case in your registration.\n")
                     end
                 end
             end
-
-            model:Remove()
-        end, GCAL_AnimAutocomplete,
-        "Print the runtime model sequence list for a registered animation. Usage: gcal_debug_sequences <animation>")
-
-    concommand.Add("gcal_test_sequence", function(_, _, args)
-        if #args < 2 then
-            MsgC(Color(255, 176, 93), "[GCAL] Usage: gcal_test_sequence <model_path> <sequence_name>\n")
-            MsgC(Color(236, 242, 255), "Example: gcal_test_sequence c_vmanip.mdl swimforward\n")
-            MsgC(Color(236, 242, 255), "         gcal_test_sequence models/c_vmanip.mdl swimforward\n")
-            return
         end
 
-        local modelPath = args[1]
-        local sequenceName = args[2]
-
-        local normalizedPath = NormalizeModelPath(modelPath)
-
-        MsgC(Color(93, 210, 180), "[GCAL] Testing model/sequence combination\n")
-        MsgC(Color(236, 242, 255), " - Input model: " .. modelPath .. "\n")
-        MsgC(Color(236, 242, 255), " - Normalized: " .. normalizedPath .. "\n")
-        MsgC(Color(236, 242, 255), " - Sequence: " .. sequenceName .. "\n")
-
-        local testModel = ClientsideModel(normalizedPath, RENDERGROUP_BOTH)
-
-        if not IsValid(testModel) then
-            MsgC(Color(255, 106, 106), "[GCAL] ✗ Model failed to load!\n")
-            MsgC(Color(255, 176, 93), "   Check that the file exists at: garrysmod/" .. normalizedPath .. "\n")
-            return
-        end
-
-        MsgC(Color(93, 210, 180), "[GCAL] ✓ Model loaded successfully\n")
-
-        testModel:SetNoDraw(true)
-        testModel:SetupBones()
-
-        local sequenceList = testModel.GetSequenceList and testModel:GetSequenceList() or {}
-        MsgC(Color(236, 242, 255), " - Model has " .. #sequenceList .. " sequences\n")
-
-        if #sequenceList == 0 then
-            MsgC(Color(255, 176, 93), "   ! WARNING: Model has zero sequences!\n")
-            MsgC(Color(255, 176, 93), "   ! This model may be a prop/ragdoll without animations\n")
-            testModel:Remove()
-            return
-        end
-
-        MsgC(Color(236, 242, 255), " - Available sequences:\n")
-        for i, seqName in ipairs(sequenceList) do
-            MsgC(Color(236, 242, 255), "   [" .. i .. "] " .. seqName .. "\n")
-        end
-
-        local seqID = testModel:LookupSequence(sequenceName)
-
-        if seqID == -1 then
-            MsgC(Color(255, 106, 106), "[GCAL] ✗ Sequence '" .. sequenceName .. "' NOT FOUND!\n")
-
-            -- Try case-insensitive match
-            local lowerSeq = string.lower(sequenceName)
-            MsgC(Color(255, 176, 93), "   Attempting case-insensitive matches...\n")
-            local foundMatch = false
-            for i, seqName in ipairs(sequenceList) do
-                if string.lower(seqName) == lowerSeq then
-                    MsgC(Color(93, 210, 180), "   ✓ Found case-insensitive match: '" .. seqName .. "'\n")
-                    foundMatch = true
-                end
-            end
-
-            if not foundMatch then
-                MsgC(Color(255, 176, 93), "   ! No case-insensitive matches found\n")
-                MsgC(Color(255, 176, 93), "   ! Try one of the sequences listed above\n")
-            end
-        else
-            MsgC(Color(93, 210, 180), "[GCAL] ✓ Sequence found! (ID: " .. seqID .. ")\n")
-            local duration = testModel:SequenceDuration(seqID)
-            MsgC(Color(236, 242, 255), "   - Duration: " .. duration .. " seconds\n")
-        end
-
-        testModel:Remove()
-    end, nil, "Test a model and sequence combination directly. Usage: gcal_test_sequence <model_path> <sequence_name>")
+        model:Remove()
+    end, GCAL_AnimAutocomplete,
+        "Print the sequences of a registered animation's model, or of any model. Usage: gcal_debug_sequences <animation> | <model.mdl> [sequence]")
 
     concommand.Add("gcal_debug_track", function(_, _, args)
         local trackID = args[1] or "legacy_left_arm"

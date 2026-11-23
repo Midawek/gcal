@@ -1062,22 +1062,15 @@ Use these console commands during development:
 - `gcal_tpik_offset_x/y/z <value>`: Changes global thirdperson TPIK source placement without affecting firstperson placement.
 - `gcal_tpik_angle_p/y/r <value>`: Changes global thirdperson TPIK source angle offsets.
 - `gcal_tpik_target_radius_add <value>`: Adds to the thirdperson hand-goal clamp radius. Negative values tighten it; positive values loosen it.
-- `gcal_tpik_pole_source_add <value>` / `gcal_tpik_pole_native_add <value>`: No longer used (IK solver removed). The convars still exist for backward compat but have no effect.
 - `gcal_tpik_smoothing_add <value>`: Adds to the shoulder-local TPIK smoothing speed. The effective value is clamped to `0..60`.
 - `gcal_clone_offset_x/y/z <value>`: Shifts the whole thirdperson model clone in render-angle space without affecting firstperson placement.
 - `gcal_list_anims`: Lists every animation currently registered in GCAL.
-- `gcal_list_files`: Lists all legacy VManip files GCAL has discovered and loaded.
 - `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.
-- `gcal_debug_sequences <animation>`: Prints the runtime sequence list for the animation model and warns when the model exposes zero sequences.
+- `gcal_debug_sequences <animation>`: Prints the runtime sequence list for the animation model, checks its sequence, and warns when the model exposes zero sequences.
+- `gcal_debug_sequences <model.mdl> [sequence]`: Same check for any model, without registering an animation first.
 - `gcal_debug_track [track]`: Dumps the current track state, selected weapon-base strategy, current and last arm target entity, matched bones, source/target deltas, and active flip-side information.
 - `gcal_stop [track]`: Stops one track, or all active tracks when no track is provided.
-- `gcal_dynabase_status`: Shows whether DynaBase is detected and lists queued GCAL DynaBase sources.
 - `gcal_menu_open`: Opens the GCAL desktop-window menu.
-- `gcal_debug_menu`: Dumps GCAL menu state and attempts a menu refresh.
-- `gcal_debug_conflict_popup`: Force-opens the conflict warning popup, using mounted conflicts or a labeled debug preview when none are present.
-- `gcal_debug_unhandled_error`: Throws a deliberate clientside GCAL error through the normal engine error pipeline. Add `conflict` to simulate engine attribution to a known conflict and test correlation output.
-- `gcal_show_now`: Opens and refreshes the current GCAL menu window immediately.
-- `gcal_rebuild_menu`: Removes and rebuilds the current GCAL menu window.
 - `gcal_cambone <0|1>`: Toggles the global camera bone (view-angle driving) feature. The menu also exposes this as a "Cambone enabled: on/off" button.
 
 ---

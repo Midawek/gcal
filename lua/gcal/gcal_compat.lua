@@ -416,27 +416,6 @@ hook.Add("InitPostEntity", "GCAL_ImportLegacy_Late", function()
     timer.Simple(0.1, GCAL_ImportLegacy)
 end)
 
-if CLIENT then
-    concommand.Add("gcal_list_files", function()
-        local files = GCAL.ImportedFiles or {}
-        MsgC(Color(93, 210, 180), "[GCAL] Imported legacy files (" .. #files .. "):\n")
-
-        for _, path in ipairs(files) do
-            MsgC(Color(236, 242, 255), " - " .. tostring(path) .. "\n")
-        end
-    end)
-
-    concommand.Add("gcal_dynabase_status", function()
-        local count = table.Count(GCAL.DynaBase.Sources or {})
-        MsgC(Color(93, 210, 180), "[GCAL] DynaBase available: " .. tostring(GCAL:IsDynaBaseAvailable()) .. "\n")
-        MsgC(Color(93, 210, 180), "[GCAL] Queued DynaBase sources: " .. count .. "\n")
-
-        for name in pairs(GCAL.DynaBase.Sources or {}) do
-            MsgC(Color(236, 242, 255), " - " .. tostring(name) .. "\n")
-        end
-    end)
-end
-
 -- Weapon Base Compatibility Hooks
 if CLIENT then
     -- ent:VManip() fallback for MW Base lives in autorun/aaa_gcal_shim.lua so it installs first.

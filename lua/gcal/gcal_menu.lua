@@ -8,7 +8,6 @@ GCAL.Menu = GCAL.Menu or {}
 GCAL.Menu.Loaded = true
 
 -- Initialize ConVar, defaulting if needed
-CreateClientConVar("gcal_context_menu", "1", true, false, "Legacy toggle for the old GCAL context panel.")
 CreateClientConVar("gcal_menu_keep_open", "1", true, false, "Keep the GCAL desktop window open after releasing the context menu key.")
 if not GetConVar("gcal_conflict_popup") then
     CreateClientConVar("gcal_conflict_popup", "1", true, false, "Show GCAL's conflict warning popup when incompatible addons are detected.")
@@ -31,8 +30,6 @@ for _, adjustmentConVar in ipairs({
     {"gcal_tpik_angle_y", "Global GCAL thirdperson TPIK yaw offset."},
     {"gcal_tpik_angle_r", "Global GCAL thirdperson TPIK roll offset."},
     {"gcal_tpik_target_radius_add", "Global GCAL thirdperson TPIK target radius adjustment."},
-    {"gcal_tpik_pole_source_add", "Global GCAL thirdperson TPIK source pole blend adjustment."},
-    {"gcal_tpik_pole_native_add", "Global GCAL thirdperson TPIK native pole blend adjustment."},
     {"gcal_tpik_smoothing_add", "Global GCAL thirdperson TPIK smoothing adjustment."}
 }) do
     if not GetConVar(adjustmentConVar[1]) then
@@ -239,8 +236,6 @@ local tpikAdjustmentFields = {
     {key = "tpik_ang_y", convar = "gcal_tpik_angle_y", label = "TPIK Yaw", min = -45, max = 45, decimals = 1},
     {key = "tpik_ang_r", convar = "gcal_tpik_angle_r", label = "TPIK Roll", min = -45, max = 45, decimals = 1},
     {key = "tpik_target_radius_add", convar = "gcal_tpik_target_radius_add", label = "TPIK Target Radius +/-", min = -38, max = 80, decimals = 1},
-    {key = "tpik_pole_source_add", convar = "gcal_tpik_pole_source_add", label = "TPIK Source Pole +/-", min = -1, max = 1, decimals = 2},
-    {key = "tpik_pole_native_add", convar = "gcal_tpik_pole_native_add", label = "TPIK Native Pole +/-", min = -1, max = 1, decimals = 2},
     {key = "tpik_smoothing_add", convar = "gcal_tpik_smoothing_add", label = "TPIK Smoothing +/-", min = -18, max = 42, decimals = 1}
 }
 
@@ -1365,9 +1360,7 @@ concommand.Add("gcal_menu_open", function()
         MsgC(Color(255, 0, 0), "[GCAL ERROR] Menu system not initialized!\n")
         return
     end
-    
-    RunConsoleCommand("gcal_context_menu", "1")
-    
+
     local success, err = pcall(function()
         GCAL.Menu.OpenFrame()
     end)
