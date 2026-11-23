@@ -183,10 +183,6 @@ local function UpdateRemoteTrack(track)
     local curtime = CurTime()
     local dt = FrameTime()
 
-    if track.delayStart and track.delayStart > 0 and curtime < track.realStartTime + track.delayStart then
-        return false
-    end
-
     if track.loop then
         if track.cycle >= 1 then
             track.lerpPeakTime = curtime + track.lerpPeak

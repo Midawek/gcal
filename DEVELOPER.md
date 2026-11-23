@@ -134,7 +134,7 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `segmented`          | bool         | Segment mode. Use `GCAL:PlaySegment(trackID, sequence, lastSegment, sounds)` after `GCALSegmentFinish`.                                               |
 | `holdtime`           | number       | Time in seconds after which the animation freezes (useful for interactions).                                                                          |
 | `sounds`             | table        | A dictionary of `[path] = time` to play audio during playback.                                                                                        |
-| `hand`               | string       | Friendly hand selector: `left`, `second`, `offhand`, `right`, or `both`. Sets default `bones` and `group_name`. Aliases: `arm`, `bone_group`, `bonegroup`. |
+| `hand`               | string       | Friendly hand selector: `left`, `second`, `offhand`, `right`, or `both`. Sets default `bones` and `group_name`. Aliases: `arm`, `bone_group`. |
 | `bones`              | table/string | Target bone names to manipulate, or a hand alias such as `"right"` / `"both"`. Defaults from `hand`.                                                  |
 | `source_hand`        | string       | Optional source hand to read from in the animation model. Useful when the target hand is right but the model sequence is authored on left-hand bones. Aliases: `source_arm`. |
 | `source_bones`       | table/string | Optional source bone names to read from. Defaults to `bones`, or from `source_hand` when provided.                                                    |
@@ -153,29 +153,57 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `assurepos`          | bool         | If true, parents the gesture model to the viewmodel each frame. The strictest lock — guarantees perfect alignment but costs a reparent per weapon swap.  |
 | **NEW FEATURES** | | |
 | `can_interrupt`      | bool         | If false, this animation cannot be interrupted and will play to completion. New animations will be queued (default: true). |
-| `on_start`           | function     | Callback function called when animation starts. Signature: `function(trackID, animName, track)`. Aliases: `onstart`, `OnStart`. |
-| `on_finish`          | function     | Callback function called when animation finishes naturally. Signature: `function(trackID, animName, track)`. Aliases: `onfinish`, `OnFinish`. |
-| `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. Aliases: `oninterrupt`, `OnInterrupt`. |
-| `on_cycle`           | function     | Callback function called periodically during playback (every 10% cycle). Signature: `function(trackID, animName, track, cycle)`. Aliases: `oncycle`, `OnCycle`. |
-| `delay_start`        | number       | Delay in seconds before animation actually starts playing (default: 0). Aliases: `delaystart`. |
-| `ease_in_time`       | number       | Duration of the blend-in in seconds. Overrides `lerp_speed_in` (a full blend lasts `1 / (7 * lerp_speed_in)` seconds otherwise). Aliases: `easeintime`. |
-| `ease_out_time`      | number       | Duration of the blend-out in seconds. Overrides `lerp_speed_out`. Aliases: `easeouttime`. |
-| `play_condition`     | function     | Conditional playback function. Return false to prevent playback. Signature: `function(animName, trackID, animData)`. Aliases: `playcondition`, `condition`. |
-| `viewmodel_fov`      | number       | View FOV to reach while the animation is fully blended in (e.g. `50` zooms in); fades in and out with the animation. First person only. Aliases: `vm_fov`, `fov`. |
-| `viewmodel_offset`   | Vector       | Shifts the viewmodel by (forward, right, up) units while the animation is blended in. Aliases: `vm_offset`. |
-| `screen_shake`       | table        | Screen shake parameters: `{amplitude, frequency, duration}`. Aliases: `screenshake`. |
-| `sound_volume`       | number       | Volume level for animation sounds (default: 75). Aliases: `soundvolume`. |
-| `sound_level`        | number       | Sound level/attenuation for animation sounds (default: 75). Aliases: `soundlevel`. |
-| `sound_flags`        | number       | Sound flags for animation sounds (default: 0). Aliases: `soundflags`. |
-| `blend_mode`         | string       | Reserved. Only `"normal"` is implemented; `"additive"` and `"override"` are accepted but currently behave like `"normal"`. Aliases: `blendmode`. |
-| `blend_weight`       | number       | Caps how strongly the animation overrides the rest pose (0-1, default 1), in first person and TPIK. Not applied to legacy animations. Aliases: `blendweight`. |
-| `model_scale`        | number       | Scale multiplier for the source animation model. Aliases: `modelscale`. |
-| `model_skin`         | number       | Skin index for the source animation model. Aliases: `modelskin`. |
-| `model_bodygroups`   | table        | Bodygroup settings for the source model: `{groupID = value, ...}`. Aliases: `modelbodygroups`. |
-| `disable_pred`       | bool         | Reserved; currently has no effect (GCAL playback is clientside and unpredicted). |
+| `on_start`           | function     | Callback function called when animation starts. Signature: `function(trackID, animName, track)`. |
+| `on_finish`          | function     | Callback function called when animation finishes naturally. Signature: `function(trackID, animName, track)`. |
+| `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. |
+| `ease_in_time`       | number       | Duration of the blend-in in seconds. Overrides `lerp_speed_in` (a full blend lasts `1 / (7 * lerp_speed_in)` seconds otherwise). |
+| `ease_out_time`      | number       | Duration of the blend-out in seconds. Overrides `lerp_speed_out`. |
+| `viewmodel_fov`      | number       | View FOV to reach while the animation is fully blended in (e.g. `50` zooms in); fades in and out with the animation. First person only. |
+| `viewmodel_offset`   | Vector       | Shifts the viewmodel by (forward, right, up) units while the animation is blended in. |
+| `sound_volume`       | number       | Volume for animation sounds, 0-1 (default: 1). |
+| `sound_level`        | number       | Sound level/attenuation for animation sounds (default: 75). |
+| `sound_flags`        | number       | Sound flags for animation sounds (default: 0). |
+| `blend_weight`       | number       | Caps how strongly the animation overrides the rest pose (0-1, default 1), in first person and TPIK. Not applied to legacy animations. |
+| `model_scale`        | number       | Scale multiplier for the source animation model. |
+| `model_skin`         | number       | Skin index for the source animation model. |
+| `model_bodygroups`   | table        | Bodygroup settings for the source model: `{groupID = value, ...}`. |
 | `local_only`         | bool         | Prevents network synchronization (clientside only, default: false). |
-| `gun_mode`           | string       | Firstperson weapon handling: `"follow"` carries the weapon bones along with the animated hand so the gun stays in the grip; `"animated"` copies the gun bone(s) from the animation model (see `gun_bones`) and carries the rest of the gun with them. Default: off. `true` means `"follow"`. Not applied to legacy animations. Aliases: `gunmode`. |
-| `gun_bones`          | string/table | For `gun_mode = "animated"`: the weapon bone to copy, a list of bones, or a map `{ ["source model bone"] = "viewmodel bone" }`. When omitted GCAL tries common names (`ValveBiped.weapon_bone`, `weapon_bone`, `Weapon`, `tag_weapon`, ...) that exist in both models; if nothing matches it behaves like `"follow"`. Aliases: `gunbones`. |
+| `gun_mode`           | string       | Firstperson weapon handling: `"follow"` carries the weapon bones along with the animated hand so the gun stays in the grip; `"animated"` copies the gun bone(s) from the animation model (see `gun_bones`) and carries the rest of the gun with them. Default: off. `true` means `"follow"`. Not applied to legacy animations. |
+| `gun_bones`          | string/table | For `gun_mode = "animated"`: the weapon bone to copy, a list of bones, or a map `{ ["source model bone"] = "viewmodel bone" }`. When omitted GCAL tries common names (`ValveBiped.weapon_bone`, `weapon_bone`, `Weapon`, `tag_weapon`, ...) that exist in both models; if nothing matches it behaves like `"follow"`. |
+
+### Deprecated and Removed Fields
+
+Registering an animation with any of these still works. GCAL prints one `[GCAL] Deprecated:` console warning per animation and field, naming the file and line that registered it.
+
+**Renamed** (still work under the old name for now, move to the new one):
+
+| Old | New |
+| :-- | :-- |
+| `onstart`, `OnStart` | `on_start` |
+| `onfinish`, `OnFinish` | `on_finish` |
+| `oninterrupt`, `OnInterrupt` | `on_interrupt` |
+| `easeintime` / `easeouttime` | `ease_in_time` / `ease_out_time` |
+| `vm_fov`, `fov` | `viewmodel_fov` |
+| `vm_offset` | `viewmodel_offset` |
+| `soundvolume`, `soundlevel`, `soundflags` | `sound_volume`, `sound_level`, `sound_flags` |
+| `blendweight` | `blend_weight` |
+| `modelscale`, `modelskin`, `modelbodygroups` | `model_scale`, `model_skin`, `model_bodygroups` |
+| `gunmode`, `gunbones` | `gun_mode`, `gun_bones` |
+| `bonegroup` | `bone_group` (or `hand`) |
+| `thirdperson_model`, `thirdperson_smoothing`, … (any `thirdperson_*` TPIK key) | The same key without the prefix, in `GCAL:RegisterTPIKOptions` |
+
+`sound_volume` used to double as the sound level (default 75). It is now a 0-1 volume; values above 1 warn and are used as `sound_level`.
+
+**Removed** (ignored; do this instead):
+
+| Field | Replacement |
+| :-- | :-- |
+| `on_cycle` | Poll `GCAL:GetCycle(trackID)` from a `Think` hook. |
+| `delay_start` | `timer.Simple(delay, function() GCAL:Play(name) end)` |
+| `play_condition` | Check your condition before calling `GCAL:Play`, or return `false` from the `VManipPrePlayAnim` hook. |
+| `screen_shake` | Call `util.ScreenShake` from `on_start`. |
+| `blend_mode` | None. Only `"normal"` was ever implemented. |
+| `disable_pred` | None. It never had an effect. |
 
 ---
 
@@ -483,7 +511,7 @@ GCAL:RegisterTPIKOptions("radio_hold", {
 
 You can also assign directly with `GCAL.TPIKOptions.radio_hold = { ... }`. Use `sequence` when the firstperson sequence is not suitable for thirdperson posing. GCAL keeps the normal `model`/`camModel` on the firstperson sequence and creates a separate hidden TPIK source model on the requested sequence. The thirdperson prop clone follows the TPIK sequence too, so addon-owned props stay matched to the thirdperson arm pose.
 
-`RegisterTPIKOptions` validates option keys against a whitelist — unknown keys print a console warning. Deprecated keys (`pole_source`, `pole_native`) also warn. Option types are normalized (`number` via `tonumber`, `bool` via `tobool`, `string` via `tostring`).
+`RegisterTPIKOptions` validates option keys against a whitelist — unknown keys print a console error. Removed and renamed keys print a one-time `[GCAL] Deprecated:` warning (see the table after the option list). Option types are normalized (`number` via `tonumber`, `bool` via `tobool`, `string` via `tostring`).
 
 Valid TPIK option keys:
 
@@ -504,31 +532,21 @@ Valid TPIK option keys:
 | `clone_offset_x` | number | 0 | Forward/back position offset for the whole third-person model clone, relative to the player's aim. The clone already follows the solved hand, so this is a fine-tuning offset. |
 | `clone_offset_y` | number | 0 | Right/left position offset. |
 | `clone_offset_z` | number | 0 | Up/down position offset. |
-| `pole_source` | number | — | **Deprecated.** Ignored (IK solver removed). |
-| `pole_native` | number | — | **Deprecated.** Ignored (IK solver removed). |
-| **NEW FEATURES** | | | |
-| `blend_strength` | number | 1.0 | Overall blend strength multiplier for animation vs rest pose (0-1). |
-| `blend_curve` | number | 1.0 | Custom blend curve exponent (overrides animation's lerp_curve for TPIK). |
 | `blend_per_bone` | table | — | Per-bone blend overrides: `{ "BoneName" = 0.5, ... }`. Partial bone name matching supported. |
-| `lock_bones` | table | — | List of bone names (or partial matches) to lock to rest pose: `{ "Hand", "Finger" }`. |
-| `ignore_bones` | table | — | List of bone names (or partial matches) to skip entirely: `{ "Wrist", "Ulna" }`. |
+| `lock_bones` | table | — | List of bone names (or partial matches) to keep at the rest pose: `{ "Hand", "Finger" }`. |
 | `scale_bones` | table | — | Per-bone scale multipliers: `{ "UpperArm" = 1.2, "Hand" = 0.9 }`. Scales distance from rest pose. |
-| `model_skin` | number | — | Override skin index for the thirdperson prop clone. |
-| `model_bodygroups` | table | — | Bodygroup overrides for the prop clone: `{ groupID = value, ... }`. |
-| `model_material` | string | — | Custom material override for the prop clone. |
-| `render_mode` | string | — | Render mode for the prop clone: `"normal"`, `"transcolor"`, `"transalpha"`, etc. |
-| `render_fx` | string | — | Render effects for the prop clone: `"none"`, `"hologram"`, `"distort"`, etc. |
-| `offset_relative_to` | string | — | Bone name to use as offset reference instead of view angles: `"ValveBiped.Bip01_Spine4"`. |
-| `offset_space` | string | `"view"` | Offset coordinate space: `"view"` (camera-relative), `"world"`, `"local"` (bone-relative). |
-| `angular_offset_x` | number | 0 | Pitch rotation offset for bones (degrees). |
-| `angular_offset_y` | number | 0 | Yaw rotation offset for bones (degrees). |
-| `angular_offset_z` | number | 0 | Roll rotation offset for bones (degrees). |
-| `distance_fade` | bool | false | Enables distance-based alpha fading. |
-| `fade_start` | number | 100 | Distance (HU) where fading begins. |
-| `fade_end` | number | 300 | Distance (HU) where animation fully fades out. |
-| `update_rate` | number | — | Custom update rate in Hz (e.g., 30 for 30fps updates). Defaults to render framerate. |
-| `interpolate` | bool | true | Enables smooth interpolation between updates (when update_rate is set). |
-| `force_update` | bool | false | Forces update every frame regardless of optimization. |
+
+Deprecated and removed TPIK keys (each prints a one-time warning):
+
+| Key | Status |
+| :-- | :-- |
+| `thirdperson_model`, `thirdperson_model_bone`, `thirdperson_model_max_distance`, `thirdperson_hide_materials`, `thirdperson_keep_materials`, `thirdperson_target_radius`, `thirdperson_smoothing` | Renamed to the key without the `thirdperson_` prefix. They are also moved over automatically when set on the `RegisterAnim` table. |
+| `ignore_bones` | Renamed to `lock_bones` (both kept the bone at its rest pose). Lists are merged. |
+| `blend_strength` | Removed. Use `blend_weight` on the animation. |
+| `blend_curve` | Removed. Use `lerp_curve` or `easing_in` / `easing_out` on the animation. |
+| `distance_fade`, `fade_start`, `fade_end` | Removed. Remote players already stop rendering past 2000 units. |
+| `pole_source`, `pole_native` | Removed (the IK solver is gone). |
+| `model_skin`, `model_bodygroups`, `model_material`, `render_mode`, `render_fx`, `offset_relative_to`, `offset_space`, `angular_offset_x/y/z`, `update_rate`, `interpolate`, `force_update` | Removed. They were accepted but never implemented. |
 
 The per-animation `offset_x/y/z` values are added on top of the global convar adjustments (`gcal_tpik_offset_x/y/z`) and per-animation cookie adjustments. They are applied after clamping, so they can push the arm beyond the clamp range.
 
@@ -615,63 +633,40 @@ GCAL:RegisterTPIKOptions("spray_can", {
     blend_per_bone = {
         ["Finger"] = 0.3,  -- Fingers blend less
         ["Hand"] = 0.7     -- Hand blends more
-    },
-    -- Distance-based fading
-    distance_fade = true,
-    fade_start = 150,
-    fade_end = 400
+    }
 })
 ```
 
-**Conditional Playback:**
+**Conditional and Delayed Playback:**
+
+Check conditions in your own code before playing, and delay with a timer:
 
 ```lua
 GCAL:RegisterSecondHandAnim("binoculars", {
     model = "myaddon/c_binoculars.mdl",
-    play_condition = function(animName, trackID, animData)
-        local ply = LocalPlayer()
-        if not IsValid(ply) then return false end
-        
-        -- Only allow if player is standing still
-        return ply:GetVelocity():Length() < 5
-    end,
-    delay_start = 0.2,  -- Small delay before starting
     viewmodel_fov = 50  -- Zoom in FOV
 })
+
+local function TryBinoculars()
+    local ply = LocalPlayer()
+    if not IsValid(ply) or ply:GetVelocity():Length() >= 5 then return end -- only while standing still
+
+    timer.Simple(0.2, function() GCAL:Play("binoculars") end)
+end
 ```
 
-**Per-Cycle Callbacks:**
+**Reacting to Playback Progress:**
 
 ```lua
-GCAL:RegisterSecondHandAnim("reload_sequence", {
-    model = "myaddon/c_reload.mdl",
-    on_cycle = function(trackID, animName, track, cycle)
-        -- Play sound at 50% cycle
-        if cycle >= 0.5 and cycle < 0.6 then
-            LocalPlayer():EmitSound("weapons/reload_click.wav")
-        end
-        -- Visual effect at 80%
-        if cycle >= 0.8 and cycle < 0.9 then
-            -- Create particle effect
-        end
+hook.Add("Think", "MyAddon_ReloadClick", function()
+    if GCAL:GetCurrentAnim("left_arm") ~= "reload_sequence" then return end
+
+    local track = GCAL:GetTrack("left_arm")
+    if GCAL:GetCycle("left_arm") >= 0.5 and not track.myClickPlayed then
+        track.myClickPlayed = true
+        LocalPlayer():EmitSound("weapons/reload_click.wav")
     end
-})
-```
-
-**Advanced Material Control:**
-
-```lua
-GCAL:RegisterTPIKOptions("hologram_device", {
-    model_material = "models/effects/vol_light001",
-    render_mode = "transalpha",
-    render_fx = "hologram",
-    model_skin = 2,
-    model_bodygroups = {
-        [1] = 1,  -- Enable antenna
-        [2] = 0   -- Disable screen
-    },
-    blend_strength = 0.8  -- Slightly transparent
-})
+end)
 ```
 
 Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, and all other weapons (including ARC9 weapons without native TPIK) use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. When ARC9's native TPIK is disabled, GCAL falls back to its own direct-bone-copy TPIK instead of disabling thirdperson entirely. This works because GCAL's TPIK is now a simple bone copy (ARC9-style) rather than the old IK solver that could interfere with ARC9's rendering.
@@ -692,7 +687,7 @@ GCAL includes a built-in easing library for natural movement. Available options:
 - `OutElastic` (Great for "snappy" or "bouncy" movements)
 - `Legacy` (Matches the original VManip power-curve behavior; this is the default)
 
-`Legacy` blends with `t ^ lerp_curve`, in first person and in thirdperson TPIK. Setting `easing_in` or `easing_out` to another name uses that function for the matching transition; `lerp_curve` (and the TPIK `blend_curve`) then only applies to a side still left on `Legacy`.
+`Legacy` blends with `t ^ lerp_curve`, in first person and in thirdperson TPIK. Setting `easing_in` or `easing_out` to another name uses that function for the matching transition; `lerp_curve` then only applies to a side still left on `Legacy`.
 
 ---
 

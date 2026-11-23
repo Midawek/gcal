@@ -60,14 +60,9 @@ function GCAL.InstallTPIK(deps)
         return nil
     end
 
-    local function Opt(track, key, ...)
+    local function Opt(track, key)
         local options = GetOptions(track)
-        if options and options[key] ~= nil then return options[key] end
-        local data = track and track.data or nil
-        for i = 1, select("#", ...) do
-            local fallback = select(i, ...)
-            if data and data[fallback] ~= nil then return data[fallback] end
-        end
+        if options then return options[key] end
         return nil
     end
 
@@ -94,9 +89,9 @@ function GCAL.InstallTPIK(deps)
         if not IsValid(model) or track.thirdpersonMaterialsConfigured then return end
         track.thirdpersonMaterialsConfigured = true
 
-        local extraHide = Opt(track, "hide_materials", "thirdperson_hide_materials")
+        local extraHide = Opt(track, "hide_materials")
         if isstring(extraHide) then extraHide = { extraHide } end
-        local keep = Opt(track, "keep_materials", "thirdperson_keep_materials")
+        local keep = Opt(track, "keep_materials")
         if isstring(keep) then keep = { keep } end
 
         local visible = 0
@@ -139,7 +134,7 @@ function GCAL.InstallTPIK(deps)
     local function PrepareClone(track, handPos, cloneShift, cloneAngles)
         local model = track.thirdpersonModel
         local source = GetSourceModel(track)
-        if not IsValid(model) or Opt(track, "model", "thirdperson_model") == false then return end
+        if not IsValid(model) or Opt(track, "model") == false then return end
         if not IsValid(source) then return end
 
         track.thirdpersonModelReadyFrame = nil
@@ -148,8 +143,8 @@ function GCAL.InstallTPIK(deps)
         ConfigureCloneMaterials(track)
         if not track.thirdpersonModelHasVisibleMaterials then return end
 
-        local maxDist = tonumber(Opt(track, "model_max_distance", "thirdperson_model_max_distance")) or 32
-        local explicitBoneName = Opt(track, "model_bone", "thirdperson_model_bone")
+        local maxDist = tonumber(Opt(track, "model_max_distance")) or 32
+        local explicitBoneName = Opt(track, "model_bone")
         local explicitBone = isstring(explicitBoneName) and GetBone(source, explicitBoneName) or nil
 
         local boneDist, hitboxDist
@@ -175,9 +170,9 @@ function GCAL.InstallTPIK(deps)
         model:SetupBones()
 
         -- Clone offsets: whole-clone shift + per-bone tweaks
-        local cloneOffsetX = (Opt(track, "clone_offset_x", "thirdperson_clone_offset_x") or 0) + OptAdd(track, "clone_offset_x")
-        local cloneOffsetY = (Opt(track, "clone_offset_y", "thirdperson_clone_offset_y") or 0) + OptAdd(track, "clone_offset_y")
-        local cloneOffsetZ = (Opt(track, "clone_offset_z", "thirdperson_clone_offset_z") or 0) + OptAdd(track, "clone_offset_z")
+        local cloneOffsetX = (Opt(track, "clone_offset_x") or 0) + OptAdd(track, "clone_offset_x")
+        local cloneOffsetY = (Opt(track, "clone_offset_y") or 0) + OptAdd(track, "clone_offset_y")
+        local cloneOffsetZ = (Opt(track, "clone_offset_z") or 0) + OptAdd(track, "clone_offset_z")
         local cloneOffsets = Opt(track, "model_offset")
 
         -- Whole-clone shift: follow the solved hand, then forward/right/up offsets in render-angle space
@@ -275,37 +270,8 @@ function GCAL.InstallTPIK(deps)
         source:SetModelScale(GetTrackModelScale(track, weapon, flip))
         source:SetupBones()
 
-        -- New: Check for distance fade
-        local options = GetOptions(track)
-        local distanceFade = options and options.distance_fade
-        if distanceFade then
-            local fadeStart = tonumber(options.fade_start) or 100
-            local fadeEnd = tonumber(options.fade_end) or 300
-            local camPos = LocalPlayer():GetPos()
-            local plyPos = ply:GetPos()
-            local dist = camPos:Distance(plyPos)
-
-            if dist > fadeEnd then
-                return -- Too far, don't render
-            elseif dist > fadeStart then
-                -- Fade blend strength based on distance
-                local fadeAlpha = 1 - math.Clamp((dist - fadeStart) / (fadeEnd - fadeStart), 0, 1)
-                track.distanceFadeAlpha = fadeAlpha
-            else
-                track.distanceFadeAlpha = 1
-            end
-        else
-            track.distanceFadeAlpha = 1
-        end
-
         -- Blend factor: 0 = full animation, 1 = full rest pose
-        local baseLerpCurve = track.lerpCurve or (track.data and track.data.lerp_curve) or 1
-        local blendCurve = tonumber(Opt(track, "blend_curve")) or baseLerpCurve
-        local blend = math.Clamp(GetTrackBlendFactor(track, track.lerpVal or 1, blendCurve), 0, 1)
-
-        -- New: Apply blend strength modifier
-        local blendStrength = tonumber(Opt(track, "blend_strength")) or 1
-        blend = math.Clamp(1 - (1 - blend) * blendStrength * (track.distanceFadeAlpha or 1), 0, 1)
+        local blend = math.Clamp(GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1), 0, 1)
 
         -- Spine position for clamping
         local spineIdx = GetBone(ply, "ValveBiped.Bip01_Spine4")
@@ -332,9 +298,9 @@ function GCAL.InstallTPIK(deps)
         end
 
         -- Options
-        local clampRadius = tonumber(Opt(track, "target_radius", "thirdperson_target_radius")) or 38
+        local clampRadius = tonumber(Opt(track, "target_radius")) or 38
         clampRadius = clampRadius + OptAdd(track, "target_radius")
-        local smoothing = tonumber(Opt(track, "smoothing", "thirdperson_smoothing")) or 18
+        local smoothing = tonumber(Opt(track, "smoothing")) or 18
         smoothing = math.Clamp(smoothing + OptAdd(track, "smoothing"), 0, 60)
 
         -- Per-animation offsets from RegisterTPIKOptions
@@ -362,7 +328,6 @@ function GCAL.InstallTPIK(deps)
 
         -- New: Get bone-specific options
         local lockBones = Opt(track, "lock_bones") or {}
-        local ignoreBones = Opt(track, "ignore_bones") or {}
         local scaleBones = Opt(track, "scale_bones") or {}
         local blendPerBone = Opt(track, "blend_per_bone") or {}
 
@@ -376,16 +341,6 @@ function GCAL.InstallTPIK(deps)
             local tgtBoneName = targetBones[k] or boneName
             local tgtBone = GetBone(ply, tgtBoneName)
             if not tgtBone or tgtBone < 0 then continue end
-
-            -- New: Check ignore list
-            local shouldIgnore = false
-            for _, ignoreName in ipairs(ignoreBones) do
-                if string.find(tgtBoneName, ignoreName, 1, true) then
-                    shouldIgnore = true
-                    break
-                end
-            end
-            if shouldIgnore then continue end
 
             local srcBone = GetBone(source, srcBoneName)
 

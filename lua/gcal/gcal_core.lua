@@ -288,11 +288,65 @@ function GCAL:GetHandTrack(hand)
     return "left_arm"
 end
 
+----------------------------------------------------------------------------------------
+-- Deprecations
+--
+-- Removed and renamed registration fields still register without erroring. Each one prints
+-- a single console warning per animation + key, pointing at the addon file that registered it.
+-- Renamed fields keep working through their new name; removed fields are ignored.
+----------------------------------------------------------------------------------------
+local warnedDeprecations = {}
+
+local function IsGCALSource(src)
+    src = string.lower(tostring(src or ""))
+    return string.find(src, "gcal/gcal_", 1, true) ~= nil
+        or string.find(src, "gcal_init.lua", 1, true) ~= nil
+        or string.find(src, "aaa_gcal_shim.lua", 1, true) ~= nil
+end
+
+local function DeprecationCallerLocation()
+    for level = 3, 16 do
+        local info = debug.getinfo(level, "Sl")
+        if not info then break end
+        if info.what ~= "C" and not IsGCALSource(info.short_src) then
+            return tostring(info.short_src) .. ":" .. tostring(info.currentline)
+        end
+    end
+    return "unknown caller"
+end
+
+function GCAL:WarnDeprecated(animName, key, message)
+    local id = tostring(animName) .. "\0" .. tostring(key)
+    if warnedDeprecations[id] then return end
+    warnedDeprecations[id] = true
+
+    MsgC(
+        Color(255, 176, 93), "[GCAL] Deprecated: ",
+        Color(239, 243, 248), "'" .. tostring(key) .. "' on '" .. tostring(animName) .. "' " .. message,
+        Color(151, 163, 177), " (" .. DeprecationCallerLocation() .. ")\n"
+    )
+end
+
+-- Moves renamed keys onto their new name and strips removed keys, warning once for each.
+local function ApplyDeprecations(name, data, renamed, removed)
+    for oldKey, newKey in pairs(renamed) do
+        if data[oldKey] ~= nil then
+            GCAL:WarnDeprecated(name, oldKey, "is deprecated, use '" .. newKey .. "' instead.")
+            if data[newKey] == nil then data[newKey] = data[oldKey] end
+            data[oldKey] = nil
+        end
+    end
+    for key, reason in pairs(removed) do
+        if data[key] ~= nil then
+            GCAL:WarnDeprecated(name, key, reason)
+            data[key] = nil
+        end
+    end
+end
+
 -- Valid TPIK option keys
 local TPIK_VALID_OPTIONS = {
     sequence = "string",
-    anim = "string",
-    animation = "string",
     model = "bool",
     model_bone = "string",
     model_max_distance = "number",
@@ -307,65 +361,83 @@ local TPIK_VALID_OPTIONS = {
     clone_offset_x = "number",
     clone_offset_y = "number",
     clone_offset_z = "number",
-    -- New: Advanced blending control
-    blend_strength = "number",
-    blend_curve = "number",
     blend_per_bone = "table",
-    -- New: Bone-specific behavior
     lock_bones = "table",
-    ignore_bones = "table",
     scale_bones = "table",
-    -- New: Visual effects
-    model_skin = "number",
-    model_bodygroups = "table",
-    model_material = "string",
-    render_mode = "string",
-    render_fx = "string",
-    -- New: Advanced positioning
-    offset_relative_to = "string",
-    offset_space = "string",
-    angular_offset_x = "number",
-    angular_offset_y = "number",
-    angular_offset_z = "number",
-    -- New: Distance-based behavior
-    distance_fade = "bool",
-    fade_start = "number",
-    fade_end = "number",
-    -- New: Performance and quality
-    update_rate = "number",
-    interpolate = "bool",
-    force_update = "bool",
-    -- Deprecated (IK solver removed, these are ignored)
-    pole_source = "number",
-    pole_native = "number",
-    thirdperson_model = "bool",
-    thirdperson_model_bone = "string",
-    thirdperson_model_max_distance = "number",
-    thirdperson_hide_materials = "table",
-    thirdperson_keep_materials = "table",
-    thirdperson_target_radius = "number",
-    thirdperson_smoothing = "number",
 }
 
-local TPIK_DEPRECATED_OPTIONS = {
-    pole_source = "IK solver removed, option ignored",
-    pole_native = "IK solver removed, option ignored",
+-- Silent spelling aliases (documented)
+local TPIK_ALIASES = {
+    anim = "sequence",
+    animation = "sequence",
+}
+
+local TPIK_RENAMED_OPTIONS = {
+    thirdperson_model = "model",
+    thirdperson_model_bone = "model_bone",
+    thirdperson_model_max_distance = "model_max_distance",
+    thirdperson_hide_materials = "hide_materials",
+    thirdperson_keep_materials = "keep_materials",
+    thirdperson_target_radius = "target_radius",
+    thirdperson_smoothing = "smoothing",
+}
+
+local TPIK_REMOVED_UNUSED = "was removed and is ignored (it was never implemented)."
+local TPIK_REMOVED_OPTIONS = {
+    pole_source = "was removed and is ignored (the IK solver is gone).",
+    pole_native = "was removed and is ignored (the IK solver is gone).",
+    blend_strength = "was removed and is ignored. Use blend_weight on the animation instead.",
+    blend_curve = "was removed and is ignored. Use lerp_curve or easing_in / easing_out on the animation instead.",
+    distance_fade = "was removed and is ignored. Remote players already stop rendering past 2000 units.",
+    fade_start = "was removed and is ignored (distance_fade is gone).",
+    fade_end = "was removed and is ignored (distance_fade is gone).",
+    model_skin = TPIK_REMOVED_UNUSED,
+    model_bodygroups = TPIK_REMOVED_UNUSED,
+    model_material = TPIK_REMOVED_UNUSED,
+    render_mode = TPIK_REMOVED_UNUSED,
+    render_fx = TPIK_REMOVED_UNUSED,
+    offset_relative_to = TPIK_REMOVED_UNUSED,
+    offset_space = TPIK_REMOVED_UNUSED,
+    angular_offset_x = TPIK_REMOVED_UNUSED,
+    angular_offset_y = TPIK_REMOVED_UNUSED,
+    angular_offset_z = TPIK_REMOVED_UNUSED,
+    update_rate = TPIK_REMOVED_UNUSED,
+    interpolate = TPIK_REMOVED_UNUSED,
+    force_update = TPIK_REMOVED_UNUSED,
 }
 
 function GCAL:RegisterTPIKOptions(name, options)
     if not name or not istable(options) then return false end
+    name = tostring(name)
+
+    local input = table.Copy(options)
+    for alias, key in pairs(TPIK_ALIASES) do
+        if input[alias] ~= nil then
+            if input[key] == nil then input[key] = input[alias] end
+            input[alias] = nil
+        end
+    end
+
+    -- ignore_bones and lock_bones both left a bone at its rest pose; they are one option now.
+    if input.ignore_bones ~= nil then
+        self:WarnDeprecated(name, "ignore_bones", "is deprecated, use 'lock_bones' instead.")
+        if istable(input.ignore_bones) then
+            local merged = istable(input.lock_bones) and table.Copy(input.lock_bones) or {}
+            for _, boneName in ipairs(input.ignore_bones) do merged[#merged + 1] = boneName end
+            input.lock_bones = merged
+        end
+        input.ignore_bones = nil
+    end
+
+    ApplyDeprecations(name, input, TPIK_RENAMED_OPTIONS, TPIK_REMOVED_OPTIONS)
 
     local clean = {}
-    for key, value in pairs(options) do
+    for key, value in pairs(input) do
         local expected = TPIK_VALID_OPTIONS[key]
         if not expected then
             ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: unknown option '" ..
-                tostring(key) .. "' for '" .. tostring(name) .. "'\n")
+                tostring(key) .. "' for '" .. name .. "'\n")
             continue
-        end
-        if TPIK_DEPRECATED_OPTIONS[key] then
-            ErrorNoHaltWithStack("[GCAL] RegisterTPIKOptions: '" ..
-                tostring(key) .. "' is deprecated (" .. TPIK_DEPRECATED_OPTIONS[key] .. ")\n")
         end
         if expected == "number" then
             clean[key] = tonumber(value) or 0
@@ -378,7 +450,7 @@ function GCAL:RegisterTPIKOptions(name, options)
         end
     end
 
-    self.TPIKOptions[tostring(name)] = clean
+    self.TPIKOptions[name] = clean
     return true
 end
 
@@ -464,8 +536,74 @@ function GCAL:NormalizeGunMode(mode)
     return nil
 end
 
-function GCAL:PrepareAnimData(data, hand)
+local ANIM_RENAMED_FIELDS = {
+    onstart = "on_start",
+    OnStart = "on_start",
+    onfinish = "on_finish",
+    OnFinish = "on_finish",
+    oninterrupt = "on_interrupt",
+    OnInterrupt = "on_interrupt",
+    easeintime = "ease_in_time",
+    easeouttime = "ease_out_time",
+    vm_fov = "viewmodel_fov",
+    fov = "viewmodel_fov",
+    vm_offset = "viewmodel_offset",
+    soundvolume = "sound_volume",
+    soundlevel = "sound_level",
+    soundflags = "sound_flags",
+    blendweight = "blend_weight",
+    modelscale = "model_scale",
+    modelskin = "model_skin",
+    modelbodygroups = "model_bodygroups",
+    gunmode = "gun_mode",
+    gunbones = "gun_bones",
+    bonegroup = "bone_group",
+}
+
+local REMOVED_ON_CYCLE = "was removed and is ignored. Poll GCAL:GetCycle(trackID) from a Think hook instead."
+local REMOVED_DELAY = "was removed and is ignored. Delay your GCAL:Play call with timer.Simple instead."
+local REMOVED_CONDITION = "was removed and is ignored. Check the condition before calling GCAL:Play, or return false from the VManipPrePlayAnim hook."
+local REMOVED_SHAKE = "was removed and is ignored. Call util.ScreenShake from on_start instead."
+local REMOVED_BLEND_MODE = "was removed and is ignored (only \"normal\" was ever implemented)."
+local ANIM_REMOVED_FIELDS = {
+    on_cycle = REMOVED_ON_CYCLE,
+    oncycle = REMOVED_ON_CYCLE,
+    OnCycle = REMOVED_ON_CYCLE,
+    delay_start = REMOVED_DELAY,
+    delaystart = REMOVED_DELAY,
+    play_condition = REMOVED_CONDITION,
+    playcondition = REMOVED_CONDITION,
+    condition = REMOVED_CONDITION,
+    screen_shake = REMOVED_SHAKE,
+    screenshake = REMOVED_SHAKE,
+    blend_mode = REMOVED_BLEND_MODE,
+    blendmode = REMOVED_BLEND_MODE,
+    disable_pred = "was removed and is ignored (it never had an effect).",
+}
+
+-- TPIK keys that used to be read straight off the animation data.
+local ANIM_TPIK_FIELDS = {
+    thirdperson_model = "model",
+    thirdperson_model_bone = "model_bone",
+    thirdperson_model_max_distance = "model_max_distance",
+    thirdperson_hide_materials = "hide_materials",
+    thirdperson_keep_materials = "keep_materials",
+    thirdperson_target_radius = "target_radius",
+    thirdperson_smoothing = "smoothing",
+}
+
+-- lerpVal moves by (FrameTime() * 7 * speed) per frame, so a full blend lasts 1 / (7 * speed) seconds.
+local function LerpSpeedFromTime(seconds, fallbackSpeed)
+    seconds = tonumber(seconds)
+    if seconds and seconds > 0 then return 1 / (7 * seconds) end
+    return fallbackSpeed or 1
+end
+
+function GCAL:PrepareAnimData(data, hand, name)
     if not data then return data end
+    name = name or "<unnamed>"
+
+    ApplyDeprecations(name, data, ANIM_RENAMED_FIELDS, ANIM_REMOVED_FIELDS)
 
     -- Normalize model path to prevent double "models/" prefix
     if data.model then
@@ -489,52 +627,29 @@ function GCAL:PrepareAnimData(data, hand)
         data.cambone = tobool(data.cambone)
     end
 
-    -- New: Callback support
-    data.on_start = data.on_start or data.onstart or data.OnStart
-    data.on_finish = data.on_finish or data.onfinish or data.OnFinish
-    data.on_interrupt = data.on_interrupt or data.oninterrupt or data.OnInterrupt
-    data.on_cycle = data.on_cycle or data.oncycle or data.OnCycle
-
-    -- New: Advanced timing control
-    data.ease_in_time = data.ease_in_time or data.easeintime
-    data.ease_out_time = data.ease_out_time or data.easeouttime
-    data.delay_start = data.delay_start or data.delaystart or 0
-
-    -- New: Conditional playback
-    data.play_condition = data.play_condition or data.playcondition or data.condition
     if data.can_interrupt == nil then
         data.can_interrupt = true
     else
         data.can_interrupt = tobool(data.can_interrupt)
     end
 
-    -- New: Visual effects
-    data.viewmodel_fov = data.viewmodel_fov or data.vm_fov or data.fov
-    data.viewmodel_offset = data.viewmodel_offset or data.vm_offset
-    data.screen_shake = data.screen_shake or data.screenshake
+    -- ease_in_time / ease_out_time are the blend duration in seconds; resolve them onto
+    -- lerp_speed_in / lerp_speed_out once here so playback only has one value to read.
+    data.lerp_speed_in = LerpSpeedFromTime(data.ease_in_time, data.lerp_speed_in)
+    data.lerp_speed_out = LerpSpeedFromTime(data.ease_out_time, data.lerp_speed_out)
 
-    -- New: Sound enhancements
-    data.sound_volume = data.sound_volume or data.soundvolume or 75
-    data.sound_level = data.sound_level or data.soundlevel or 75
-    data.sound_flags = data.sound_flags or data.soundflags or 0
+    -- sound_volume used to double as the sound level (default 75). It is a 0-1 volume now.
+    local volume = tonumber(data.sound_volume)
+    if volume and volume > 1 then
+        self:WarnDeprecated(name, "sound_volume", "is now a 0-1 volume. Values above 1 are used as sound_level; set sound_level instead.")
+        if data.sound_level == nil then data.sound_level = volume end
+        volume = nil
+    end
+    data.sound_volume = volume and math.Clamp(volume, 0, 1) or 1
+    data.sound_level = tonumber(data.sound_level) or 75
+    data.sound_flags = tonumber(data.sound_flags) or 0
 
-    -- New: Blend modes
-    data.blend_mode = data.blend_mode or data.blendmode or "normal"
-    data.blend_weight = data.blend_weight or data.blendweight
-
-    -- New: Model manipulation
-    data.model_scale = data.model_scale or data.modelscale
-    data.model_skin = data.model_skin or data.modelskin
-    data.model_bodygroups = data.model_bodygroups or data.modelbodygroups
-
-    -- Gun bone handling (firstperson)
-    local gunMode = data.gun_mode
-    if gunMode == nil then gunMode = data.gunmode end
-    data.gun_mode = self:NormalizeGunMode(gunMode)
-    data.gun_bones = data.gun_bones or data.gunbones
-
-    -- New: Advanced flags
-    data.disable_pred = data.disable_pred ~= nil and tobool(data.disable_pred) or false
+    data.gun_mode = self:NormalizeGunMode(data.gun_mode)
     data.local_only = data.local_only ~= nil and tobool(data.local_only) or false
 
     return data
@@ -545,14 +660,6 @@ local defaultCamIntensity = { 1, 1, 1 }
 local GetTPIKOptionsForAnim
 local GetTPIKSequenceName
 local ResolveTPIKSequence
-
--- lerpVal moves by (FrameTime() * 7 * speed) per frame, so a full blend lasts 1 / (7 * speed) seconds.
--- ease_in_time / ease_out_time give that duration directly and override lerp_speed_in / lerp_speed_out.
-local function LerpSpeedFromTime(seconds, fallbackSpeed)
-    seconds = tonumber(seconds)
-    if seconds and seconds > 0 then return 1 / (7 * seconds) end
-    return fallbackSpeed or 1
-end
 
 -- Push live-edited fields from a re-registered anim onto the active track
 local function RefreshActiveTrack(track, data)
@@ -571,8 +678,8 @@ local function RefreshActiveTrack(track, data)
     track.thirdperson = GCAL.InternalThirdPersonEnabled and GCAL.ThirdPerson:GetBool() and data.thirdperson ~= false and not data.legacy and (not GCAL.IsAnimTPIKEnabled or GCAL:IsAnimTPIKEnabled(track.name))
     track.lerpCurve = data.lerp_curve or 1
     track.legacyMatrixLerp = legacyMatrixLerp
-    track.lerpSpeedIn = LerpSpeedFromTime(data.ease_in_time, data.lerp_speed_in)
-    track.lerpSpeedOut = LerpSpeedFromTime(data.ease_out_time, data.lerp_speed_out)
+    track.lerpSpeedIn = data.lerp_speed_in or 1
+    track.lerpSpeedOut = data.lerp_speed_out or 1
     -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
     track.easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil
     track.easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil
@@ -594,20 +701,17 @@ local function RefreshActiveTrack(track, data)
     track.onStartCallback = data.on_start
     track.onFinishCallback = data.on_finish
     track.onInterruptCallback = data.on_interrupt
-    track.onCycleCallback = data.on_cycle
 
     -- Update visual effects
     track.viewmodelFov = data.viewmodel_fov
     track.viewmodelOffset = data.viewmodel_offset
-    track.screenShake = data.screen_shake
 
     -- Update sound settings
-    track.soundVolume = data.sound_volume or 75
+    track.soundVolume = data.sound_volume or 1
     track.soundLevel = data.sound_level or 75
     track.soundFlags = data.sound_flags or 0
 
     -- Update blend settings
-    track.blendMode = data.blend_mode or "normal"
     track.blendWeight = data.blend_weight
 
     -- Update gun bone settings
@@ -664,7 +768,26 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
     end
     if not name or not data then return end
 
-    self:PrepareAnimData(data)
+    self:PrepareAnimData(data, nil, name)
+
+    -- thirdperson_* keys on the animation data belong in RegisterTPIKOptions now.
+    local movedTPIK
+    for oldKey, optionKey in pairs(ANIM_TPIK_FIELDS) do
+        if data[oldKey] ~= nil then
+            self:WarnDeprecated(name, oldKey, "belongs in GCAL:RegisterTPIKOptions as '" .. optionKey .. "' now.")
+            movedTPIK = movedTPIK or {}
+            movedTPIK[optionKey] = data[oldKey]
+            data[oldKey] = nil
+        end
+    end
+    if movedTPIK then
+        local existing = self:GetTPIKOptions(name)
+        if existing then
+            for key, value in pairs(existing) do movedTPIK[key] = value end
+        end
+        self:RegisterTPIKOptions(name, movedTPIK)
+    end
+
     data.addon_name = data.addon_name or data.addon or data.source_addon or GCAL.CurrentRegistrationSource or "GCAL"
     GCAL_Log("Registering animation:", name)
     self.Anims[name] = data
@@ -1130,30 +1253,28 @@ if CLIENT then
         local easingInName = anim.easing_in or "Legacy"
         local easingOutName = anim.easing_out or "Legacy"
         local legacyMatrixLerp = easingInName == "Legacy" and easingOutName == "Legacy"
-        local delayStart = tonumber(anim.delay_start) or 0
 
         return {
             name = name,
             data = anim,
-            startTime = CurTime() + delayStart,
+            startTime = CurTime(),
             realStartTime = CurTime(),
-            delayStart = delayStart,
             cycle = anim.startcycle or 0,
             lerpVal = 1, -- 1 = weapon pose, 0 = full animation
             model = ClientsideModel(NormalizeModelPath(anim.model), RENDERGROUP_BOTH),
             camboneEnabled = (anim.cambone == nil) or tobool(anim.cambone),
             camModel = nil,
             speed = anim.speed or 1,
-            lerpSpeedIn = LerpSpeedFromTime(anim.ease_in_time, anim.lerp_speed_in),
-            lerpSpeedOut = LerpSpeedFromTime(anim.ease_out_time, anim.lerp_speed_out),
+            lerpSpeedIn = anim.lerp_speed_in or 1,
+            lerpSpeedOut = anim.lerp_speed_out or 1,
             -- nil easing = OG VManip power-curve blend (GCAL.Lerp.Legacy with lerp_curve)
             easingIn = easingInName ~= "Legacy" and GCAL.Lerp.Get(easingInName) or nil,
             easingOut = easingOutName ~= "Legacy" and GCAL.Lerp.Get(easingOutName) or nil,
             lerpPeak = anim.lerp_peak or 0.5,
-            lerpPeakTime = CurTime() + delayStart + (anim.lerp_peak or 0.5),
+            lerpPeakTime = CurTime() + (anim.lerp_peak or 0.5),
             legacyMatrixLerp = legacyMatrixLerp,
             lerpCurve = anim.lerp_curve or 1,
-            holdTime = anim.holdtime and (CurTime() + delayStart + anim.holdtime) or nil,
+            holdTime = anim.holdtime and (CurTime() + anim.holdtime) or nil,
             holdTimeData = anim.holdtime,
             holdQuit = false,
             gestureOnHold = false,
@@ -1186,18 +1307,14 @@ if CLIENT then
             onStartCallback = anim.on_start,
             onFinishCallback = anim.on_finish,
             onInterruptCallback = anim.on_interrupt,
-            onCycleCallback = anim.on_cycle,
-            lastCycleTrigger = 0,
             -- New: Visual effects
             viewmodelFov = anim.viewmodel_fov,
             viewmodelOffset = anim.viewmodel_offset,
-            screenShake = anim.screen_shake,
             -- New: Sound settings
-            soundVolume = anim.sound_volume or 75,
+            soundVolume = anim.sound_volume or 1,
             soundLevel = anim.sound_level or 75,
             soundFlags = anim.sound_flags or 0,
             -- New: Blend settings
-            blendMode = anim.blend_mode or "normal",
             blendWeight = anim.blend_weight,
             -- Gun bone handling
             gunMode = anim.gun_mode,
@@ -1457,14 +1574,6 @@ if CLIENT then
 
         trackID = trackID or anim.group_name or "default"
 
-        -- New: Check play condition
-        if anim.play_condition and isfunction(anim.play_condition) then
-            if not anim.play_condition(name, trackID, anim) then
-                GCAL_Log("Suppressed: play_condition returned false for '" .. tostring(name) .. "'")
-                return false
-            end
-        end
-
         if not LegacyAnimAllowed(name, trackID, anim) then return false end
         if hook.Run("VManipPrePlayAnim", name) == false then return false end
 
@@ -1512,19 +1621,6 @@ if CLIENT then
         -- New: Call start callback
         if track.onStartCallback and isfunction(track.onStartCallback) then
             pcall(track.onStartCallback, trackID, name, track)
-        end
-
-        -- Trigger screen shake if configured
-        if track.screenShake then
-            local shake = track.screenShake
-            local ply = LocalPlayer()
-            if IsValid(ply) then
-                local amplitude = shake.amplitude or 2
-                local frequency = shake.frequency or 10
-                local duration = shake.duration or 0.5
-                local radius = shake.radius or 500
-                util.ScreenShake(ply:EyePos(), amplitude, frequency, duration, radius)
-            end
         end
 
         hook.Run("GCALTrackStarted", trackID, name, track)
@@ -1584,11 +1680,8 @@ if CLIENT then
     end
 
     local function EmitTrackSound(ply, track, soundPath)
-        local soundLevel = track.soundLevel or track.soundVolume or 75
-        local pitch = GCAL.SoundPitch:GetInt()
-        local volume = (track.soundVolume and track.soundVolume <= 1) and track.soundVolume or 1.0
-        local flags = track.soundFlags or 0
-        ply:EmitSound(soundPath, soundLevel, pitch, volume, CHAN_AUTO, flags)
+        ply:EmitSound(soundPath, track.soundLevel or 75, GCAL.SoundPitch:GetInt(), track.soundVolume or 1, CHAN_AUTO,
+            track.soundFlags or 0)
     end
 
     function GCAL:PlaySegment(trackID, sequence, lastSegment, soundTable)
@@ -1764,21 +1857,7 @@ if CLIENT then
 
         curtime = CurTime()
 
-        -- New: Handle delay_start
-        if track.delayStart and track.delayStart > 0 and curtime < track.realStartTime + track.delayStart then
-            return false
-        end
-
         HandleSounds(track)
-
-        -- New: Cycle callback
-        if track.onCycleCallback and isfunction(track.onCycleCallback) then
-            local cycleTrigger = math.floor(track.cycle * 10)
-            if cycleTrigger ~= track.lastCycleTrigger then
-                track.lastCycleTrigger = cycleTrigger
-                pcall(track.onCycleCallback, trackID, track.name, track, track.cycle)
-            end
-        end
 
         if track.loop then
             if track.cycle >= 1 then
