@@ -158,8 +158,6 @@ The data table passed to `RegisterAnim` supports the following fields:
 | `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. |
 | `ease_in_time`       | number       | Duration of the blend-in in seconds. Overrides `lerp_speed_in` (a full blend lasts `1 / (7 * lerp_speed_in)` seconds otherwise). |
 | `ease_out_time`      | number       | Duration of the blend-out in seconds. Overrides `lerp_speed_out`. |
-| `viewmodel_fov`      | number       | View FOV to reach while the animation is fully blended in (e.g. `50` zooms in); fades in and out with the animation. First person only. |
-| `viewmodel_offset`   | Vector       | Shifts the viewmodel by (forward, right, up) units while the animation is blended in. |
 | `sound_volume`       | number       | Volume for animation sounds, 0-1 (default: 1). |
 | `sound_level`        | number       | Sound level/attenuation for animation sounds (default: 75). |
 | `sound_flags`        | number       | Sound flags for animation sounds (default: 0). |
@@ -183,8 +181,6 @@ Registering an animation with any of these still works. GCAL prints one `[GCAL] 
 | `onfinish`, `OnFinish` | `on_finish` |
 | `oninterrupt`, `OnInterrupt` | `on_interrupt` |
 | `easeintime` / `easeouttime` | `ease_in_time` / `ease_out_time` |
-| `vm_fov`, `fov` | `viewmodel_fov` |
-| `vm_offset` | `viewmodel_offset` |
 | `soundvolume`, `soundlevel`, `soundflags` | `sound_volume`, `sound_level`, `sound_flags` |
 | `blendweight` | `blend_weight` |
 | `modelscale`, `modelskin`, `modelbodygroups` | `model_scale`, `model_skin`, `model_bodygroups` |
@@ -204,6 +200,8 @@ Registering an animation with any of these still works. GCAL prints one `[GCAL] 
 | `screen_shake` | Call `util.ScreenShake` from `on_start`. |
 | `blend_mode` | None. Only `"normal"` was ever implemented. |
 | `disable_pred` | None. It never had an effect. |
+| `viewmodel_fov` (`vm_fov`, `fov`) | Change the FOV from your own `CalcView` hook, scaled by `1 - GCAL:GetLerp(trackID)`. |
+| `viewmodel_offset` (`vm_offset`) | Offset the viewmodel from your own `CalcViewModelView` hook. |
 
 ---
 
@@ -643,8 +641,7 @@ Check conditions in your own code before playing, and delay with a timer:
 
 ```lua
 GCAL:RegisterSecondHandAnim("binoculars", {
-    model = "myaddon/c_binoculars.mdl",
-    viewmodel_fov = 50  -- Zoom in FOV
+    model = "myaddon/c_binoculars.mdl"
 })
 
 local function TryBinoculars()

@@ -562,9 +562,6 @@ local ANIM_RENAMED_FIELDS = {
     OnInterrupt = "on_interrupt",
     easeintime = "ease_in_time",
     easeouttime = "ease_out_time",
-    vm_fov = "viewmodel_fov",
-    fov = "viewmodel_fov",
-    vm_offset = "viewmodel_offset",
     soundvolume = "sound_volume",
     soundlevel = "sound_level",
     soundflags = "sound_flags",
@@ -582,6 +579,8 @@ local REMOVED_DELAY = "was removed and is ignored. Delay your GCAL:Play call wit
 local REMOVED_CONDITION = "was removed and is ignored. Check the condition before calling GCAL:Play, or return false from the VManipPrePlayAnim hook."
 local REMOVED_SHAKE = "was removed and is ignored. Call util.ScreenShake from on_start instead."
 local REMOVED_BLEND_MODE = "was removed and is ignored (only \"normal\" was ever implemented)."
+local REMOVED_FOV = "was removed and is ignored. Change the FOV from your own CalcView hook, scaled by 1 - GCAL:GetLerp(trackID)."
+local REMOVED_VM_OFFSET = "was removed and is ignored. Offset the viewmodel from your own CalcViewModelView hook instead."
 local ANIM_REMOVED_FIELDS = {
     on_cycle = REMOVED_ON_CYCLE,
     oncycle = REMOVED_ON_CYCLE,
@@ -596,6 +595,11 @@ local ANIM_REMOVED_FIELDS = {
     blend_mode = REMOVED_BLEND_MODE,
     blendmode = REMOVED_BLEND_MODE,
     disable_pred = "was removed and is ignored (it never had an effect).",
+    viewmodel_fov = REMOVED_FOV,
+    vm_fov = REMOVED_FOV,
+    fov = REMOVED_FOV,
+    viewmodel_offset = REMOVED_VM_OFFSET,
+    vm_offset = REMOVED_VM_OFFSET,
 }
 
 -- TPIK keys that used to be read straight off the animation data.
@@ -709,9 +713,6 @@ local function ApplyAnimDataToTrack(track, data)
     track.onStartCallback = data.on_start
     track.onFinishCallback = data.on_finish
     track.onInterruptCallback = data.on_interrupt
-
-    track.viewmodelFov = data.viewmodel_fov
-    track.viewmodelOffset = data.viewmodel_offset
 
     track.soundVolume = data.sound_volume or 1
     track.soundLevel = data.sound_level or 75
@@ -3224,13 +3225,13 @@ if CLIENT then
         -- In third-person, skip GCAL camera adjustments without blocking other mods
         if ply:ShouldDrawLocalPlayer() then return end
 
-        -- Skip unless a track drives the camera (cambone attachment) or the FOV (viewmodel_fov),
+        -- Skip unless a track drives the camera (cambone attachment),
         -- to avoid suppressing other CalcView hooks
-        local camBoneEnabled = GCAL.CamBone:GetBool()
+        if not GCAL.CamBone:GetBool() then return end
         local needsView = false
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
-            if (camBoneEnabled and track.attachment) or tonumber(track.viewmodelFov) then
+            if track.attachment then
                 needsView = true; break
             end
         end
@@ -3250,22 +3251,10 @@ if CLIENT then
         local baseFov = composed.fov or fov
 
         local newOrigin, newAngles, newFov = baseOrigin, baseAngles, baseFov
-        if camBoneEnabled then
-            for trackID, track in pairs(GCAL.ActiveTracks) do
-                if trackID == "legs" then continue end
-                if not track.attachment then continue end
-                newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
-            end
-        end
-
-        -- viewmodel_fov is the FOV to reach while the animation is fully blended in:
-        -- fade from the current FOV toward it as the track blends in, and back out again.
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
-            local targetFov = tonumber(track.viewmodelFov)
-            if targetFov and newFov then
-                newFov = Lerp(1 - (track.lerpVal or 1), newFov, targetFov)
-            end
+            if not track.attachment then continue end
+            newOrigin, newAngles, newFov = GCAL:ComputeCamBoneView(track, ply, newOrigin, newAngles, newFov)
         end
 
         -- Keep drawviewer / znear / zfar / ortho etc. from the composed view
@@ -3276,38 +3265,8 @@ if CLIENT then
         return view
     end)
 
-    -- viewmodel_offset: shift the viewmodel (forward, right, up) while the animation is blended in.
-    -- Composes with the gamemode / weapon / other addons the same way GCAL_VManipCam does.
-    local inCalcViewModelView = false
-    hook.Add("CalcViewModelView", "GCAL_ViewModelOffset", function(weapon, vm, oldPos, oldAng, pos, ang)
-        if inCalcViewModelView then return end
-
-        local offX, offY, offZ = 0, 0, 0
-        local hasOffset = false
-        for trackID, track in pairs(GCAL.ActiveTracks) do
-            local offset = track.viewmodelOffset
-            if trackID ~= "legs" and isvector(offset) then
-                local scale = 1 - (track.lerpVal or 1)
-                offX = offX + offset.x * scale
-                offY = offY + offset.y * scale
-                offZ = offZ + offset.z * scale
-                hasOffset = true
-            end
-        end
-        if not hasOffset then return end
-
-        inCalcViewModelView = true
-        local ok, newPos, newAng = pcall(hook.Run, "CalcViewModelView", weapon, vm, oldPos, oldAng, pos, ang)
-        inCalcViewModelView = false
-        if not ok then
-            ErrorNoHaltWithStack(newPos)
-            newPos, newAng = nil, nil
-        end
-        if not isvector(newPos) then newPos = pos end
-        if not isangle(newAng) then newAng = ang end
-
-        return newPos + newAng:Forward() * offX + newAng:Right() * offY + newAng:Up() * offZ, newAng
-    end)
+    -- viewmodel_offset was removed; drop the hook left behind by an older version on lua refresh.
+    hook.Remove("CalcViewModelView", "GCAL_ViewModelOffset")
 
     hook.Add("StartCommand", "GCAL_VManipPreventReload", function(ply, ucmd)
         if VManip and VManip:IsActive() and not ply:ShouldDrawLocalPlayer() then
