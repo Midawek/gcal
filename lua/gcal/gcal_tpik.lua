@@ -199,25 +199,27 @@ function GCAL.InstallTPIK(deps)
         local maxDist = tonumber(Opt(track, "model_max_distance")) or 32
         local explicitBoneName = Opt(track, "model_bone")
         local explicitBone = isstring(explicitBoneName) and GetBone(source, explicitBoneName) or nil
+        local measure = handPos ~= nil and maxDist > 0
 
         local boneDist, hitboxDist
-        local function Consider(bone, pos, isHitbox)
-            if not handPos or not pos then return end
-            if explicitBone ~= nil and bone ~= explicitBone then return end
-            local d = pos:Distance(handPos)
-            if isHitbox then
-                hitboxDist = hitboxDist and math.min(hitboxDist, d) or d
-            else
-                boneDist = boneDist and math.min(boneDist, d) or d
-            end
-        end
 
         model:SetPos(source:GetPos())
         model:SetAngles(source:GetAngles())
-        model:SetModelScale(track.modelScale or 1)
-        model:SetSkin(source:GetSkin())
-        for _, id in ipairs(GetBodygroupIDs(source)) do
-            model:SetBodygroup(id, source:GetBodygroup(id))
+        local scale = track.modelScale or 1
+        local sourceModel = source:GetModel()
+        local appearance = model.gcalCloneAppearance
+        if not appearance or appearance.source ~= source or appearance.sourceModel ~= sourceModel
+            or appearance.scale ~= scale or appearance.skin ~= track.modelSkin
+            or appearance.bodygroups ~= track.modelBodygroups then
+            model:SetModelScale(scale)
+            model:SetSkin(source:GetSkin())
+            for _, id in ipairs(GetBodygroupIDs(source)) do
+                model:SetBodygroup(id, source:GetBodygroup(id))
+            end
+            model.gcalCloneAppearance = {
+                source = source, sourceModel = sourceModel, scale = scale,
+                skin = track.modelSkin, bodygroups = track.modelBodygroups
+            }
         end
         model:SetCycle(track.cycle or 0)
         model:SetupBones()
@@ -240,39 +242,47 @@ function GCAL.InstallTPIK(deps)
         end
         local hasShift = not shift:IsZero()
 
-        local copies = {}
+        local copies = measure and {} or nil
         for bone = 0, model:GetBoneCount() - 1 do
             local m = source:GetBoneMatrix(bone) or model:GetBoneMatrix(bone)
             if m then
-                copies[bone] = m
                 local pos = m:GetTranslation()
                 if hasShift then
-                    pos = pos + shift
+                    pos:Add(shift)
                     m:SetTranslation(pos)
                 end
                 local boneOffset = offsetByBone and offsetByBone[bone]
                 if boneOffset then
-                    pos = pos + boneOffset
+                    pos:Add(boneOffset)
                     m:SetTranslation(pos)
                 end
                 model:SetBoneMatrix(bone, m)
                 model:SetBonePosition(bone, pos, m:GetAngles())
-                Consider(bone, pos, false)
-            end
-        end
-
-        if model.GetHitBoxCount and model.GetHitBoxBone and model.GetHitBoxBounds then
-            for hb = 0, (model:GetHitBoxCount(0) or 0) - 1 do
-                local bone = model:GetHitBoxBone(hb, 0)
-                local mat = bone and copies[bone]
-                if mat then
-                    local mins, maxs = model:GetHitBoxBounds(hb, 0)
-                    if mins and maxs then Consider(bone, mat * ((mins + maxs) * 0.5), true) end
+                if measure then
+                    copies[bone] = m
+                    if explicitBone == nil or bone == explicitBone then
+                        local d = pos:Distance(handPos)
+                        boneDist = boneDist and math.min(boneDist, d) or d
+                    end
                 end
             end
         end
 
-        if handPos and maxDist > 0 then
+        if measure and model.GetHitBoxCount and model.GetHitBoxBone and model.GetHitBoxBounds then
+            for hb = 0, (model:GetHitBoxCount(0) or 0) - 1 do
+                local bone = model:GetHitBoxBone(hb, 0)
+                local mat = bone and copies[bone]
+                if mat and (explicitBone == nil or bone == explicitBone) then
+                    local mins, maxs = model:GetHitBoxBounds(hb, 0)
+                    if mins and maxs then
+                        local d = (mat * ((mins + maxs) * 0.5)):Distance(handPos)
+                        hitboxDist = hitboxDist and math.min(hitboxDist, d) or d
+                    end
+                end
+            end
+        end
+
+        if measure then
             local dist = (hitboxDist or boneDist) and math.min(hitboxDist or math.huge, boneDist or math.huge)
             if not dist then dist = source:GetPos():Distance(handPos) end
             if dist and dist > maxDist then
@@ -353,13 +363,18 @@ function GCAL.InstallTPIK(deps)
     local function CarryChildren(ply, parentBone, baseMatrices, finalMatrices, carried)
         if carried[parentBone] then return end
         carried[parentBone] = true
-        local baseParent, solvedParent = baseMatrices[parentBone], finalMatrices[parentBone]
-        local inverse = baseParent and solvedParent and baseParent:GetInverse()
-        local delta = inverse and solvedParent * inverse
+        local delta
         for _, childBone in ipairs(GetChildren(ply, parentBone)) do
-            if not finalMatrices[childBone] and delta then
+            if not finalMatrices[childBone] and delta ~= false then
                 local baseChild = baseMatrices[childBone]
-                if baseChild then finalMatrices[childBone] = delta * baseChild end
+                if baseChild then
+                    if delta == nil then
+                        local baseParent, solvedParent = baseMatrices[parentBone], finalMatrices[parentBone]
+                        local inverse = baseParent and solvedParent and baseParent:GetInverse()
+                        delta = inverse and solvedParent * inverse or false
+                    end
+                    if delta then finalMatrices[childBone] = delta * baseChild end
+                end
             end
             if finalMatrices[childBone] then
                 CarryChildren(ply, childBone, baseMatrices, finalMatrices, carried)
@@ -425,6 +440,11 @@ function GCAL.InstallTPIK(deps)
         local carried = {}
         local boneCount = 0
         local sourceBones = track.sourceBones
+        local pool = track.thirdpersonMatrixPool
+        if not pool then
+            pool = {}
+            track.thirdpersonMatrixPool = pool
+        end
 
         for k, boneName in ipairs(track.bones) do
             local tgtBoneName = targetBones[k] or boneName
@@ -445,21 +465,25 @@ function GCAL.InstallTPIK(deps)
                 continue
             end
 
-            local pos = srcMatrix:GetTranslation() + offset
+            local pos = srcMatrix:GetTranslation()
+            pos:Add(offset)
             if spinePos then
-                pos = Vector(
-                    math.Clamp(pos.x, spinePos.x - clampRadius, spinePos.x + clampRadius),
-                    math.Clamp(pos.y, spinePos.y - clampRadius, spinePos.y + clampRadius),
-                    math.Clamp(pos.z, spinePos.z - clampRadius, spinePos.z + clampRadius)
-                )
+                pos.x = math.Clamp(pos.x, spinePos.x - clampRadius, spinePos.x + clampRadius)
+                pos.y = math.Clamp(pos.y, spinePos.y - clampRadius, spinePos.y + clampRadius)
+                pos.z = math.Clamp(pos.z, spinePos.z - clampRadius, spinePos.z + clampRadius)
             end
-            pos = pos + tpikPosDelta
-            local srcAng = srcMatrix:GetAngles()
-            local ang = Angle(srcAng.p + tpikAdjustAng.p, srcAng.y + tpikAdjustAng.y, srcAng.r + tpikAdjustAng.r)
+            pos:Add(tpikPosDelta)
+            local ang = srcMatrix:GetAngles()
+            ang.p = ang.p + tpikAdjustAng.p
+            ang.y = ang.y + tpikAdjustAng.y
+            ang.r = ang.r + tpikAdjustAng.r
 
+            local tgtPos = tgtMatrix:GetTranslation()
             if rules.scale ~= 1 then
-                local boneBase = tgtMatrix:GetTranslation()
-                pos = boneBase + (pos - boneBase) * rules.scale
+                local scale = rules.scale
+                pos.x = tgtPos.x + (pos.x - tgtPos.x) * scale
+                pos.y = tgtPos.y + (pos.y - tgtPos.y) * scale
+                pos.z = tgtPos.z + (pos.z - tgtPos.z) * scale
             end
 
             if smoothing > 0 then
@@ -467,9 +491,24 @@ function GCAL.InstallTPIK(deps)
             end
 
             local finalBlend = rules.blend or blend
-            local final = Matrix()
-            final:SetTranslation(LerpVector(finalBlend, pos, tgtMatrix:GetTranslation()))
-            final:SetAngles(LerpAngle(finalBlend, ang, tgtMatrix:GetAngles()))
+            tgtPos.x = pos.x + (tgtPos.x - pos.x) * finalBlend
+            tgtPos.y = pos.y + (tgtPos.y - pos.y) * finalBlend
+            tgtPos.z = pos.z + (tgtPos.z - pos.z) * finalBlend
+
+            local final = pool[tgtBone]
+            if not final then
+                final = Matrix()
+                pool[tgtBone] = final
+            end
+            final:Identity()
+            final:SetTranslation(tgtPos)
+            if finalBlend <= 0 then
+                final:SetAngles(ang)
+            elseif finalBlend >= 1 then
+                final:SetAngles(tgtMatrix:GetAngles())
+            else
+                final:SetAngles(LerpAngle(finalBlend, ang, tgtMatrix:GetAngles()))
+            end
             finalMatrices[tgtBone] = final
             boneCount = boneCount + 1
         end

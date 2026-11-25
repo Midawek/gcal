@@ -7,33 +7,9 @@ GCAL.Menu.Loaded = true
 
 CreateClientConVar("gcal_menu_keep_open", "1", true, false,
     "Keep the GCAL desktop window open after releasing the context menu key.")
-if not GetConVar("gcal_conflict_popup") then
-    CreateClientConVar("gcal_conflict_popup", "1", true, false,
-        "Show GCAL's conflict warning popup when incompatible addons are detected.")
-end
 local prideConVar = GetConVar("gcal_pride")
 if not prideConVar then
     prideConVar = CreateClientConVar("gcal_pride", "0", true, false, "Enable GCAL's hidden pride theme.")
-end
-for _, adjustmentConVar in ipairs({
-    {"gcal_anim_offset_x", "Global GCAL animation forward/back offset."},
-    {"gcal_anim_offset_y", "Global GCAL animation right/left offset."},
-    {"gcal_anim_offset_z", "Global GCAL animation up/down offset."},
-    {"gcal_anim_angle_p", "Global GCAL animation pitch offset."},
-    {"gcal_anim_angle_y", "Global GCAL animation yaw offset."},
-    {"gcal_anim_angle_r", "Global GCAL animation roll offset."},
-    {"gcal_tpik_offset_x", "Global GCAL thirdperson TPIK forward/back offset."},
-    {"gcal_tpik_offset_y", "Global GCAL thirdperson TPIK right/left offset."},
-    {"gcal_tpik_offset_z", "Global GCAL thirdperson TPIK up/down offset."},
-    {"gcal_tpik_angle_p", "Global GCAL thirdperson TPIK pitch offset."},
-    {"gcal_tpik_angle_y", "Global GCAL thirdperson TPIK yaw offset."},
-    {"gcal_tpik_angle_r", "Global GCAL thirdperson TPIK roll offset."},
-    {"gcal_tpik_target_radius_add", "Global GCAL thirdperson TPIK target radius adjustment."},
-    {"gcal_tpik_smoothing_add", "Global GCAL thirdperson TPIK smoothing adjustment."}
-}) do
-    if not GetConVar(adjustmentConVar[1]) then
-        CreateClientConVar(adjustmentConVar[1], "0", true, false, adjustmentConVar[2])
-    end
 end
 
 GCAL.Menu.DisabledAnims = GCAL.Menu.DisabledAnims or {}
@@ -66,16 +42,6 @@ local function FirstTrackName()
     end
 
     return nil, nil
-end
-
-local function StopAllTracks()
-    if GCAL.StopAllTracks then
-        GCAL:StopAllTracks()
-        return
-    end
-    for id in pairs(GCAL.ActiveTracks or {}) do
-        GCAL:StopTrack(id)
-    end
 end
 
 local function AnimCookieKey(prefix, name)
@@ -165,9 +131,8 @@ local function SetAnimEnabled(name, enabled)
     StoreAnimFlag(GCAL.Menu.DisabledAnims, "gcal_anim_enabled_", name, enabled)
 
     if not enabled then
-        local trackIDs = GCAL.GetActiveTrackIDs and GCAL:GetActiveTrackIDs() or {}
-        for _, id in ipairs(trackIDs) do
-            local track = GCAL.ActiveTracks and GCAL.ActiveTracks[id]
+        for _, id in ipairs(GCAL:GetActiveTrackIDs()) do
+            local track = GCAL.ActiveTracks[id]
             if track and track.name == name then
                 GCAL:StopTrack(id)
             end
@@ -388,8 +353,6 @@ local function ResetGlobalAdjustments()
 end
 
 local function LocalAdjustmentValue(name, field)
-    if not GCAL.GetAnimationAdjustmentValue then return 0 end
-
     return GCAL:GetAnimationAdjustmentValue(name, field.key)
 end
 
@@ -545,6 +508,28 @@ local function PaintPill(x, y, w, h, color, text)
     draw.SimpleText(text, "GCAL.Menu.Small", x + w * 0.5, y + h * 0.5 - 1, color, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 end
 
+local function DrawHeaderLogo(x, glow)
+    local activeLogoMaterial = PrideEnabled() and prideLogoMaterial or logoMaterial
+    if activeLogoMaterial:IsError() then return x end
+
+    local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
+    local logoMaxWidth = 112
+    local logoMaxHeight = 58
+    local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
+    local logoHeight = logoWidth / math.max(logoAspect, 0.01)
+    local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
+
+    surface.SetMaterial(activeLogoMaterial)
+    if glow and PrideEnabled() then
+        surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 24)
+        surface.DrawTexturedRect(x - 2, logoY - 2, logoWidth + 4, logoHeight + 4)
+    end
+    surface.SetDrawColor(255, 255, 255, PrideEnabled() and 245 or 235)
+    surface.DrawTexturedRect(x, logoY, logoWidth, logoHeight)
+
+    return x + logoWidth + 14
+end
+
 local function MakeButton(parent, text, accent, click, indent)
     local btn = vgui.Create("DButton", parent)
     btn:SetTall(34)
@@ -582,6 +567,26 @@ local function MakeButton(parent, text, accent, click, indent)
 
     return btn
 end
+
+GCAL.Menu.Colors = {
+    Bg = colBg,
+    Panel = colPanel,
+    PanelSoft = colPanelSoft,
+    Header = colHeader,
+    Line = colLine,
+    Text = colText,
+    Muted = colMuted,
+    Accent = colAccent,
+    Warn = colWarn,
+    Bad = colBad
+}
+GCAL.Menu.PrideEnabled = PrideEnabled
+GCAL.Menu.UpdateAccent = UpdateMenuAccent
+GCAL.Menu.PaintPrideLine = PaintPrideLine
+GCAL.Menu.DrawPrideTitle = DrawPrideTitle
+GCAL.Menu.DrawHeaderLogo = DrawHeaderLogo
+GCAL.Menu.PaintPill = PaintPill
+GCAL.Menu.MakeButton = MakeButton
 
 local function MakeStaticRow(parent, text, accent)
     local row = vgui.Create("DPanel", parent)
@@ -641,7 +646,7 @@ local function MakeAdjustmentSliders(parent, fields, name)
     end
 end
 
-local function MakeSearchEntry(parent, focusID)
+local function MakeSearchEntry(parent)
     local entry = vgui.Create("DTextEntry", parent)
     entry:SetTall(30)
     entry:SetText(GCAL.Menu.AnimSearch or "")
@@ -659,16 +664,7 @@ local function MakeSearchEntry(parent, focusID)
     end
     entry.OnValueChange = function(_, value)
         GCAL.Menu.AnimSearch = value or ""
-        GCAL.Menu.AnimSearchFocus = focusID
         timer.Simple(0, GCAL.Menu.Refresh)
-    end
-    entry.OnGetFocus = function()
-        GCAL.Menu.AnimSearchFocus = focusID
-    end
-    entry.OnLoseFocus = function()
-        if GCAL.Menu.AnimSearchFocus == focusID then
-            GCAL.Menu.AnimSearchFocus = nil
-        end
     end
 
     return entry
@@ -693,9 +689,20 @@ local function MakeSection(parent, title)
 end
 
 local function OpenAnimationAdjustmentEditor(name, label)
-    if not GCAL.GetAnimationAdjustmentValue or not GCAL.SetAnimationAdjustmentValue then return end
+    local frame = GCAL.Menu.AdjustmentEditor
+    if IsValid(frame) then
+        if frame.GCALAnimName == name then
+            frame:MakePopup()
+            frame:MoveToFront()
+            return
+        end
 
-    local frame = vgui.Create("DFrame")
+        frame:Remove()
+    end
+
+    frame = vgui.Create("DFrame")
+    GCAL.Menu.AdjustmentEditor = frame
+    frame.GCALAnimName = name
     frame:SetTitle("GCAL Adjust: " .. label)
     frame:SetSize(470, 620)
     frame:Center()
@@ -711,10 +718,9 @@ local function OpenAnimationAdjustmentEditor(name, label)
     end
 
     local resetButton = MakeButton(scroll, "Reset this animation", colWarn, function()
-        if GCAL.ClearAnimationAdjustment then
-            GCAL:ClearAnimationAdjustment(name)
-        end
+        GCAL:ClearAnimationAdjustment(name)
 
+        GCAL.Menu.AdjustmentEditor = nil
         frame:Close()
         timer.Simple(0, function()
             OpenAnimationAdjustmentEditor(name, label)
@@ -791,28 +797,7 @@ function GCAL.Menu.BuildWindow(window)
         surface.DrawOutlinedRect(0, 0, w, h, 1)
         surface.DrawLine(PANEL_PAD, 92, w - PANEL_PAD, 92)
 
-        local titleX = PANEL_PAD
-
-        local activeLogoMaterial = PrideEnabled() and prideLogoMaterial or logoMaterial
-        if not activeLogoMaterial:IsError() then
-            local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
-            local logoMaxWidth = 112
-            local logoMaxHeight = 58
-            local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
-            local logoHeight = logoWidth / math.max(logoAspect, 0.01)
-            local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
-            local logoX = PANEL_PAD
-
-            surface.SetMaterial(activeLogoMaterial)
-            if PrideEnabled() then
-                surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 24)
-                surface.DrawTexturedRect(logoX - 2, logoY - 2, logoWidth + 4, logoHeight + 4)
-            end
-            surface.SetDrawColor(255, 255, 255, PrideEnabled() and 245 or 235)
-            surface.DrawTexturedRect(logoX, logoY, logoWidth, logoHeight)
-
-            titleX = PANEL_PAD + logoWidth + 14
-        end
+        local titleX = DrawHeaderLogo(PANEL_PAD, true)
 
         DrawPrideTitle(panel, "Garry's Mod Compliant Armature Layer", "GCAL.Menu.Title", titleX, 15, colText)
         draw.SimpleText("Modern and modular offhand animation library", "GCAL.Menu.Subtitle", titleX + 1, 47,
@@ -827,7 +812,7 @@ function GCAL.Menu.BuildWindow(window)
             TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
     end
 
-    local searchEntry = MakeSearchEntry(panel, "header")
+    local searchEntry = MakeSearchEntry(panel)
     panel.SearchEntry = searchEntry
     searchEntry:SetTooltip("Filter animations by name, addon, model, or sequence.")
 
@@ -954,9 +939,7 @@ local function BuildAnimList(scroll)
 
                 if HasLocalAdjustments(name) then
                     menu:AddOption("Reset offsets/TPIK", function()
-                        if GCAL.ClearAnimationAdjustment then
-                            GCAL:ClearAnimationAdjustment(name)
-                        end
+                        GCAL:ClearAnimationAdjustment(name)
 
                         notification.AddLegacy("GCAL offsets reset for " .. label, NOTIFY_GENERIC, 2)
                         GCAL.Menu.Refresh()
@@ -1163,7 +1146,7 @@ local function BuildActions(panel)
             .. "Console: gcal_cambone 0/1.")
 
     AddActionButton(actions, "Stop all animations", colBad, function()
-        StopAllTracks()
+        GCAL:StopAllTracks()
         GCAL.Menu.Refresh()
     end)
 
@@ -1300,6 +1283,13 @@ function GCAL.Menu.Refresh()
 end
 
 function GCAL.Menu.OpenFrame()
+    local existing = IsValid(GCAL.Menu.Panel) and GCAL.Menu.Panel.GCALWindow
+    if IsValid(existing) then
+        GCAL.Menu.DetachWindow(existing)
+        existing:MoveToFront()
+        return existing
+    end
+
     local frame = vgui.Create("DFrame")
     frame:SetSize(980, 640)
     frame:Center()

@@ -49,6 +49,11 @@ if CLIENT then
 
         track.model:SetPos(finalPos)
         track.model:SetAngles(legAng)
+
+        if IsValid(track.legModel) then
+            track.model:SetupBones()
+            track.legModel:DrawModel()
+        end
     end
 end
 
@@ -70,12 +75,12 @@ function VMLegs:PlayAnim(name)
     track.legModel = ClientsideModel(legModelPath, RENDERGROUP_TRANSLUCENT)
     if not IsValid(track.legModel) then return res end
 
+    track.legModel:SetNoDraw(true)
     track.legModel:SetPos(ply:GetPos())
     track.legModel:SetAngles(ply:GetAngles())
 
-    local hands = ply:GetHands()
-    if IsValid(hands) then
-        track.legModel.GetPlayerColor = hands.GetPlayerColor
+    track.legModel.GetPlayerColor = function()
+        if IsValid(ply) then return ply:GetPlayerColor() end
     end
 
     track.legModel:SetParent(track.model)

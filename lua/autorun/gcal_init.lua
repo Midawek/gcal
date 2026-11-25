@@ -86,20 +86,20 @@ local function GCAL_ErrorFrameDetails(stack)
     local externalFrame
 
     for _, frame in ipairs(istable(stack) and stack or {}) do
-        local file
+        local frameFile
         local line
         local func
 
         if istable(frame) then
-            file = frame.File or frame.file or frame.Source or frame.source
+            frameFile = frame.File or frame.file or frame.Source or frame.source
             line = frame.Line or frame.line
             func = frame.Function or frame.func or frame.Name or frame.name
         elseif isstring(frame) then
-            file = frame
+            frameFile = frame
         end
 
-        if file and tostring(file) ~= "[C]" then
-            local detail = tostring(file)
+        if frameFile and tostring(frameFile) ~= "[C]" then
+            local detail = tostring(frameFile)
             if line and tonumber(line) and tonumber(line) >= 0 then
                 detail = detail .. ":" .. tostring(line)
             end
@@ -108,7 +108,7 @@ local function GCAL_ErrorFrameDetails(stack)
             end
 
             firstFrame = firstFrame or detail
-            if not GCAL_MatchesOwnPath(file) then
+            if not GCAL_MatchesOwnPath(frameFile) then
                 externalFrame = externalFrame or detail
             end
         end
@@ -252,125 +252,11 @@ if CLIENT then
         if IsValid(conflictPopupFrame) then conflictPopupFrame:Remove() end
         if IsValid(conflictPopupDim) then conflictPopupDim:Remove() end
 
-        local colBg = Color(14, 16, 21, 242)
-        local colPanel = Color(22, 25, 32, 248)
-        local colPanelSoft = Color(30, 35, 44, 238)
-        local colHeader = Color(27, 33, 41, 245)
-        local colLine = Color(110, 126, 148, 78)
-        local colText = Color(239, 243, 248)
-        local colMuted = Color(151, 163, 177)
-        local colAccent = Color(102, 207, 177)
-        local colWarn = Color(241, 181, 103)
-        local colBad = Color(236, 116, 121)
-        local logoMaterial = Material("gcal/logo", "smooth")
-        local prideLogoMaterial = Material("gcal/pridelogo", "smooth")
-        local defaultAccent = Color(102, 207, 177)
-        local prideColors = {
-            Color(228, 3, 3),
-            Color(255, 140, 0),
-            Color(255, 237, 0),
-            Color(0, 128, 38),
-            Color(0, 77, 255),
-            Color(117, 7, 135)
-        }
-
-        local function PrideEnabled()
-            local prideConVar = GetConVar("gcal_pride")
-            return prideConVar and prideConVar:GetBool() or false
-        end
-
-        local function PrideGradientColor(fraction)
-            local scaled = (fraction % 1) * #prideColors
-            local index = math.floor(scaled) + 1
-            local blend = scaled - math.floor(scaled)
-            local from = prideColors[index]
-            local to = prideColors[index % #prideColors + 1]
-
-            return Color(
-                Lerp(blend, from.r, to.r),
-                Lerp(blend, from.g, to.g),
-                Lerp(blend, from.b, to.b)
-            )
-        end
-
-        local function UpdatePrideAccent()
-            if PrideEnabled() then
-                local rainbow = HSVToColor((RealTime() * 55) % 360, 0.72, 1)
-                colAccent.r = rainbow.r
-                colAccent.g = rainbow.g
-                colAccent.b = rainbow.b
-                return
-            end
-
-            colAccent.r = defaultAccent.r
-            colAccent.g = defaultAccent.g
-            colAccent.b = defaultAccent.b
-        end
-
-        local function PaintPrideLine(x, y, width, height)
-            if not PrideEnabled() then
-                surface.SetDrawColor(colAccent.r, colAccent.g, colAccent.b, 120)
-                surface.DrawRect(x, y, width, height)
-                return
-            end
-
-            local phase = (RealTime() * 0.12) % 1
-            local sliceWidth = 4
-            for sliceX = 0, width - 1, sliceWidth do
-                local color = PrideGradientColor((sliceX / math.max(width, 1) + phase) % 1)
-                surface.SetDrawColor(color)
-                surface.DrawRect(x + sliceX, y, math.min(sliceWidth, width - sliceX), height)
-            end
-        end
-
-        local function DrawPrideTitle(panel, text, font, x, y)
-            if not PrideEnabled() then
-                draw.SimpleText(text, font, x, y, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-                return
-            end
-
-            surface.SetFont(font)
-            local textWidth, textHeight = surface.GetTextSize(text)
-            local screenX, screenY = panel:LocalToScreen(x, y)
-            local phase = (RealTime() * 0.12) % 1
-            local stripeWidth = 3
-
-            for stripeX = 0, textWidth - 1, stripeWidth do
-                local color = PrideGradientColor((stripeX / math.max(textWidth - 1, 1) + phase) % 1)
-                render.SetScissorRect(
-                    screenX + stripeX,
-                    screenY,
-                    math.min(screenX + stripeX + stripeWidth, screenX + textWidth),
-                    screenY + textHeight,
-                    true
-                )
-                draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-            end
-
-            render.SetScissorRect(0, 0, 0, 0, false)
-        end
-
-        local function PaintConflictButton(btn, w, h)
-            UpdatePrideAccent()
-            btn.GCALHover = Lerp(FrameTime() * 12, btn.GCALHover or 0, btn:IsHovered() and 1 or 0)
-
-            local a = btn.GCALHover
-            local accent = btn.GCALAccent or colAccent
-            local fill = Color(
-                Lerp(a, colPanelSoft.r, accent.r * 0.45),
-                Lerp(a, colPanelSoft.g, accent.g * 0.45),
-                Lerp(a, colPanelSoft.b, accent.b * 0.45),
-                225
-            )
-
-            draw.RoundedBox(5, 0, 0, w, h, fill)
-            surface.SetDrawColor(accent.r, accent.g, accent.b, 50 + a * 90)
-            surface.DrawOutlinedRect(0, 0, w, h, 1)
-            draw.RoundedBox(2, 8, 8, 3, h - 16, Color(accent.r, accent.g, accent.b, 160 + a * 60))
-            draw.SimpleText(
-                btn.GCALText or "", "GCAL.Menu.Body", 19, h * 0.5 - 1, colText, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER
-            )
-        end
+        local menu = GCAL.Menu
+        local colors = menu.Colors
+        local colBg, colPanel, colPanelSoft, colHeader = colors.Bg, colors.Panel, colors.PanelSoft, colors.Header
+        local colLine, colText, colMuted, colAccent = colors.Line, colors.Text, colors.Muted, colors.Accent
+        local colWarn, colBad = colors.Warn, colors.Bad
 
         local lines = {
             "Conflicting addons were detected.",
@@ -431,46 +317,26 @@ if CLIENT then
         end
 
         function frame:Paint(w, h)
-            UpdatePrideAccent()
+            menu.UpdateAccent()
             Derma_DrawBackgroundBlur(self, self.StartTime)
             draw.RoundedBox(0, 0, 0, w, h, colBg)
             draw.RoundedBox(0, 1, 1, w - 2, h - 2, colPanel)
             draw.RoundedBox(0, 1, 1, w - 2, 92, colHeader)
-            PaintPrideLine(10, 0, w - 20, PrideEnabled() and 3 or 1)
+            menu.PaintPrideLine(10, 0, w - 20, menu.PrideEnabled() and 3 or 1)
             surface.SetDrawColor(colLine)
             surface.DrawOutlinedRect(0, 0, w, h, 1)
             surface.DrawLine(16, 92, w - 16, 92)
 
-            local titleX = 16
-            local prideEnabled = PrideEnabled()
-            local activeLogoMaterial = prideEnabled and prideLogoMaterial or logoMaterial
-            if not activeLogoMaterial:IsError() then
-                local logoAspect = activeLogoMaterial:Width() / math.max(activeLogoMaterial:Height(), 1)
-                local logoMaxWidth = 112
-                local logoMaxHeight = 58
-                local logoWidth = math.min(logoMaxWidth, logoMaxHeight * logoAspect)
-                local logoHeight = logoWidth / math.max(logoAspect, 0.01)
-                local logoY = 15 + (logoMaxHeight - logoHeight) * 0.5
-                local logoX = 16
+            local titleX = menu.DrawHeaderLogo(16)
 
-                surface.SetMaterial(activeLogoMaterial)
-                surface.SetDrawColor(255, 255, 255, prideEnabled and 245 or 235)
-                surface.DrawTexturedRect(logoX, logoY, logoWidth, logoHeight)
-
-                titleX = 16 + math.min(logoMaxWidth, logoMaxHeight * logoAspect) + 14
-            end
-
-            DrawPrideTitle(self, "GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15)
+            menu.DrawPrideTitle(self, "GCAL Conflict Warning", "GCAL.Menu.Title", titleX, 15, colText)
             draw.SimpleText(
                 "Conflicting addons can break GCAL in unexpected ways!", "GCAL.Menu.Subtitle",
                 titleX + 1, 47, colMuted, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP
             )
 
             local pillText = tostring((hasLegacyFile and 1 or 0) + #mountedConflicts) .. " detected"
-            draw.RoundedBox(5, w - 124, 18, 98, 22, Color(colWarn.r, colWarn.g, colWarn.b, 26))
-            surface.SetDrawColor(colWarn.r, colWarn.g, colWarn.b, 150)
-            surface.DrawOutlinedRect(w - 124, 18, 98, 22, 1)
-            draw.SimpleText(pillText, "GCAL.Menu.Small", w - 75, 28, colWarn, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            menu.PaintPill(w - 124, 18, 98, 22, colWarn, pillText)
         end
 
         local content = vgui.Create("DScrollPanel", frame)
@@ -526,16 +392,7 @@ if CLIENT then
             end
         end
 
-        local workshopButton = vgui.Create("DButton", frame)
-        workshopButton:Dock(BOTTOM)
-        workshopButton:DockMargin(16, 0, 16, 8)
-        workshopButton:SetTall(34)
-        workshopButton:SetText("")
-        workshopButton.GCALText = "Open Subscribed Addons"
-        workshopButton.GCALAccent = colAccent
-        workshopButton.Paint = PaintConflictButton
-        workshopButton.DoClick = function()
-            surface.PlaySound("ui/buttonclickrelease.wav")
+        local workshopButton = menu.MakeButton(frame, "Open Subscribed Addons", colAccent, function()
             local ply = LocalPlayer()
             local steamID64 = IsValid(ply) and ply:SteamID64() or ""
             if steamID64 == "" then
@@ -547,20 +404,15 @@ if CLIENT then
                 "https://steamcommunity.com/profiles/" .. steamID64 ..
                     "/myworkshopfiles?appid=4000&browsefilter=mysubscriptions"
             )
-        end
+        end)
+        workshopButton:Dock(BOTTOM)
+        workshopButton:DockMargin(16, 0, 16, 8)
 
-        local closeButton = vgui.Create("DButton", frame)
+        local closeButton = menu.MakeButton(frame, "I know what I am doing, close this warning.", colBad, function()
+            frame:Close()
+        end)
         closeButton:Dock(BOTTOM)
         closeButton:DockMargin(16, 0, 16, 16)
-        closeButton:SetTall(34)
-        closeButton:SetText("")
-        closeButton.GCALText = "I know what I am doing, close this warning."
-        closeButton.GCALAccent = colBad
-        closeButton.Paint = PaintConflictButton
-        closeButton.DoClick = function()
-            surface.PlaySound("ui/buttonclickrelease.wav")
-            frame:Close()
-        end
 
         local suppressCheck = vgui.Create("DCheckBoxLabel", frame)
         suppressCheck:Dock(BOTTOM)
@@ -605,7 +457,8 @@ if CLIENT then
 
     timer.Simple(1, function()
         local prideConVar = GetConVar("gcal_pride")
-        if not prideConVar or not prideConVar:GetBool() then return end
+        if GCAL._PrideGreetingShown or not prideConVar or not prideConVar:GetBool() then return end
+        GCAL._PrideGreetingShown = true
 
         local prideColors = {
             Color(228, 3, 3),
@@ -648,6 +501,9 @@ if CLIENT then
     end)
 
     timer.Simple(1, function()
+        if GCAL._ConflictCheckDone then return end
+        GCAL._ConflictCheckDone = true
+
         local mountedConflicts = GetMountedConflictingWorkshopAddons()
         local hasLegacyFile = file.Exists("autorun/client/cl_vmanip.lua", "LUA")
 
@@ -697,7 +553,7 @@ if SERVER then
 
     concommand.Add("gcal_menu_open", function(ply)
         if IsValid(ply) then
-            ply:ConCommand("gcal_menu_open")
+            ply:PrintMessage(HUD_PRINTCONSOLE, "[GCAL] The GCAL menu is not loaded on your client.")
         else
             print("GCAL menu is clientside. Run gcal_menu_open from a player console.")
         end

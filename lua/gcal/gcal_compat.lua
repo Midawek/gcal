@@ -457,10 +457,18 @@ if CLIENT then
         resolveLegsViewModel = OwnerViewModel,
         thirdPersonMethod = function(_, weapon)
             local arc9TPIK = GetConVar("arc9_tpik")
-            local noTPIK = weapon.NoTPIK or (ARC9 and ARC9.NoTPIK)
-            if not noTPIK and weapon.GetProcessedValue then
-                local ok, processedNoTPIK = pcall(weapon.GetProcessedValue, weapon, "NoTPIK", true)
-                if ok then noTPIK = processedNoTPIK end
+            local frame = FrameNumber()
+            local noTPIK
+            if weapon.GCAL_NoTPIKFrame == frame then
+                noTPIK = weapon.GCAL_NoTPIK
+            else
+                noTPIK = weapon.NoTPIK or (ARC9 and ARC9.NoTPIK)
+                if not noTPIK and weapon.GetProcessedValue then
+                    local ok, processedNoTPIK = pcall(weapon.GetProcessedValue, weapon, "NoTPIK", true)
+                    if ok then noTPIK = processedNoTPIK end
+                end
+                weapon.GCAL_NoTPIKFrame = frame
+                weapon.GCAL_NoTPIK = noTPIK
             end
 
             local canUseARC9TPIK = ARC9

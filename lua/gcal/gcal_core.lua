@@ -432,16 +432,6 @@ local ANIM_TPIK_FIELDS = {
     thirdperson_smoothing = "smoothing",
 }
 
-local TPIK_RENAMED_OPTIONS = {
-    thirdperson_model = "model",
-    thirdperson_model_bone = "model_bone",
-    thirdperson_model_max_distance = "model_max_distance",
-    thirdperson_hide_materials = "hide_materials",
-    thirdperson_keep_materials = "keep_materials",
-    thirdperson_target_radius = "target_radius",
-    thirdperson_smoothing = "smoothing",
-}
-
 local TPIK_REMOVED_UNUSED = "was removed and is ignored (it was never implemented)."
 local TPIK_REMOVED_OPTIONS = {
     pole_source = "was removed and is ignored (the IK solver is gone).",
@@ -514,7 +504,7 @@ function GCAL:RegisterTPIKOptions(name, options)
         input.ignore_bones = nil
     end
 
-    ApplyDeprecations(name, input, TPIK_RENAMED_OPTIONS, TPIK_REMOVED_OPTIONS)
+    ApplyDeprecations(name, input, ANIM_TPIK_FIELDS, TPIK_REMOVED_OPTIONS)
 
     local clean = {}
     for key, value in pairs(input) do
@@ -562,7 +552,10 @@ end
 local function RebuildCamBoneHandlerOrder(self)
     local order = {}
     for _, handler in pairs(self.CamBoneHandlers) do order[#order + 1] = handler end
-    table.sort(order, function(a, b) return a.priority < b.priority end)
+    table.sort(order, function(a, b)
+        if a.priority ~= b.priority then return a.priority < b.priority end
+        return tostring(a.id) < tostring(b.id)
+    end)
     self.CamBoneHandlerOrder = order
 end
 
@@ -754,6 +747,7 @@ local function RefreshActiveTrack(track, data)
     track.thirdpersonBoneMatrices = nil
     track.thirdpersonSolveFrame = nil
     track.thirdpersonModelReadyFrame = nil
+    track.tpikRateModel, track.thirdpersonRateModel = nil, nil
 end
 
 function GCAL:RegisterAnim(arg1, arg2, arg3)
@@ -763,7 +757,7 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
     else
         name, data = arg2, arg3
     end
-    if not name or not data then return end
+    if not isstring(name) or not istable(data) then return false end
 
     self:PrepareAnimData(data, nil, name)
 
@@ -793,10 +787,11 @@ function GCAL:RegisterAnim(arg1, arg2, arg3)
             RefreshActiveTrack(track, data)
         end
     end
+    return true
 end
 
 function GCAL:RegisterHandAnim(name, hand, data)
-    if not name or not data then return end
+    if not name or not istable(data) then return false end
 
     data.hand = hand
     return self:RegisterAnim(name, data)
@@ -955,6 +950,7 @@ function GCAL:StopAllTracks()
     for _, trackID in ipairs(self:GetActiveTrackIDs()) do
         self:StopTrack(trackID)
     end
+    table.Empty(self.QueuedAnims)
 end
 
 if CLIENT then
@@ -1528,9 +1524,9 @@ if CLIENT then
         if GCAL.ActiveTracks[trackID] then
             local oldTrack = GCAL.ActiveTracks[trackID]
             if oldTrack.onInterruptCallback and isfunction(oldTrack.onInterruptCallback) then
-                pcall(oldTrack.onInterruptCallback, trackID, oldTrack.name, name)
+                xpcall(oldTrack.onInterruptCallback, ErrorNoHaltWithStack, trackID, oldTrack.name, name)
             end
-            GCAL:StopTrack(trackID)
+            GCAL:StopTrack(trackID, true)
         end
 
         GCAL.ActiveTracks[trackID] = track
@@ -1541,7 +1537,7 @@ if CLIENT then
         end
 
         if track.onStartCallback and isfunction(track.onStartCallback) then
-            pcall(track.onStartCallback, trackID, name, track)
+            xpcall(track.onStartCallback, ErrorNoHaltWithStack, trackID, name, track)
         end
 
         hook.Run("GCALTrackStarted", trackID, name, track)
@@ -1549,7 +1545,8 @@ if CLIENT then
         return true
     end
 
-    function GCAL:StopTrack(trackID)
+    function GCAL:StopTrack(trackID, keepQueue)
+        if not keepQueue and trackID ~= nil then GCAL.QueuedAnims[trackID] = nil end
         local track = GCAL.ActiveTracks[trackID]
         if track then
             GCAL_Log("Stopping track:", trackID)
@@ -1635,7 +1632,7 @@ if CLIENT then
         if soundTable then
             for soundPath, time in pairs(soundTable) do
                 timer.Simple(time, function()
-                    if self:GetCurrentAnim(trackID) == track.name and IsValid(LocalPlayer())
+                    if self:GetTrack(trackID) == track and IsValid(LocalPlayer())
                         and LocalPlayer():Alive() then
                         if not GCAL.MuteSounds:GetBool() then
                             local overridePath = GCAL.GetAnimSoundOverride and GCAL:GetAnimSoundOverride(track.name)
@@ -1723,7 +1720,7 @@ if CLIENT then
         end
     end
 
-    local function AdvanceTrackTiming(track, now, dt)
+    local function AdvanceTrackTiming(track, now, dt, skipModels)
         local looped = false
         if track.loop then
             if track.cycle >= 1 then
@@ -1750,7 +1747,7 @@ if CLIENT then
             track.cycle = track.cycle + dt * speedMultiplier
         end
 
-        if not track.poseOnlyLegacy then
+        if not track.poseOnlyLegacy and not skipModels then
             if IsValid(track.model) then
                 track.model:SetCycle(track.cycle)
                 track.model:InvalidateBoneCache()
@@ -1760,12 +1757,18 @@ if CLIENT then
                 track.camModel:InvalidateBoneCache()
             end
             if IsValid(track.tpikModel) then
-                track.tpikModel:SetPlaybackRate(speedMultiplier)
+                if track.tpikRateModel ~= track.tpikModel or track.tpikRate ~= speedMultiplier then
+                    track.tpikModel:SetPlaybackRate(speedMultiplier)
+                    track.tpikRateModel, track.tpikRate = track.tpikModel, speedMultiplier
+                end
                 track.tpikModel:SetCycle(track.cycle)
                 track.tpikModel:InvalidateBoneCache()
             end
             if IsValid(track.thirdpersonModel) then
-                track.thirdpersonModel:SetPlaybackRate(speedMultiplier)
+                if track.thirdpersonRateModel ~= track.thirdpersonModel or track.thirdpersonRate ~= speedMultiplier then
+                    track.thirdpersonModel:SetPlaybackRate(speedMultiplier)
+                    track.thirdpersonRateModel, track.thirdpersonRate = track.thirdpersonModel, speedMultiplier
+                end
                 track.thirdpersonModel:SetCycle(track.cycle)
                 track.thirdpersonModel:InvalidateBoneCache()
             end
@@ -1782,10 +1785,10 @@ if CLIENT then
     end
 
     local function FinishTrack(track, trackID)
+        GCAL:StopTrack(trackID, true)
         if track.onFinishCallback and isfunction(track.onFinishCallback) then
-            pcall(track.onFinishCallback, trackID, track.name, track)
+            xpcall(track.onFinishCallback, ErrorNoHaltWithStack, trackID, track.name, track)
         end
-        GCAL:StopTrack(trackID)
     end
 
     local function UpdateTrack(track, trackID)
@@ -1872,9 +1875,10 @@ if CLIENT then
     end
 
     local function GetTrackModelScale(track, weapon, flip)
-        if TrackUsesLegacyFlip(track) and flip.flipmode then return -1 end
+        local scale = track.modelScale or 1
+        if TrackUsesLegacyFlip(track) and flip.flipmode then return -scale end
 
-        return 1
+        return scale
     end
 
     local function PlaceTrackModel(track, pos, ang)
@@ -2110,11 +2114,55 @@ if CLIENT then
         return self:FindArmTarget(context.vm, context.handsEnt, targetBones)
     end
 
+    local frameFlip, frameArmTargets = {}, {}
+    local frameMemoContext, frameMemoWeapon, frameMemoFlipReady, frameMemoReloading
+    local function SyncFrameMemo(context, weapon)
+        if frameMemoContext == context and frameMemoWeapon == weapon then return end
+        frameMemoContext, frameMemoWeapon, frameMemoFlipReady, frameMemoReloading = context, weapon, false, nil
+        table.Empty(frameArmTargets)
+    end
+
+    local function GetFrameFlipState(context, weapon)
+        if not context then return GetLegacyFlipState(weapon) end
+        SyncFrameMemo(context, weapon)
+        if not frameMemoFlipReady then
+            for k, v in pairs(GetLegacyFlipState(weapon)) do frameFlip[k] = v end
+            frameMemoFlipReady = true
+        end
+        return frameFlip
+    end
+
+    local function IsFrameWeaponReloading(context, weapon)
+        if context then
+            SyncFrameMemo(context, weapon)
+            if frameMemoReloading ~= nil then return frameMemoReloading end
+        end
+        local reloading = IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 or false
+        if context then frameMemoReloading = reloading end
+        return reloading
+    end
+
+    local function ResolveFrameArmTarget(context, weapon, targetBones)
+        if not context or not targetBones then return GCAL:ResolveArmTarget(context, targetBones) end
+        SyncFrameMemo(context, weapon)
+        local target = frameArmTargets[targetBones]
+        if target == nil then
+            target = GCAL:ResolveArmTarget(context, targetBones) or false
+            frameArmTargets[targetBones] = target
+        end
+        return target or nil
+    end
+
+    local function OffsetAngle(ang, offset)
+        if rawequal(offset, angleZero) then return ang end
+        return ang + offset
+    end
+
     local function ApplyLegacyLeftArmVisible(track, vm, handsEnt, ply, weapon, flags, renderContext, skipVMSetup)
         if not IsValid(track.model) or not IsValid(vm) then return end
-        if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
+        if IsFrameWeaponReloading(renderContext, weapon) then return end
 
-        local flip = GetLegacyFlipState(weapon)
+        local flip = GetFrameFlipState(renderContext, weapon)
         local flipmode = flip.flipmode
         local flipped = (track.lerpVal <= 0.5 and scaleflipvec or scalevec)
         local sourceAngleOffset = GetTrackSourceAngleOffset(track, weapon, flip)
@@ -2123,7 +2171,7 @@ if CLIENT then
             if posparentcache ~= weapon then
                 posparentcache = weapon
                 track.model:SetParent(nil)
-                PlaceTrackModel(track, EyePos(), vm:GetAngles() + sourceAngleOffset)
+                PlaceTrackModel(track, EyePos(), OffsetAngle(vm:GetAngles(), sourceAngleOffset))
                 track.model:SetParent(vm)
             end
         end
@@ -2135,10 +2183,10 @@ if CLIENT then
             local finang = eyeang - vmang
             finang.y = 0
             local newang = eyeang + (finang * 0.25)
-            PlaceTrackModel(track, eyepos, newang + sourceAngleOffset)
+            PlaceTrackModel(track, eyepos, OffsetAngle(newang, sourceAngleOffset))
         elseif not track.data.assurepos then
             local eyeang, eyepos = EyeAngles(), EyePos()
-            PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
+            PlaceTrackModel(track, eyepos, OffsetAngle(eyeang, sourceAngleOffset))
         end
 
         if not skipVMSetup then
@@ -2156,7 +2204,7 @@ if CLIENT then
 
         local rigpick = GCAL.GROUPS.LEFT_ARM
         local targetRig = flip.targetBones
-        local targetEnt = GCAL:ResolveArmTarget(renderContext, targetRig)
+        local targetEnt = ResolveFrameArmTarget(renderContext, weapon, targetRig)
         if not IsValid(targetEnt) then return end
         if not skipVMSetup or (targetEnt ~= vm and targetEnt ~= handsEnt) then
             targetEnt:SetupBones()
@@ -2165,6 +2213,14 @@ if CLIENT then
         local boneCount = 0
         local factor = (track.lerpVal or 1) ^ (track.lerpCurve or 1)
         local scaleVec = flip.targetRight and flipped or scalevec
+        if factor == 1 and rawequal(scaleVec, scalevec) then
+            if IsValid(handsEnt) and handsEnt ~= targetEnt then
+                handsEnt:InvalidateBoneCache()
+            end
+            track.debugTargetEntity = targetEnt
+            track.debugBoneCount = 0
+            return
+        end
         local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
 
         for k, boneName in ipairs(rigpick) do
@@ -2202,7 +2258,7 @@ if CLIENT then
     local function ApplyBones(track, vm, handsEnt, ply, weapon, thirdperson, suppressSourceDraw, flags, renderContext,
                               skipVMSetup)
         if not IsValid(vm) or not track.bones then return end
-        if IsValid(weapon) and type(weapon.GetStatus) == "function" and weapon:GetStatus() == 5 then return end
+        if IsFrameWeaponReloading(not thirdperson and renderContext or nil, weapon) then return end
 
         if thirdperson then
             ApplyThirdPersonBones(track, vm, weapon, renderContext and renderContext.thirdpersonBaseMatrices)
@@ -2216,22 +2272,21 @@ if CLIENT then
             end
         end
 
-        local flip = GetLegacyFlipState(weapon)
+        local flip = GetFrameFlipState(renderContext, weapon)
         local useLegacyFlip = TrackUsesLegacyFlip(track)
         local flipmode = useLegacyFlip and flip.flipmode or false
         local sourceAngleOffset = GetTrackSourceAngleOffset(track, weapon, flip)
-        local eyeang, eyepos = EyeAngles(), EyePos()
         local targetBones = GetTrackTargetBones(track, weapon, flip)
-        local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
+        local targetEnt = ResolveFrameArmTarget(renderContext, weapon, targetBones)
         if not IsValid(targetEnt) then return end
         if not skipVMSetup or (targetEnt ~= vm and targetEnt ~= handsEnt) then
             targetEnt:SetupBones()
         end
 
         if track.data.legacy or track.data.locktoply or track.data.assurepos then
-            PlaceTrackModel(track, eyepos, eyeang + sourceAngleOffset)
+            PlaceTrackModel(track, EyePos(), OffsetAngle(EyeAngles(), sourceAngleOffset))
         else
-            PlaceTrackModel(track, vm:GetPos(), vm:GetAngles() + sourceAngleOffset)
+            PlaceTrackModel(track, vm:GetPos(), OffsetAngle(vm:GetAngles(), sourceAngleOffset))
         end
 
         track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
@@ -2246,6 +2301,14 @@ if CLIENT then
         local lerpVal = track.lerpVal
         local blendFactor = GetTrackBlendFactor(track, lerpVal, track.lerpCurve or 1)
         local scaleVec = useLegacyFlip and flip.targetRight and lerpVal <= 0.5 and scaleflipvec or scalevec
+        if blendFactor == 1 and rawequal(scaleVec, scalevec) then
+            if IsValid(handsEnt) and handsEnt ~= targetEnt then
+                handsEnt:InvalidateBoneCache()
+            end
+            track.debugTargetEntity = targetEnt
+            track.debugBoneCount = 0
+            return
+        end
         local sourceBones = track.sourceBones
         local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
 
@@ -2258,17 +2321,17 @@ if CLIENT then
             local targetBone = CachedBone(targetCache, targetEnt, targetBones[k] or boneName)
             if targetBone < 0 then continue end
 
-            local modelMatrix = track.model:GetBoneMatrix(modelBone)
-            if not modelMatrix then continue end
-
             local m
             -- Exactly 0, not <= 0: OutElastic overshoot gives negative factors that must still lerp.
             if blendFactor == 0 then
-                m = modelMatrix
+                m = track.model:GetBoneMatrix(modelBone)
+                if not m then continue end
             elseif blendFactor == 1 then
                 m = targetEnt:GetBoneMatrix(targetBone)
                 if not m then continue end
             else
+                local modelMatrix = track.model:GetBoneMatrix(modelBone)
+                if not modelMatrix then continue end
                 local targetMatrix = targetEnt:GetBoneMatrix(targetBone)
                 if not targetMatrix then continue end
                 m = LerpMatrixInto(modelMatrix, targetMatrix, blendFactor)
@@ -2392,13 +2455,16 @@ if CLIENT then
         return moved
     end
 
+    local gunRootEnts, gunRootBones, gunRootOld, gunRootNew = {}, {}, {}, {}
+    local gunSolvedTarget, gunSolvedVM, gunOutTarget, gunOutVM = {}, {}, {}, {}
+
     local function ApplyGunBones(track, vm, weapon, renderContext, mode)
         if not IsValid(track.model) or not track.bones or not track.data then return end
         if TrackUsesLegacyFlip(track) then return end
 
-        local flip = GetLegacyFlipState(weapon)
+        local flip = GetFrameFlipState(renderContext, weapon)
         local targetBones = GetTrackTargetBones(track, weapon, flip)
-        local targetEnt = GCAL:ResolveArmTarget(renderContext, targetBones)
+        local targetEnt = ResolveFrameArmTarget(renderContext, weapon, targetBones)
         if not IsValid(targetEnt) then return end
         if targetEnt ~= vm then targetEnt:SetupBones() end
 
@@ -2407,13 +2473,14 @@ if CLIENT then
         else
             PlaceTrackModel(track, vm:GetPos(), vm:GetAngles())
         end
-        track.model:SetModelScale(1)
+        track.model:SetModelScale(GetTrackModelScale(track, weapon, flip))
         track.model:SetupBones()
 
         local blendFactor = GetTrackBlendFactor(track, track.lerpVal or 1, track.lerpCurve or 1)
 
-        local roots = {}
-        local solved = { [targetEnt] = {} }
+        local rootCount = 0
+        local solvedTarget = gunSolvedTarget
+        table.Empty(solvedTarget)
         local rightHandOld, rightHandNew
         local sourceCache, targetCache = BoneCache(track.model), BoneCache(targetEnt)
         for k, boneName in ipairs(track.bones) do
@@ -2433,17 +2500,24 @@ if CLIENT then
             if not targetMatrix then continue end
 
             local newMatrix = BlendGunMatrix(modelMatrix, targetMatrix, blendFactor)
-            solved[targetEnt][targetBone] = true
-            roots[#roots + 1] = { targetEnt, targetBone, targetMatrix, newMatrix }
+            solvedTarget[targetBone] = true
+            rootCount = rootCount + 1
+            gunRootEnts[rootCount], gunRootBones[rootCount] = targetEnt, targetBone
+            gunRootOld[rootCount], gunRootNew[rootCount] = targetMatrix, newMatrix
             if targetBoneName == "ValveBiped.Bip01_R_Hand" then
                 rightHandOld, rightHandNew = targetMatrix, newMatrix
             end
         end
-        if #roots == 0 then return end
+        if rootCount == 0 then return end
 
-        local out = { [targetEnt] = {} }
-        solved[vm] = solved[vm] or {}
-        out[vm] = out[vm] or {}
+        local outTarget = gunOutTarget
+        table.Empty(outTarget)
+        local solvedVM, outVM = solvedTarget, outTarget
+        if targetEnt ~= vm then
+            solvedVM, outVM = gunSolvedVM, gunOutVM
+            table.Empty(solvedVM)
+            table.Empty(outVM)
+        end
 
         local drivenOld, drivenNew
         local gunMoved = 0
@@ -2452,14 +2526,16 @@ if CLIENT then
             for _, pair in ipairs(GetGunBonePairs(track)) do
                 local sourceBone = CachedBone(sourceCache, track.model, pair[1])
                 local gunBone = CachedBone(vmCache, vm, pair[2])
-                if sourceBone >= 0 and gunBone >= 0 and not solved[vm][gunBone] then
+                if sourceBone >= 0 and gunBone >= 0 and not solvedVM[gunBone] then
                     local sourceMatrix = track.model:GetBoneMatrix(sourceBone)
                     local gunMatrix = vm:GetBoneMatrix(gunBone)
                     if sourceMatrix and gunMatrix then
                         local newMatrix = BlendGunMatrix(sourceMatrix, gunMatrix, blendFactor)
-                        solved[vm][gunBone] = true
-                        out[vm][gunBone] = newMatrix
-                        roots[#roots + 1] = { vm, gunBone, gunMatrix, newMatrix }
+                        solvedVM[gunBone] = true
+                        outVM[gunBone] = newMatrix
+                        rootCount = rootCount + 1
+                        gunRootEnts[rootCount], gunRootBones[rootCount] = vm, gunBone
+                        gunRootOld[rootCount], gunRootNew[rootCount] = gunMatrix, newMatrix
                         gunMoved = gunMoved + 1
                         if not drivenOld then drivenOld, drivenNew = gunMatrix, newMatrix end
                         if pair[3] then break end
@@ -2469,10 +2545,12 @@ if CLIENT then
         end
 
         local carried = 0
-        for _, root in ipairs(roots) do
-            local ent = root[1]
-            local moved = CarryGunChildren(ent, root[2], root[3], root[4], solved[ent], out[ent])
-            if ent == vm then carried = carried + moved end
+        for i = 1, rootCount do
+            local ent = gunRootEnts[i]
+            local isVM = ent == vm
+            local moved = CarryGunChildren(ent, gunRootBones[i], gunRootOld[i], gunRootNew[i],
+                isVM and solvedVM or solvedTarget, isVM and outVM or outTarget)
+            if isVM then carried = carried + moved end
         end
 
         local driverOld, driverNew = drivenOld or rightHandOld, drivenNew or rightHandNew
@@ -2481,10 +2559,10 @@ if CLIENT then
             local delta = GunDelta(driverOld, driverNew)
             if delta then
                 for bone = 0, vm:GetBoneCount() - 1 do
-                    if not solved[vm][bone] and not IsArmBone(vm, bone) then
+                    if not solvedVM[bone] and not IsArmBone(vm, bone) then
                         local matrix = vm:GetBoneMatrix(bone)
                         if matrix then
-                            out[vm][bone] = delta * matrix
+                            outVM[bone] = delta * matrix
                             carried = carried + 1
                             rigid = true
                         end
@@ -2493,15 +2571,23 @@ if CLIENT then
             end
         end
 
-        for ent, matrices in pairs(out) do
-            for bone, matrix in pairs(matrices) do
-                ent:SetBoneMatrix(bone, matrix)
+        for bone, matrix in pairs(outTarget) do
+            targetEnt:SetBoneMatrix(bone, matrix)
+        end
+        if outVM ~= outTarget then
+            for bone, matrix in pairs(outVM) do
+                vm:SetBoneMatrix(bone, matrix)
             end
         end
 
-        track.debugGunMode = mode
-            .. ((mode == "animated" and gunMoved == 0) and " (no gun bone matched, following hand)" or "")
-            .. (rigid and " [rigid]" or "")
+        local noGunMatch = mode == "animated" and gunMoved == 0
+        if not track.debugGunMode or track.debugGunModeBase ~= mode or track.debugGunModeNoMatch ~= noGunMatch
+            or track.debugGunModeRigid ~= rigid then
+            track.debugGunModeBase, track.debugGunModeNoMatch, track.debugGunModeRigid = mode, noGunMatch, rigid
+            track.debugGunMode = mode
+                .. (noGunMatch and " (no gun bone matched, following hand)" or "")
+                .. (rigid and " [rigid]" or "")
+        end
         track.debugGunBoneCount = gunMoved + carried
     end
 
@@ -2539,8 +2625,9 @@ if CLIENT then
         return bones
     end
 
-    local function CollectTPIKBaseMatrices(ply, tracks)
-        local matrices = {}
+    local function CollectTPIKBaseMatrices(ply, tracks, out)
+        local matrices = out or {}
+        if out then table.Empty(out) end
         for _, bone in ipairs(GetTPIKBaseBones(ply)) do
             matrices[bone] = ply:GetBoneMatrix(bone)
         end
@@ -2600,6 +2687,9 @@ if CLIENT then
         local frame = FrameNumber()
         if lastTrackUpdateFrame == frame then return false end
         lastTrackUpdateFrame = frame
+        if next(GCAL.ActiveTracks) == nil and next(GCAL.QueuedAnims) == nil and not (VManip and VManip.QueuedAnim) then
+            return true
+        end
 
         local ply = LocalPlayer()
         if IsValid(ply) and not ply:Alive() then
@@ -2681,6 +2771,7 @@ if CLIENT then
         renderTracksBusy = false
     end
 
+    local thirdPersonRenderContext = { thirdpersonBaseMatrices = {} }
     local function RenderThirdPersonTracks(ply, methodOverride, forcedWeapon)
         if next(GCAL.ActiveTracks) == nil or ply ~= LocalPlayer() then return end
         if not GCAL:IsThirdPersonEnabled() then return end
@@ -2697,11 +2788,12 @@ if CLIENT then
         UpdateTracksForFrame()
         if next(GCAL.ActiveTracks) == nil then return end
 
+        local frame = FrameNumber()
         local needsSolve = false
         for id, track in pairs(GCAL.ActiveTracks) do
             if id ~= "legs"
                 and track.thirdperson
-                and track.thirdpersonSolveFrame ~= FrameNumber()
+                and track.thirdpersonSolveFrame ~= frame
             then
                 needsSolve = true
                 break
@@ -2715,15 +2807,14 @@ if CLIENT then
                 ply:SetupBones()
             end
 
-            renderContext = {
-                thirdpersonBaseMatrices = CollectTPIKBaseMatrices(ply, GCAL.ActiveTracks)
-            }
+            renderContext = thirdPersonRenderContext
+            CollectTPIKBaseMatrices(ply, GCAL.ActiveTracks, renderContext.thirdpersonBaseMatrices)
         end
 
         for id, track in pairs(GCAL.ActiveTracks) do
             if id == "legs" or not track.thirdperson then continue end
 
-            if track.thirdpersonSolveFrame == FrameNumber() then
+            if track.thirdpersonSolveFrame == frame then
                 ApplyCachedThirdPersonBones(track, ply)
             elseif renderContext then
                 ApplyBones(track, ply, nil, ply, weapon, true, false, nil, renderContext)
@@ -2834,10 +2925,12 @@ if CLIENT then
         if next(GCAL.ActiveTracks) == nil or not GCAL.CamBone:GetBool() then return end
         local ply = LocalPlayer()
         if not IsValid(ply) or not ply:Alive() then return end
+        if ply:GetViewEntity() ~= ply or ply:ShouldDrawLocalPlayer() then return end
 
         for trackID, track in pairs(GCAL.ActiveTracks) do
             if trackID == "legs" then continue end
             if not IsValid(track.camModel) then continue end
+            if (track.lerpVal or 1) >= 1 then continue end
 
             if track.camAttachmentID == nil then
                 local attachments = track.camModel:GetAttachments() or {}
@@ -3395,6 +3488,7 @@ if CLIENT then
             GCAL:StopTrack(activeTrackID)
             stopped = stopped + 1
         end
+        table.Empty(GCAL.QueuedAnims)
 
         MsgC(consoleTitle, "[GCAL] Stopped " .. tostring(stopped) .. " active track(s)\n")
     end, nil, "Stop one GCAL track, or every active track when no track is provided. Usage: gcal_stop [track]")
@@ -3436,7 +3530,7 @@ if SERVER then
         if isstring(arg1) then
             name, trackID = arg1, arg2
         else
-            name, trackID = arg2, nil
+            name, trackID, recipients = arg2, recipients, arg1
         end
 
         if not name then return false end

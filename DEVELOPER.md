@@ -2,497 +2,577 @@
 
 ### Developer Documentation :3
 
-GCAL is a modern, modular offhand animation library for Garry's Mod. It serves as a superior, backward-compatible replacement for the legacy VManip system.
+GCAL is a modular offhand animation library for Garry's Mod and a backward-compatible replacement for VManip. This page is for addon authors who want to register and play hand animations with GCAL, or port VManip addons to it.
+
+## Contents
+
+1. [Overview](#1-overview)
+2. [Getting started](#2-getting-started)
+3. [Registering animations](#3-registering-animations)
+4. [Playback and tracks](#4-playback-and-tracks)
+5. [Runtime query API](#5-runtime-query-api)
+6. [Hooks reference](#6-hooks-reference)
+7. [Thirdperson (TPIK)](#7-thirdperson-tpik)
+8. [Camera bone (cambone)](#8-camera-bone-cambone)
+9. [Weapon-base strategies](#9-weapon-base-strategies)
+10. [Multiplayer and networking](#10-multiplayer-and-networking)
+11. [Migrating from VManip and VMLegs](#11-migrating-from-vmanip-and-vmlegs)
+12. [Debugging](#12-debugging)
+13. [Convar reference](#13-convar-reference)
+14. [Integrations](#14-integrations)
+15. [Deprecated and removed fields](#15-deprecated-and-removed-fields)
 
 ---
 
-## 0. How GCAL Works
+## 1. Overview
 
-GCAL is built around a simple idea: an addon registers animation data once, then asks GCAL to play that animation on a named runtime track. GCAL owns the clientside animation model, advances its cycle once per rendered frame, reads the animated source bones from that model, and writes the resulting transforms onto the correct viewmodel, hands entity, or thirdperson player bones.
+An addon registers animation data once, then asks GCAL to play it on a named **track**. For every playing track GCAL owns a hidden clientside model, advances its cycle once per rendered frame, reads the animated bones from it and writes them onto the viewmodel, the hands entity, or (in thirdperson) the player model.
 
-The important pieces are:
+| Piece | What it is |
+| :---- | :--------- |
+| `GCAL.Anims[name]` | Registry of static data from `GCAL:RegisterAnim`. |
+| `GCAL.ActiveTracks[trackID]` | Runtime state of each playing track: cycle, blend (`lerpVal`), hold/segment state, models. |
+| `GCAL.QueuedAnims[trackID]` | One queued animation name per track. |
+| `GCAL.TPIKOptions[name]` | Thirdperson-only settings from `GCAL:RegisterTPIKOptions`. |
+| Source model | Hidden `ClientsideModel` of the registered `model`. GCAL reads the animated bones from it. |
+| Target entity | The entity GCAL writes bones to: the viewmodel if it has the target bones, otherwise the player's hands entity. Weapon-base strategies can override this. |
+| Track ID | A runtime slot. Different tracks play at the same time; starting an animation on a busy track replaces the old one (unless it can't be interrupted, see [4](#4-playback-and-tracks)). |
 
-| Piece | What it does |
-| :---- | :----------- |
-| Animation registry | `GCAL.Anims[name]` stores static data from `GCAL:RegisterAnim`. |
-| Active tracks | `GCAL.ActiveTracks[trackID]` stores runtime playback state such as cycle, lerp, hold state, models, and sounds. |
-| Source model | A hidden clientside model created from the registered `model`; GCAL reads the animated bones from this. |
-| Target entity | The entity GCAL writes bones to. This is usually the viewmodel or player hands entity, but weapon-base strategies can choose another entity. |
-| Track ID | The slot an animation plays in. Different track IDs can run at the same time. Starting a new animation on the same track replaces the old one. |
-| TPIK options | `GCAL.TPIKOptions[name]` stores thirdperson-only solver and prop-rendering settings. |
-
-### Playback Lifecycle
-
-Most native animations follow this flow:
+### Lifecycle
 
 1. Your addon calls `GCAL:RegisterAnim(name, data)` during clientside initialization.
 2. Your addon calls `GCAL:Play(name, trackID)` when gameplay wants the gesture.
-3. GCAL creates hidden clientside models, resolves the sequence, initializes cycle/lerp state, and stores the runtime track in `GCAL.ActiveTracks`.
-4. Every rendered frame, GCAL advances each track once, updates model cycles, plays scheduled sounds, and updates hold/segment state.
-5. During viewmodel/hands rendering, GCAL places the hidden source model, reads source bone matrices, and applies them to the selected target bones.
-6. When the animation finishes, is stopped, or is replaced on the same track, GCAL removes its clientside models and fires stop hooks.
+3. GCAL creates the source model(s), resolves the sequence and stores the track in `GCAL.ActiveTracks`.
+4. Once per frame a shared updater advances every track (cycle, blend, sounds, hold/segment state) and starts queued animations. The render hooks only draw the result, so drawing both firstperson and thirdperson can't speed an animation up or skip short clips.
+5. In the viewmodel pass GCAL places the source model, draws it (so props authored into it are visible), and blends its bone matrices into the target's.
+6. When the animation finishes, is stopped, or is replaced, GCAL removes its models and fires the stop hooks.
 
-Thirdperson uses the same track timing. It does not run a second copy of the animation; it reuses the active track state and projects it onto the player model through TPIK when possible.
+### Firstperson vs thirdperson
 
-### Firstperson vs Thirdperson
+Firstperson is a direct bone copy/blend from the source model onto the viewmodel or hands. It is the primary, most stable path.
 
-Firstperson rendering is direct bone copying/blending from the hidden animation model into the active viewmodel or hands entity. It is the primary, most stable path.
+Thirdperson reuses the same track timing; it does not run a second copy of the animation. GCAL's TPIK is also a direct bone copy, not an IK solver: each mapped bone is moved into the player's body space using the upper arm as reference, clamped to a box around `Spine4`, smoothed per bone, blended with the player's pose and written to the player model. Unmapped child bones follow, and a clone of the registered model renders addon props on the player's hand. Player models and weapon bases differ, so thirdperson often needs its own tuning: keep regular data in `RegisterAnim`, and put thirdperson-only tuning in `GCAL:RegisterTPIKOptions`.
 
-Thirdperson rendering is a retargeting problem. Player models have different proportions, weapon bases may already run their own thirdperson IK, and addon props may be weighted differently from arms. GCAL solves this with a TPIK pass: it reads shoulder, elbow, and hand goals from the animation model, solves a two-bone player arm, then carries fingers/helper bones and optional prop geometry along with that solved hand.
+### Native GCAL vs VManip compatibility
 
-This means firstperson and thirdperson may need different tuning. Keep regular animation data in `RegisterAnim`; put thirdperson-only adjustments in `GCAL.TPIKOptions`.
-
-### Native GCAL vs VManip Compatibility
-
-Native GCAL addons should use `GCAL:RegisterAnim`, `GCAL:Play`, track IDs, and GCAL hooks directly. The VManip shim exists so older addons continue to work, but new addons should avoid depending on global VManip state such as `VManip.VMGesture` or `VManip.Cycle`.
-
-The compatibility layer translates old VManip registrations and playback calls into GCAL tracks, adds tolerant sequence resolution, and handles known weapon-base quirks. Native code gets cleaner behavior by being explicit about hands, tracks, source bones, and TPIK options.
+Native addons use `GCAL:RegisterAnim`, `GCAL:Play`, track IDs and GCAL hooks. The `VManip`/`VMLegs` shim keeps old addons working: their animations are registered with `legacy = true` and play on the `legacy_left_arm` track, with tolerant sequence lookup, VManip flip handling and the VManip globals synced every frame. Legacy animations get no TPIK, `gun_mode` or `blend_weight`, to encourage porting. New code should not depend on `VManip.*` globals such as `VManip.VMGesture` or `VManip.Cycle`. Section [11](#11-migrating-from-vmanip-and-vmlegs) covers porting.
 
 ---
 
-## 1. Quick Start
+## 2. Getting started
 
-GCAL is globally accessible via the `GCAL` table. It also provides a shim for `VManip` and `VMLegs` for legacy support.
+### Load order and realm
 
-### Registering an Animation
+GCAL loads from `lua/autorun/gcal_init.lua` on both realms. Registration, playback and rendering are clientside; the server can only tell clients to play or stop animations ([10](#10-multiplayer-and-networking)).
+
+`lua/autorun/aaa_gcal_shim.lua` runs before almost everything else and creates the `GCAL` table plus stub `VManip`/`VMLegs` tables, so VManip registrations made before GCAL loads are kept and imported later. Because the `GCAL` table can exist before GCAL itself has loaded, check for a function rather than the table:
 
 ```lua
-GCAL:RegisterAnim("my_cool_gesture", {
-    model = "weapons/c_arms_citizen.mdl", -- Path relative to models/
-    lerp_peak = 0.5,                      -- Peak of the transition (0 to 1)
-    speed = 1.0,                         -- Playback speed
-    easing_in = "OutCubic",              -- Smooth entry (see Easing section)
-    easing_out = "OutQuad",              -- Smooth exit
-    hand = "left"                        -- left/second/offhand, right, or both
+-- lua/autorun/client/myaddon_gcal.lua
+if not GCAL or not GCAL.RegisterAnim then return end
+
+GCAL:RegisterSecondHandAnim("myaddon_ping", {
+    model = "myaddon/c_ping.mdl",
+    sequence = "ping",
+    addon_name = "My Addon"
 })
 ```
 
-### Registering a Second-Hand Animation
+Files in `lua/autorun/client/` run after the shared `lua/autorun/` files, so GCAL is ready by then. If your file can run earlier, register from a hook you control (for example `InitPostEntity`). Register once, never every frame.
 
-For left-hand or "second hand" offhand animations, you no longer need to manually set the bone table and track name.
+### Register
 
 ```lua
-GCAL:RegisterSecondHandAnim("scanner_ping", {
-    model = "weapons/c_arms_citizen.mdl",
-    sequence = "scanner_ping",
-    lerp_peak = 0.35,
-    speed = 1.0
+GCAL:RegisterSecondHandAnim("myaddon_ping", {
+    model = "myaddon/c_ping.mdl", -- relative to models/ (a leading "models/" is stripped)
+    sequence = "ping",
+    lerp_peak = 0.5,              -- seconds after start before blending back out
+    easing_in = "OutCubic",
+    easing_out = "OutQuad"
 })
 ```
 
-This is equivalent to:
+`GCAL:RegisterAnim(name, data)` and the hand helpers return `true` on success and `false` for a missing name or data table. GCAL normalizes `data` in place. Re-registering a name that is currently playing updates the running track, which helps when hot-reloading.
+
+### Play from the client
 
 ```lua
-GCAL:RegisterAnim("scanner_ping", {
-    model = "weapons/c_arms_citizen.mdl",
-    sequence = "scanner_ping",
-    hand = "left"
-})
+GCAL:Play("myaddon_ping")                 -- on the animation's registered track (left_arm here)
+GCAL:Play("myaddon_ping", "myaddon_slot") -- on an explicit track
+GCAL:PlaySecondHand("myaddon_ping")       -- always on left_arm unless you pass a track
 ```
 
-If your model stores the pose on left-hand source bones but you want to drive the right hand, use the explicit right-hand helper and set `source_hand`:
+`GCAL:Play` returns `false` when the animation isn't registered, has no model, its sequence can't be found, or something blocked it (a weapon-base strategy, `VManipPrePlayAnim`, legacy checks). It returns `true` when the animation starts, gets queued, or was skipped because the player disabled it in the GCAL menu (`GCALAnimSuppressed` fires).
+
+To avoid restarting a long gesture, check the track first. For actions that should replace themselves, just call `GCAL:Play` again on the same track.
 
 ```lua
-GCAL:RegisterRightHandAnim("scanner_ping_mirrored_source", {
-    model = "weapons/c_arms_citizen.mdl",
+if not GCAL:IsTrackActive("left_arm") then
+    GCAL:Play("myaddon_ping")
+end
+```
+
+### Play from the server
+
+```lua
+GCAL:Play("myaddon_ping", nil, ply)       -- recipients: a player, a table of players or a CRecipientFilter
+GCAL:Play(ply, "myaddon_ping", "left_arm") -- recipients first also works
+GCAL:Play("myaddon_ping")                 -- no recipients: broadcast
+```
+
+The animation must be registered on the clients. See [10](#10-multiplayer-and-networking) for stopping tracks from the server.
+
+### Recommended naming
+
+Every addon and every imported VManip animation shares one registry, so use stable, namespaced names. They also keep debug output and the menu readable:
+
+```lua
+GCAL:RegisterSecondHandAnim("myaddon_tablet_open", { ... })
+GCAL:RegisterSecondHandAnim("myaddon_tablet_close", { ... })
+GCAL:RegisterSecondHandAnim("myaddon_tablet_press", { ... })
+```
+
+Avoid generic names like `open`, `use`, or `idle` unless the animation is internal and cannot conflict.
+
+---
+
+## 3. Registering animations
+
+### Hand helpers and aliases
+
+```lua
+GCAL:RegisterHandAnim("myaddon_left_press", "left", { model = "myaddon/c_left_press.mdl" })
+GCAL:RegisterSecondHandAnim("myaddon_offhand_press", { model = "myaddon/c_left_press.mdl" })   -- hand = "left"
+GCAL:RegisterRightHandAnim("myaddon_right_press", { model = "myaddon/c_right_press.mdl" })     -- hand = "right"
+GCAL:RegisterBothHandsAnim("myaddon_two_hand_panel", { model = "myaddon/c_two_hand_panel.mdl" }) -- hand = "both"
+```
+
+Each helper sets `data.hand` and calls `GCAL:RegisterAnim`.
+
+| Hand | Accepted values | Default `bones` | Default track |
+| :--- | :-------------- | :-------------- | :------------ |
+| Left / second / offhand | `left`, `left_arm`, `l`, `second`, `second_hand`, `secondhand`, `offhand`, and any unrecognized value | `GCAL.GROUPS.LEFT_ARM` | `left_arm` |
+| Right | `right`, `right_arm`, `r` | `GCAL.GROUPS.RIGHT_ARM` | `right_arm` |
+| Both | `both`, `both_hands`, `bothhands`, `both_arms`, `dual` | `GCAL.GROUPS.BOTH_ARMS` | `both_arms` |
+
+The `GCAL.GROUPS` lists hold the ValveBiped upper arm, forearm, hand, wrist, ulna and finger bones for each side. `GCAL:NormalizeHand(hand)` returns `"left"`, `"right"` or `"both"`; `GCAL:GetHandBones(hand)` and `GCAL:GetHandTrack(hand)` return the defaults above.
+
+**Target hand vs source hand.** `hand` picks the viewmodel bones GCAL writes to; `source_hand` picks the bones it reads from your model. Use `source_hand` to drive the right hand from a left-authored sequence:
+
+```lua
+GCAL:RegisterRightHandAnim("myaddon_scanner_ping_right", {
+    model = "myaddon/c_scanner.mdl",
     sequence = "scanner_ping",
     source_hand = "left"
 })
 ```
 
-### Playing an Animation
+Bones are paired by index: `source_bones[k]` drives `bones[k]`. `ValveBiped.Bip01_L_Ulna` is always read from the source model's `L_Forearm`.
 
-```lua
--- Play by name. Optional second argument is the track ID.
-GCAL:Play("my_cool_gesture")
+### Field reference
 
--- Play on a specific track to avoid overriding others
-GCAL:Play("wave_hand", "right_arm")
+**Model and sequence**
 
--- Play using the built-in helper for the registered hand
-GCAL:PlaySecondHand("scanner_ping")
-```
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `model` | string | **required** | Model containing the sequence, relative to `models/`. A leading `models/` is stripped. |
+| `sequence` | string | animation name | Sequence to play. GCAL looks up the animation name first, then `sequence`, then a case-insensitive match, so a model sequence named like the animation wins. |
+| `model_scale` | number | 1 | Scale of the source animation model (mirrored under legacy flip). The thirdperson prop clone uses it too. |
+| `model_skin` | number | | Skin of the source model. |
+| `model_bodygroups` | table | | `{ [bodygroupID] = value, ... }` for the source model. |
 
----
+**Timing**
 
-## 2. Advanced Animation Data
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `speed` | number | 1 | Cycles per second. Like VManip, GCAL advances the cycle by `FrameTime() * speed * gcal_playback_speed`, so at `speed = 1` the whole sequence takes one second whatever its authored length. Use `speed = 1 / authoredSeconds` to play at the authored rate. |
+| `startcycle` | number | 0 | Cycle to start at (0 to 1). |
+| `loop` | bool | false | Wraps the cycle and never blends out. `GCAL:QuitHolding(trackID)` ends the loop; `GCAL:StopTrack` cuts it. |
+| `holdtime` | number | | Seconds after start at which the cycle freezes until `GCAL:QuitHolding`. |
+| `preventquit` | bool | false | `GCAL:QuitHolding(trackID)` without an animation name won't release this hold. `QuitHolding(trackID, name)` still does. |
+| `segmented` | bool | false | Segment mode, see [Segments](#segments). |
+| `duration` | number | | Only read by the legacy pose-only fallback (a `legacy` model reporting zero sequences), where it sets the reported duration (falling back to `holdtime`, `lerp_peak`, then 1). Normal animations report the sequence duration. |
 
-The data table passed to `RegisterAnim` supports the following fields:
+**Blending and easing**
 
-| Field                | Type         | Description                                                                                                                                           |
-| :------------------- | :----------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`              | string       | **REQUIRED.** The model containing the sequence.                                                                                                      |
-| `sequence`           | string       | Explicit model sequence name. When omitted, GCAL falls back to the registered animation name and a few legacy name-resolution strategies.     |
-| `lerp_peak`          | number       | Cycle at which the animation begins transitioning back (default: 0.5).                                                                                |
-| `lerp_speed_in`      | number       | Lerp speed for the entry transition (default: 1).                                                                                                      |
-| `lerp_speed_out`     | number       | Lerp speed for the exit transition (default: 1).                                                                                                       |
-| `lerp_curve`         | number       | Easing curve exponent for the lerp (default: 1).                                                                                                       |
-| `speed`              | number       | Playback rate multiplier (default: 1.0).                                                                                                              |
-| `startcycle`         | number       | Cycle to start the animation at (0.0 to 1.0).                                                                                                         |
-| `duration`           | number       | Manual override for the track duration (seconds). When omitted, GCAL uses the sequence duration, then `holdtime`, then `lerp_peak`, defaulting to 1. |
-| `loop`               | bool         | If true, the animation repeats and never lerps out.                                                                                                   |
-| `segmented`          | bool         | Segment mode. Use `GCAL:PlaySegment(trackID, sequence, lastSegment, sounds)` after `GCALSegmentFinish`.                                               |
-| `holdtime`           | number       | Time in seconds after which the animation freezes (useful for interactions).                                                                          |
-| `sounds`             | table        | A dictionary of `[path] = time` to play audio during playback.                                                                                        |
-| `hand`               | string       | Friendly hand selector: `left`, `second`, `offhand`, `right`, or `both`. Sets default `bones` and `group_name`. Aliases: `arm`, `bone_group`. |
-| `bones`              | table/string | Target bone names to manipulate, or a hand alias such as `"right"` / `"both"`. Defaults from `hand`.                                                  |
-| `source_hand`        | string       | Optional source hand to read from in the animation model. Useful when the target hand is right but the model sequence is authored on left-hand bones. Aliases: `source_arm`. |
-| `source_bones`       | table/string | Optional source bone names to read from. Defaults to `bones`, or from `source_hand` when provided.                                                    |
-| `addon_name`         | string       | Optional display name used by GCAL's Toggle Anims tree to group animations by addon.                                                                  |
-| `group_name`         | string       | Default track ID for this animation. If omitted, GCAL uses `left_arm`, `right_arm`, or `both_arms` from `hand`.                                       |
-| `track` / `track_id` | string       | Friendly aliases for `group_name`.                                                                                                                    |
-| `thirdperson`        | bool         | Enables projection of this track onto the local player model while rendered in thirdperson. Defaults to true.                                         |
-| `cambone`             | bool         | When `true`, drives the player's first-person view angles from this track's animation attachments (VManip-style camera bone). When `false`, disables cambone for this animation. When `nil` (default), follows the global `gcal_cambone` convar. See section 11. |
-| `legacy`             | bool         | Marks this as a VManip legacy animation. Enables tolerant name matching and disables arc9-style bone copies. Most VManip addons set this automatically. **Note: Legacy animations do not support thirdperson TPIK to encourage porting to native GCAL.** |
-| `block_code`         | bool         | Marks this animation as a code blocker while its track is active. Other addon code can check `GCAL:IsCodeBlocked(scope)` and return early.             |
-| `block_code_scope`   | string       | Optional scope name for `block_code`, so unrelated systems can continue running.                                                                       |
-| `preventquit`        | bool         | If true, `GCAL:QuitHolding` will not release this hold state.                                                                                          |
-| `easing_in`          | string       | Easing function for the entry transition (default: `"Legacy"`, the VManip power curve driven by `lerp_curve`). |
-| `easing_out`         | string       | Easing function for the exit transition (default: `"Legacy"`, the VManip power curve driven by `lerp_curve`). |
-| `locktoply`          | bool         | If true, pins the animation to the player's view. The model is placed at `EyePos()` with a 25% blend between view and viewmodel angles.              |
-| `assurepos`          | bool         | If true, parents the gesture model to the viewmodel each frame. The strictest lock — guarantees perfect alignment but costs a reparent per weapon swap.  |
-| **NEW FEATURES** | | |
-| `can_interrupt`      | bool         | If false, this animation cannot be interrupted and will play to completion. New animations will be queued (default: true). |
-| `on_start`           | function     | Callback function called when animation starts. Signature: `function(trackID, animName, track)`. |
-| `on_finish`          | function     | Callback function called when animation finishes naturally. Signature: `function(trackID, animName, track)`. |
-| `on_interrupt`       | function     | Callback function called when animation is interrupted. Signature: `function(trackID, oldAnimName, newAnimName)`. |
-| `ease_in_time`       | number       | Duration of the blend-in in seconds. Overrides `lerp_speed_in` (a full blend lasts `1 / (7 * lerp_speed_in)` seconds otherwise). |
-| `ease_out_time`      | number       | Duration of the blend-out in seconds. Overrides `lerp_speed_out`. |
-| `sound_volume`       | number       | Volume for animation sounds, 0-1 (default: 1). |
-| `sound_level`        | number       | Sound level/attenuation for animation sounds (default: 75). |
-| `sound_flags`        | number       | Sound flags for animation sounds (default: 0). |
-| `blend_weight`       | number       | Caps how strongly the animation overrides the rest pose (0-1, default 1), in first person and TPIK. Not applied to legacy animations. |
-| `model_scale`        | number       | Scale multiplier for the source animation model. |
-| `model_skin`         | number       | Skin index for the source animation model. |
-| `model_bodygroups`   | table        | Bodygroup settings for the source model: `{groupID = value, ...}`. |
-| `local_only`         | bool         | Prevents network synchronization (clientside only, default: false). |
-| `gun_mode`           | string       | Firstperson weapon handling: `"follow"` carries the weapon bones along with the animated hand so the gun stays in the grip; `"animated"` copies the gun bone(s) from the animation model (see `gun_bones`) and carries the rest of the gun with them. Default: off. `true` means `"follow"`. Not applied to legacy animations. |
-| `gun_bones`          | string/table | For `gun_mode = "animated"`: the weapon bone to copy, a list of bones, or a map `{ ["source model bone"] = "viewmodel bone" }`. When omitted GCAL tries common names (`ValveBiped.weapon_bone`, `weapon_bone`, `Weapon`, `tag_weapon`, ...) that exist in both models; if nothing matches it behaves like `"follow"`. |
+`lerpVal` is the blend: 1 = weapon pose, 0 = full animation. A track blends in until `lerp_peak`, then blends back out. A non-looping, non-segmented track ends the moment its cycle reaches 1, so keep `lerp_peak` plus the blend-out shorter than the clip or the arm snaps back.
 
-### Deprecated and Removed Fields
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `lerp_peak` | number | 0.5 | Seconds after start at which the blend-out begins. Compared against `CurTime()`; not scaled by `speed` or `gcal_playback_speed`. Re-armed on every loop, when the last segment starts, and after a hold release (`lerp_peak - holdtime` from the release). |
+| `lerp_speed_in` / `lerp_speed_out` | number | 1 | Blend rate. A full blend takes `1 / (7 * lerp_speed)` seconds (about 0.14 s at 1). |
+| `ease_in_time` / `ease_out_time` | number | | Blend durations in seconds. Override `lerp_speed_in` / `lerp_speed_out`. |
+| `easing_in` / `easing_out` | string | `"Legacy"` | Easing used while blending in / out. |
+| `lerp_curve` | number | 1 | Exponent of the `Legacy` easing (`t ^ lerp_curve`). Applies to whichever side is still `Legacy`. |
+| `blend_weight` | number | 1 | Caps how strongly the animation overrides the pose (0 to 1), in firstperson and TPIK. Ignored on the `legacy_left_arm` track. |
 
-Registering an animation with any of these still works. GCAL prints one `[GCAL] Deprecated:` console warning per animation and field, naming the file and line that registered it.
+Easing names: `Linear`, `InQuad`, `OutQuad`, `InOutQuad`, `InCubic`, `OutCubic`, `InOutCubic`, `OutElastic` (overshoots, good for snappy or bouncy moves) and `Legacy` (VManip's power curve). The functions live in `GCAL.Lerp` with the signature `fn(t, b, c, d)`; `GCAL.Lerp.Get(name)` returns one, falling back to `OutQuad` for unknown names.
 
-**Renamed** (still work under the old name for now, move to the new one):
+**Bones and tracks**
 
-| Old | New |
-| :-- | :-- |
-| `onstart`, `OnStart` | `on_start` |
-| `onfinish`, `OnFinish` | `on_finish` |
-| `oninterrupt`, `OnInterrupt` | `on_interrupt` |
-| `easeintime` / `easeouttime` | `ease_in_time` / `ease_out_time` |
-| `soundvolume`, `soundlevel`, `soundflags` | `sound_volume`, `sound_level`, `sound_flags` |
-| `blendweight` | `blend_weight` |
-| `modelscale`, `modelskin`, `modelbodygroups` | `model_scale`, `model_skin`, `model_bodygroups` |
-| `gunmode`, `gunbones` | `gun_mode`, `gun_bones` |
-| `bonegroup` | `bone_group` (or `hand`) |
-| `thirdperson_model`, `thirdperson_smoothing`, … (any `thirdperson_*` TPIK key) | The same key without the prefix, in `GCAL:RegisterTPIKOptions` |
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `hand` | string | `"left"` | Target hand, see the alias table. Aliases: `arm`, `bone_group`. Unknown values mean left. |
+| `bones` | table/string | from `hand` | Target bone names, or a hand alias such as `"right"`. |
+| `source_hand` | string | | Hand to read in the source model. Alias: `source_arm`. |
+| `source_bones` | table/string | `bones` | Source bone names or a hand alias, paired by index with `bones`. |
+| `group_name` | string | from `hand` | Default track. `track` and `track_id` are aliases and take precedence, in the order `track`, `track_id`, `group_name`. |
+| `addon_name` | string | see text | Group label in the menu's Toggle Anims tree. Aliases: `addon`, `source_addon`. Defaults to the file name for imported `vmanip/anims` files, otherwise `"GCAL"`. |
 
-`sound_volume` used to double as the sound level (default 75). It is now a 0-1 volume; values above 1 warn and are used as `sound_level`.
+**Sound**
 
-**Removed** (ignored; do this instead):
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `sounds` | table | | `{ [path] = seconds }` after track start; replayed each loop. Played on the local player at `gcal_sound_pitch`. A custom sound set in the menu replaces every path. |
+| `sound_volume` | number | 1 | Volume, 0 to 1. Values above 1 warn and are used as `sound_level`. |
+| `sound_level` | number | 75 | Sound level (attenuation). |
+| `sound_flags` | number | 0 | `SND_*` flags. |
 
-| Field | Replacement |
-| :-- | :-- |
-| `on_cycle` | Poll `GCAL:GetCycle(trackID)` from a `Think` hook. |
-| `delay_start` | `timer.Simple(delay, function() GCAL:Play(name) end)` |
-| `play_condition` | Check your condition before calling `GCAL:Play`, or return `false` from the `VManipPrePlayAnim` hook. |
-| `screen_shake` | Call `util.ScreenShake` from `on_start`. |
-| `blend_mode` | None. Only `"normal"` was ever implemented. |
-| `disable_pred` | None. It never had an effect. |
-| `viewmodel_fov` (`vm_fov`, `fov`) | Change the FOV from your own `CalcView` hook, scaled by `1 - GCAL:GetLerp(trackID)`. |
-| `viewmodel_offset` (`vm_offset`) | Offset the viewmodel from your own `CalcViewModelView` hook. |
+**Camera** (see [8](#8-camera-bone-cambone))
 
----
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `cambone` | bool | nil | `false` opts this animation out and skips its camera model. `nil` and `true` both follow `gcal_cambone`; the convar turns cambone off for every animation. |
+| `cam_ang` | Angle | `Angle(-79.75, 0, -90)` | Rest angle of the camera attachment. |
+| `cam_angint` | table | `{ 1, 1, 1 }` | Per-axis intensity `{ pitch, yaw, roll }`. |
 
-## 3. Hand Authoring Helpers
+**Gun**
 
-GCAL has high-level helpers for common hand layouts:
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `gun_mode` | string/bool | off | `"follow"` (also `true`, `"hand"`, `"1"`) carries the weapon's bones along with the animated hand so the gun stays in the grip; if the gun isn't parented to the hand bones, every non-arm viewmodel bone moves rigidly with the right hand. `"animated"` (also `"anim"`, `"animation"`, `"2"`) copies the gun bone(s) from the source model and carries the rest of the gun with them. Any other value is off. Firstperson only; ignored for `legacy` animations. |
+| `gun_bones` | string/table | auto | For `"animated"`: a bone name, a list, or a map `{ ["source model bone"] = "viewmodel bone" }`. When omitted GCAL uses the first of `ValveBiped.weapon_bone`, `weapon_bone`, `Weapon`, `weapon`, `tag_weapon`, `j_gun`, `v_weapon` found in both models; with no match it behaves like `"follow"`. |
 
-```lua
-GCAL:RegisterHandAnim("left_press", "left", {
-    model = "myaddon/c_left_press.mdl"
-})
+**Behaviour**
 
-GCAL:RegisterHandAnim("right_press", "right", {
-    model = "myaddon/c_right_press.mdl"
-})
+| Field | Type | Default | Description |
+| :---- | :--- | :------ | :---------- |
+| `can_interrupt` | bool | true | `false`: `GCAL:Play` on the busy track queues instead of replacing. |
+| `on_start`, `on_finish`, `on_interrupt` | function | | Callbacks, see [Callbacks](#callbacks). |
+| `block_code` | bool | false | Marks the animation as a code blocker while it plays, see [block_code](#blocking-your-own-code-block_code). |
+| `block_code_scope` | string | | Scope for `block_code`. Without one it blocks every scope. |
+| `thirdperson` | bool | true | `false` disables TPIK and multiplayer sync for this animation. |
+| `local_only` | bool | false | Never sent to other players. |
+| `locktoply` | bool | false | Places the source model at the eye instead of the viewmodel. On `legacy_left_arm` it also blends 25% between view and viewmodel angles, like VManip. |
+| `assurepos` | bool | false | On `legacy_left_arm`, parents the source model to the viewmodel (re-parented on weapon switch). On other tracks it acts like `locktoply`. |
+| `legacy` | bool | false | VManip mode, set by the shim. |
 
-GCAL:RegisterSecondHandAnim("offhand_press_alt", {
-    model = "myaddon/c_left_press.mdl"
-})
+`legacy = true` enables tolerant sequence resolution (lowercase name, normalized and partial name matches, a `c_vmanip<name>` model filename, the model's only sequence), a surrogate or pose-only fallback for models reporting zero sequences, VManip flip handling, eye-placed source models, VManip's start checks (see [11](#11-migrating-from-vmanip-and-vmlegs)) and `VManipPreActCheck`. It disables TPIK and `gun_mode`.
 
-GCAL:RegisterBothHandsAnim("two_hand_panel", {
-    model = "myaddon/c_two_hand_panel.mdl"
-})
-```
+### Model authoring guidelines
 
-Accepted hand aliases:
+GCAL expects a model under `models/` with a sequence it can resolve: a regular c_arms-style model, a VManip-style animation model, or an addon-owned gesture model containing the bones GCAL should read.
 
-| Meaning                 | Accepted values                                                           |
-| :---------------------- | :------------------------------------------------------------------------ |
-| Left / second / offhand | `left`, `left_arm`, `l`, `second`, `second_hand`, `secondhand`, `offhand` |
-| Right hand              | `right`, `right_arm`, `r`                                                 |
-| Both hands              | `both`, `both_hands`, `bothhands`, `both_arms`, `dual`                    |
-
-The helper sets:
-
-| Hand                          | Default bones           | Default track |
-| :---------------------------- | :---------------------- | :------------ |
-| `left` / `second` / `offhand` | `GCAL.GROUPS.LEFT_ARM`  | `left_arm`    |
-| `right`                       | `GCAL.GROUPS.RIGHT_ARM` | `right_arm`   |
-| `both`                        | `GCAL.GROUPS.BOTH_ARMS` | `both_arms`   |
-
-You can still override `bones`, `group_name`, `track`, or `track_id` when you need a custom setup.
-
-### Target Hand vs. Source Hand
-
-`hand` decides which viewmodel bones GCAL writes to. `source_hand` decides which bones GCAL reads from in your animation model.
-
-Most animations can omit `source_hand`:
-
-```lua
-GCAL:RegisterSecondHandAnim("offhand_button", {
-    model = "myaddon/c_left_hand_button.mdl"
-})
-```
-
-Use `source_hand` when reusing a left-authored animation on the right hand:
-
-```lua
-GCAL:RegisterHandAnim("right_hand_from_left_source", "right", {
-    model = "myaddon/c_left_authored_button.mdl",
-    source_hand = "left"
-})
-```
-
-### Model and Sequence Authoring Guidelines
-
-GCAL expects the registered model to be a clientside model under `models/` with a sequence GCAL can resolve. The model can be a regular c_arms-style model, a VManip-style animation model, or an addon-owned gesture model that includes the bones you want GCAL to read.
-
-For predictable results:
-
-- Use ValveBiped arm bone names when possible, such as `ValveBiped.Bip01_L_UpperArm`, `ValveBiped.Bip01_L_Forearm`, and `ValveBiped.Bip01_L_Hand`.
-- Make sure the source model actually contains the source bones listed by `source_bones` or implied by `source_hand`.
-- Put props that should appear in thirdperson inside the registered animation model when possible. GCAL's thirdperson prop clone is pulled from the registered addon model, not from GCAL-local models.
-- Use `sequence` when the registered animation name does not exactly match the model sequence.
-- If the firstperson sequence is not a good thirdperson pose, use `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` instead of changing the firstperson registration.
-- Keep one logical gesture per animation name. If the same model has several sequences, register several GCAL animations that share the same `model` but use different `sequence` values.
-
-Minimal shared-model pattern:
+- Use ValveBiped arm bone names where possible (`ValveBiped.Bip01_L_UpperArm`, `ValveBiped.Bip01_L_Forearm`, `ValveBiped.Bip01_L_Hand`, fingers).
+- Make sure the source model contains the bones implied by `source_bones` / `source_hand`, and the viewmodel or hands contain `bones`.
+- Put props inside the animation model. GCAL draws the source model in firstperson, and the thirdperson prop clone is made from the same registered model, never from GCAL's own models.
+- Author for VManip timing: one cycle per second at `speed = 1`.
+- Use `sequence` when the animation name doesn't match the model's sequence.
+- If the firstperson sequence is a poor thirdperson pose, add `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` instead of changing the firstperson registration.
+- Keep one gesture per animation name. Several registrations can share a model with different `sequence` values:
 
 ```lua
 local MODEL = "myaddon/c_shared_tools.mdl"
 
-GCAL:RegisterSecondHandAnim("tool_raise", {
-    model = MODEL,
-    sequence = "tool_raise",
-    addon_name = "My Addon"
-})
-
-GCAL:RegisterSecondHandAnim("tool_press", {
-    model = MODEL,
-    sequence = "tool_press",
-    addon_name = "My Addon"
-})
+GCAL:RegisterSecondHandAnim("myaddon_tool_raise", { model = MODEL, sequence = "tool_raise", addon_name = "My Addon" })
+GCAL:RegisterSecondHandAnim("myaddon_tool_press", { model = MODEL, sequence = "tool_press", addon_name = "My Addon" })
 ```
 
 ---
 
-## 3.5. Native API Equivalents to Legacy VManip Functions
+## 4. Playback and tracks
 
-GCAL provides a clean `GCAL:`-prefixed API for addons that want to inspect runtime state without depending on the `VManip` compatibility shim. These are the preferred natives for new addons:
+### Standard and custom tracks
 
-| Legacy VManip pattern | Native GCAL equivalent | Description |
-| :-- | :-- | :-- |
-| `VManip:GetVMGesture()` | `GCAL:GetGestureModel(trackID)` | Returns the gesture model entity for a track, or `nil`. |
-| `VManip:GetVMGestures()` / similar multi-gesture queries | `GCAL:GetAllGestureModels()` | Returns `{ trackID = model, ... }` for every active non-legs track. |
-| `VManip.VMCam` (global) | `GCAL:GetCamModel(trackID)` | Returns the cambone model entity (camera-bone attachment source). |
-| `VManip.VMGesture` (global) | `GCAL:GetGestureModel(trackID)` | Single-gesture query per track. |
-| Inspecting the world-model entity | `GCAL:GetTPIKModel(trackID)` | Returns the TPIK source model (third-person world-model clone source). |
-| Iterating registered anim names | `GCAL:GetAnimationNames()` | Returns a list of all names in `GCAL.Anims`. |
-| `VManip.IsActive` for any non-legacy track | `GCAL:IsTrackActive(trackID)` | Standard per-track query. |
-| Enumerating active tracks | `GCAL:GetActiveTrackIDs()` | Returns a list of all track IDs currently active. |
-| `VManip:Remove()` (single) | `GCAL:StopTrack(trackID)` | Standard per-track stop. |
-| Stopping everything at once | `GCAL:StopAllTracks()` | Iterates and stops every active track. |
-| `VManip:GetCycle()` | `GCAL:GetCycle(trackID)` | Returns the current animation cycle (0..1). |
-| `VManip:SetCycle(newcycle)` | `GCAL:SetCycle(trackID, cycle)` | Sets the current cycle and continues from there. |
-| `VManip:GetLerp()` | `GCAL:GetLerp(trackID)` | Returns the current weapon/anim blend value. |
-| `VManip:GetCurrentAnim()` | `GCAL:GetCurrentAnim(trackID)` | Returns the active animation name. |
-| `VManip:IsSegmented()` | `GCAL:IsSegmented(trackID)` | Returns whether the active track is segmented. |
-| `VManip:GetCurrentSegment()` | `GCAL:GetCurrentSegment(trackID)` | Returns the current segment name. |
-| `VManip:GetSegmentCount()` | `GCAL:GetSegmentCount(trackID)` | Returns how many segments have played. |
-| `VManip:IsPreventQuit()` | `GCAL:IsPreventQuit(trackID)` | Returns whether the track resists hold release. |
-| `VManip:QueueAnim(name)` | `GCAL:QueueAnim(name, trackID)` | Queues an animation to play when the track becomes free. |
-| `VManip:QuitHolding(anim)` | `GCAL:QuitHolding(trackID, animToStop)` | Standard hold release. |
-| `VManip:PlaySegment(seq, last, sounds)` | `GCAL:PlaySegment(trackID, sequence, lastSegment, soundTable)` | Standard segmented play. |
-| `VManip:IsValid()` | `GCAL:IsTrackActive(trackID)` | Equivalent. |
-| Querying `VManip.VMatrixlerp` (read) | `GCAL:GetLerp(trackID)` | Returns the current blend (1 = weapon, 0 = full anim). |
-| Checking if the active anim loops | `GCAL:IsLooping(trackID)` | Returns `true`/`false`. |
-| Querying anim duration | `GCAL:GetTrackDuration(trackID)` | Returns the track's effective duration in seconds. |
-
-Example — porting an old VManip addon to natives:
+| Track | Used by |
+| :---- | :------ |
+| `left_arm` | Native left / second-hand animations. |
+| `right_arm` | Native right-hand animations. |
+| `both_arms` | Native both-hands animations. |
+| `legacy_left_arm` | VManip animations registered through the shim. |
+| `legs` | VMLegs animations. |
+| any other string | Custom tracks. |
 
 ```lua
--- Legacy
-local gesture = VManip.VMGesture
-if IsValid(gesture) then gesture:SetPos(...) end
-
--- Native
-local gesture = GCAL:GetGestureModel("left_arm")
-if IsValid(gesture) then gesture:SetPos(...) end
+GCAL:Play("myaddon_watch_check", "left_arm")
+GCAL:PlayHand("myaddon_hand_signal", "right") -- right_arm, both play at once
 ```
 
-All native functions are safe to call when the track is not active (they return `nil`/`false` instead of erroring), so you can poll them from `Think` without guards.
+`GCAL:PlayHand(name, hand, trackID)` plays on `trackID` or the hand's standard track, ignoring the animation's registered track. `GCAL:PlaySecondHand(name, trackID)` is `PlayHand(name, "left", trackID)`.
 
----
-
-## 4. The Multi-Track System
-
-Unlike legacy systems, GCAL can play multiple animations at once by using different `trackID`s.
-
-- **Left Arm:** Usually uses the `left_arm` track.
-- **Right Arm:** Usually uses the `right_arm` track.
-- **Both Arms:** Usually uses the `both_arms` track.
-- **Legs:** Handled via the special `legs` track.
-- **Custom:** You can define any string as a track ID!
-
-Example:
+- Use `left_arm`, `right_arm` or `both_arms` for normal hand gestures.
+- Use a custom track when an animation is logically independent of the normal hand slot, and share it between mutually exclusive animations of one subsystem.
+- Tracks are runtime slots, not event IDs. Don't create a new track every time you play something.
+- Two tracks writing the same bones (for example `left_arm` and `legacy_left_arm`) overlap; avoid it.
+- On death `legacy_left_arm` and `legs` stop automatically; other tracks keep running.
 
 ```lua
-GCAL:Play("watch_check", "left_arm")
-GCAL:PlayHand("hand_signal", "right")
--- Both will play simultaneously without glitching!
-```
-
-Track IDs are intentionally simple strings. GCAL does not require every addon to share the built-in names, but you should prefer the standard tracks unless you have a reason not to:
-
-- Use `left_arm`, `right_arm`, or `both_arms` for normal hand gestures.
-- Use a custom track when an animation is logically independent from the normal hand slot.
-- Use the same custom track for mutually exclusive animations in the same subsystem.
-- Avoid creating a new unique track every time you play an animation; tracks are runtime slots, not event IDs.
-
-Example custom track:
-
-```lua
-GCAL:RegisterSecondHandAnim("scanner_insert", {
+GCAL:RegisterSecondHandAnim("myaddon_scanner_insert", {
     model = "myaddon/c_scanner.mdl",
     sequence = "scanner_insert",
-    group_name = "scanner_device"
+    track = "myaddon_scanner"
 })
 
-GCAL:RegisterSecondHandAnim("scanner_remove", {
+GCAL:RegisterSecondHandAnim("myaddon_scanner_remove", {
     model = "myaddon/c_scanner.mdl",
     sequence = "scanner_remove",
-    group_name = "scanner_device"
+    track = "myaddon_scanner"
 })
 
-GCAL:Play("scanner_insert") -- Uses scanner_device by default.
+GCAL:Play("myaddon_scanner_insert") -- plays on myaddon_scanner
 ```
 
-If `scanner_remove` starts while `scanner_insert` is still active on `scanner_device`, GCAL stops the old track first. Other tracks keep playing.
+If `myaddon_scanner_remove` starts while `myaddon_scanner_insert` is still playing, the old one is replaced (its `on_interrupt` runs). Other tracks keep playing.
 
-### Native Track Control
+Control functions (client): `GCAL:StopTrack(trackID)`, `GCAL:StopAllTracks()`, `GCAL:QueueAnim(name, trackID)`, `GCAL:QuitHolding(trackID, animToStop)`, `GCAL:PlaySegment(trackID, sequence, lastSegment, sounds)`.
 
-Native GCAL addons do not need to use the legacy `VManip` shim for advanced control. GCAL exposes track-aware helpers directly:
+### Interrupting and queueing
 
-```lua
-GCAL:GetAnim("watch_check")
-GCAL:GetTrack("left_arm")
-GCAL:IsTrackActive("left_arm")
-GCAL:GetCurrentAnim("left_arm")
-GCAL:GetLerp("left_arm")
-GCAL:GetCycle("left_arm")
-GCAL:SetCycle("left_arm", 0.5)
-GCAL:StopTrack("left_arm")
-```
-
-For animations that should pause your addon's own follow-up logic while they play, register them with `block_code`:
+`GCAL:QueueAnim(name, trackID)` stores one animation per track (default: the animation's registered track) and plays it as soon as the track is free. A second `QueueAnim` on the same track overwrites the first. When the playing animation has `can_interrupt = false`, `GCAL:Play` on its track queues automatically and returns `true`. Explicitly stopping a track (`GCAL:StopTrack`, `GCAL:StopAllTracks`, `gcal_stop`) also drops its queued animation; a natural finish or a replacement keeps it.
 
 ```lua
-GCAL:RegisterSecondHandAnim("scanner_insert", {
-    model = "myaddon/c_scanner_insert.mdl",
-    block_code = true,
-    block_code_scope = "myaddon_scanner"
+local MODEL = "myaddon/c_tablet.mdl"
+
+GCAL:RegisterSecondHandAnim("myaddon_tablet_open", {
+    model = MODEL,
+    sequence = "open",
+    can_interrupt = false, -- Play on this track queues while it runs
+    on_finish = function(trackID, animName, track)
+        if GCAL.QueuedAnims[trackID] then return end -- a close was requested meanwhile, let it play
+        GCAL:Play("myaddon_tablet_idle", trackID)
+    end,
+    on_interrupt = function(trackID, oldAnim, newAnim)
+        print(oldAnim .. " was interrupted by " .. newAnim)
+    end
 })
 
-hook.Add("Think", "MyAddon_ScannerLogic", function()
-    if GCAL:IsCodeBlocked("myaddon_scanner") then return end
+GCAL:RegisterSecondHandAnim("myaddon_tablet_idle", { model = MODEL, sequence = "idle", loop = true })
+GCAL:RegisterSecondHandAnim("myaddon_tablet_close", { model = MODEL, sequence = "close" })
 
-    -- Continue regular scanner logic only after scanner_insert finishes.
-end)
+GCAL:Play("myaddon_tablet_open")
+GCAL:Play("myaddon_tablet_close") -- queued, plays when tablet_open finishes
 ```
 
-This does not literally pause Lua execution globally. It exposes a scoped runtime gate so cooperating addon code can stop itself for the lifetime of the animation.
-
-For held animations:
+### Holding
 
 ```lua
-GCAL:RegisterAnim("radio_hold", {
+GCAL:RegisterSecondHandAnim("myaddon_radio_hold", {
     model = "myaddon/c_radio.mdl",
     holdtime = 0.35
 })
 
-GCAL:Play("radio_hold", "left_arm")
-GCAL:QuitHolding("left_arm")
+GCAL:Play("myaddon_radio_hold")
+-- later:
+GCAL:QuitHolding("left_arm")                       -- releases unless the animation has preventquit
+GCAL:QuitHolding("left_arm", "myaddon_radio_hold") -- releases only that animation, even with preventquit
 ```
 
-For queued follow-up animations:
+`QuitHolding` returns `true` when the release is accepted. It runs `GCALPreHoldQuit` (return `false` to block) and fires `GCALHoldQuit`. It also ends a `loop` and marks a segmented track's current segment as the last.
+
+### Segments
+
+A `segmented` animation stays blended in across several sequences of its model. When a segment's cycle reaches 1 GCAL fires `GCALSegmentFinish`; answer with `GCAL:PlaySegment(trackID, sequence, lastSegment, sounds)`. After the last segment ends and the blend-out completes, the track stops.
 
 ```lua
-GCAL:QueueAnim("radio_lower", "left_arm")
-```
-
-Queued animations are track-specific, so a queued `left_arm` animation can begin as soon as that track becomes free while other tracks keep running.
-
-For segmented animations:
-
-```lua
-GCAL:RegisterAnim("tool_sequence", {
+GCAL:RegisterSecondHandAnim("myaddon_tool", {
     model = "myaddon/c_tool.mdl",
+    sequence = "tool_start",
     segmented = true
 })
 
-hook.Add("GCALSegmentFinish", "MyAddon_ToolSequence", function(trackID, animName, segment, lastSegment, segmentCount)
-    if trackID == "left_arm" and animName == "tool_sequence" then
+hook.Add("GCALSegmentFinish", "MyAddon_Tool", function(trackID, animName, segment, lastSegment, segmentCount)
+    if animName ~= "myaddon_tool" or lastSegment then return end
+
+    if segmentCount == 0 then
         GCAL:PlaySegment(trackID, "tool_loop", false)
+    else
+        GCAL:PlaySegment(trackID, "tool_end", true)
     end
 end)
 ```
 
-Useful native hooks:
+`PlaySegment` returns `false` unless the track is segmented, its current segment has finished, the last segment hasn't been played yet, and the sequence exists. `sounds` is `{ [path] = seconds }` from the segment start. `GCALPrePlaySegment` can block it. Segment changes are synced to other players ([10](#10-multiplayer-and-networking)).
 
-| Hook                                                                       | Purpose                                                        |
-| :------------------------------------------------------------------------- | :------------------------------------------------------------- |
-| `GCALTrackStarted(trackID, animName, track)`                               | Fired after a track starts.                                    |
-| `GCALTrackStopped(trackID, animName, track)`                               | Fired after a track stops.                                     |
-| `GCALCodeBlockStarted(trackID, animName, track, scope)`                    | Fired when a `block_code` animation starts.                    |
-| `GCALCodeBlockStopped(trackID, animName, track, scope)`                    | Fired when a `block_code` animation stops.                     |
-| `GCALPreHoldQuit(trackID, animName, animToStop)`                           | Return `false` to block a native hold release.                 |
-| `GCALHoldQuit(trackID, animName, animToStop)`                              | Fired after a native hold release is accepted.                 |
-| `GCALSegmentFinish(trackID, animName, segment, lastSegment, segmentCount)` | Fired when a segmented animation reaches the end of a segment. |
-| `GCALPrePlaySegment(trackID, animName, sequence, lastSegment)`             | Return `false` to block a native segment change.               |
-| `GCALPlaySegment(trackID, animName, sequence, lastSegment)`                | Fired after a native segment starts.                           |
+### Callbacks
+
+| Field | Signature | When |
+| :---- | :-------- | :--- |
+| `on_start` | `fn(trackID, animName, track)` | After the track is active, before `GCALTrackStarted`. |
+| `on_finish` | `fn(trackID, animName, track)` | After a natural finish (not `StopTrack` or replacement). The track is already stopped (its models are removed), so calling `GCAL:Play` from here chains animations. |
+| `on_interrupt` | `fn(trackID, oldAnimName, newAnimName)` | When another `GCAL:Play` replaces it on the same track. |
+
+Errors inside callbacks are printed with a stack trace; playback continues.
+
+### Blocking your own code (block_code)
+
+`block_code` doesn't pause Lua. It exposes a gate that cooperating code checks so it can stop itself while the animation plays:
+
+```lua
+GCAL:RegisterSecondHandAnim("myaddon_insert_battery", {
+    model = "myaddon/c_battery.mdl",
+    sequence = "insert",
+    block_code = true,
+    block_code_scope = "myaddon_battery"
+})
+
+hook.Add("Think", "MyAddon_BatteryThink", function()
+    if GCAL:IsCodeBlocked("myaddon_battery") then return end
+
+    -- Regular battery logic, resumes after the insert animation.
+end)
+```
+
+- `GCAL:IsCodeBlocked(scope)` returns `true, track` when an active `block_code` track matches, otherwise `false, nil`. A track matches when its scope equals `scope`, when it has no scope (it blocks every scope), or when `scope` is nil (any blocker).
+- `GCAL:GetCodeBlockers(scope)` returns `{ [trackID] = track }` for every matching track.
+- `GCALCodeBlockStarted` / `GCALCodeBlockStopped` fire when a blocker starts and stops.
+
+### Recipes
+
+Conditions and delays belong in your own code:
+
+```lua
+local ply = LocalPlayer()
+if IsValid(ply) and ply:GetVelocity():Length() < 5 then -- only while standing still
+    timer.Simple(0.2, function() GCAL:Play("myaddon_binoculars") end)
+end
+```
+
+React to playback progress by polling the cycle:
+
+```lua
+hook.Add("Think", "MyAddon_ReloadClick", function()
+    local track = GCAL:GetTrack("left_arm")
+    if not track or track.name ~= "myaddon_reload" then return end
+
+    if track.cycle >= 0.5 and not track.myClickPlayed then
+        track.myClickPlayed = true
+        LocalPlayer():EmitSound("weapons/reload_click.wav")
+    end
+end)
+```
 
 ---
 
-## 5. Thirdperson Support
+## 5. Runtime query API
 
-GCAL can project active arm tracks onto the local player model while the local player is rendered in thirdperson. The feature is experimental and enabled through `gcal_thirdperson`.
+Every getter is safe to call when the track isn't active, so you can poll from `Think` without guards. Tracks only exist on the client.
+
+| Function | Returns |
+| :------- | :------ |
+| `GCAL:GetAnim(name)` | Registered (normalized) data, or nil. |
+| `GCAL:GetAnimationNames()` | List of registered animation names. |
+| `GCAL:GetTPIKOptions(name)` | Registered TPIK options, or nil. |
+| `GCAL:GetTrack(trackID)` | Runtime track table (`name`, `cycle`, `lerpVal`, `data`, `model`, `camModel`, `attachment`, ...), or nil. Read it; don't restructure it. |
+| `GCAL:GetActiveTrackIDs()` | List of active track IDs. |
+| `GCAL:IsTrackActive(trackID)` | `true` while the track exists with a valid model. |
+| `GCAL:GetCurrentAnim(trackID)` | Animation name, or nil. |
+| `GCAL:GetCycle(trackID)` | Cycle 0 to 1 (0 when inactive). |
+| `GCAL:SetCycle(trackID, cycle)` | Jumps to `cycle` and continues from there; `false` when inactive. |
+| `GCAL:GetLerp(trackID)` | Blend, 1 = weapon pose, 0 = full animation. Returns 0 when inactive, so pair it with `IsTrackActive`. |
+| `GCAL:IsLooping(trackID)` | `true` / `false`. |
+| `GCAL:GetTrackDuration(trackID)` | The sequence's authored duration in seconds (not the playback length, see `speed`), or nil. |
+| `GCAL:IsSegmented(trackID)` | `true` / `false`. |
+| `GCAL:GetCurrentSegment(trackID)` | Sequence of the current segment (nil before the first `PlaySegment`). |
+| `GCAL:GetSegmentCount(trackID)` | Segments played through `PlaySegment` (0 when inactive). |
+| `GCAL:IsPreventQuit(trackID)` | `true` / `false`. |
+| `GCAL:GetGunMode(trackID)` | `"follow"`, `"animated"` or nil. |
+| `GCAL:IsCodeBlocked(scope)` | `true, track` or `false, nil`. |
+| `GCAL:GetCodeBlockers(scope)` | `{ [trackID] = track }`. |
+| `GCAL:GetGestureModel(trackID)` | Hidden source model, or nil. |
+| `GCAL:GetCamModel(trackID)` | Camera model used for cambone, or nil. |
+| `GCAL:GetTPIKModel(trackID)` | Separate TPIK source model (only exists when a TPIK `sequence` is set), or nil. |
+| `GCAL:GetAllGestureModels()` | `{ [trackID] = model }` for every active track except `legs`. |
+| `GCAL:IsThirdPersonEnabled()` | Whether `gcal_thirdperson` is on. |
+| `GCAL:IsAnimEnabled(name)` / `GCAL:IsAnimSuppressed(name)` | Whether the player enabled / disabled the animation in the menu. |
+| `GCAL:IsAnimTPIKEnabled(name)` | Whether the player left TPIK on for the animation. |
+| `GCAL:GetAnimSoundOverride(name)` | Custom sound path set in the menu, or nil. |
+| `GCAL:GetWeaponBaseStrategy(ply, weapon)` | Matching strategy table, or nil. |
+| `GCAL:GetThirdPersonRenderMethod(ply, weapon, strategy)` | `"arc9_tpik"` or `"normal"`. |
+| `GCAL:IsDynaBaseAvailable()` | Whether DynaBase is installed. |
+
+### Animation adjustments
+
+Players can offset each animation from the menu (right-click an animation, "Edit offsets/TPIK..."). The values are stored in cookies and added to the global convars. Clientside.
+
+| Function | Description |
+| :------- | :---------- |
+| `GCAL:GetAnimationAdjustmentValue(name, field)` | Stored per-animation value (0 when unset). |
+| `GCAL:SetAnimationAdjustmentValue(name, field, value)` | Stores and persists a value. |
+| `GCAL:ClearAnimationAdjustment(name)` | Resets every field of the animation. |
+| `GCAL:GetAnimationAdjustment(name)` | Combined convar + per-animation table `{ pos, ang, tpik, option_add, isZero }` (cached). |
+| `GCAL:ApplyAnimationAdjustment(name, pos, ang)` | Returns `pos, ang` with the firstperson adjustment applied (offset along `ang`'s forward/right/up). |
+| `GCAL:GetTPIKAdjustment(name)` | `{ pos, ang, target_radius_add, smoothing_add }`. |
+| `GCAL:GetTPIKOptionAdd(name, option)` | Additive for `clone_offset_x/y/z`, `target_radius` or `smoothing`. |
+
+Fields: `pos_x/y/z`, `ang_p/y/r` (firstperson), `tpik_pos_x/y/z`, `tpik_ang_p/y/r`, `tpik_target_radius_add`, `tpik_smoothing_add`, `clone_offset_x/y/z`. Unknown fields are ignored.
+
+### Advanced
+
+| Function | Description |
+| :------- | :---------- |
+| `GCAL:BuildWeaponRenderContext(ply, weapon, vm, handsEnt)` | `{ strategy, strategy_id, ply, weapon, vm, handsEnt }`, with `vm` already replaced by the strategy's `resolveViewModel` or a `VManipVMEntity` result. |
+| `GCAL:ResolveArmTarget(context, targetBones)` | Entity to write arm bones to: the strategy's `resolveArmTarget`, else `FindArmTarget`. |
+| `GCAL:FindArmTarget(vm, handsEnt, targetBones)` | `vm` if it has any target bone, else `handsEnt` if it does, else `vm`. |
+| `GCAL:NormalizeGunMode(mode)` | `"follow"`, `"animated"` or nil. |
+| `GCAL:WarnDeprecated(animName, key, message)` | Prints one `[GCAL] Deprecated:` warning per animation and key, with the calling file and line. Usable for your own fields. |
+| `GCAL:AddDebugEvent(text, color)` | Adds a line to the debug HUD's event list. |
+
+---
+
+## 6. Hooks reference
+
+### GCAL hooks
+
+| Hook | Arguments | When |
+| :--- | :-------- | :--- |
+| `GCALTrackStarted` | `trackID, animName, track` | After a track starts (after `on_start`). |
+| `GCALTrackStopped` | `trackID, animName, track` | After a track stops for any reason. |
+| `GCALAnimSuppressed` | `name, trackID` | `GCAL:Play` skipped an animation the player disabled. `trackID` is what was passed and may be nil. |
+| `GCALCodeBlockStarted` / `GCALCodeBlockStopped` | `trackID, animName, track, scope` | A `block_code` track starts / stops. |
+| `GCALPreHoldQuit` | `trackID, animName, animToStop` | `GCAL:QuitHolding`. Return `false` to block. |
+| `GCALHoldQuit` | `trackID, animName, animToStop` | A hold release was accepted (also from `VManip:QuitHolding`). |
+| `GCALSegmentFinish` | `trackID, animName, segment, lastSegment, segmentCount` | A segment reached the end of its cycle. |
+| `GCALPrePlaySegment` | `trackID, animName, sequence, lastSegment` | `GCAL:PlaySegment`. Return `false` to block. |
+| `GCALPlaySegment` | `trackID, animName, sequence, lastSegment` | After a segment starts. |
+
+### VManip-compatible hooks GCAL fires
+
+| Hook | Arguments | When |
+| :--- | :-------- | :--- |
+| `VManipPrePlayAnim` | `name` | Every `GCAL:Play`, on any track. Return `false` to block. Strategy `prePlayAnim` callbacks run through it. |
+| `VManipPostPlayAnim` | `name` | `legacy_left_arm` only: the first frame the blend leaves the weapon pose. |
+| `VManipPreActCheck` | `name, vm` | Legacy animations only, before the reload checks. Return `true` to skip them. |
+| `VManipPreRemove` | `name` | `VManip:Remove()` while the legacy track is active (blend < 1). |
+| `VManipRemove` | none | After `legacy_left_arm` stops. |
+| `VManipSegmentFinish` | `name, segment, lastSegment, segmentCount` | Any track, together with `GCALSegmentFinish`. |
+| `VManipPreHoldQuit` | `name, animToStop` | `VManip:QuitHolding` only. Return `false` to block. |
+| `VManipHoldQuit` | `name, animToStop` | `VManip:QuitHolding` was accepted. |
+| `VManipPrePlaySegment` | `name, sequence, lastSegment` | `VManip:PlaySegment` only. Return `false` to block. |
+| `VManipPlaySegment` | `name, sequence, lastSegment` | After `VManip:PlaySegment`. |
+| `VManipVMEntity` | `ply, weapon` | When building the render context, if no strategy with a `resolveViewModel` matches the weapon and another addon listens. Return an entity to render against instead of the viewmodel. |
+
+---
+
+## 7. Thirdperson (TPIK)
+
+When the local player is drawn in thirdperson (`ShouldDrawLocalPlayer()` or another view entity) and `gcal_thirdperson` is on (the default), GCAL projects active arm tracks onto the player model. Whether a track uses TPIK is decided when it starts: `gcal_thirdperson` must be on, the animation must not set `thirdperson = false` or be `legacy`, and the player must not have turned TPIK off for it in the menu ("Toggle TPIK Anims").
+
+### How it works
+
+Each frame, for each TPIK track:
+
+1. The TPIK source model (the TPIK `sequence` copy, or the firstperson source model) is placed at the player's eye with the eye angles, scaled by `model_scale`.
+2. Every mapped bone is offset by the difference between the player's and the source model's upper arm, then clamped per axis to `Spine4 ± target_radius` so the arm can't stretch.
+3. `offset_x/y/z`, `gcal_tpik_offset_*` and the per-animation TPIK adjustment are added after the clamp, so they can push past it. `gcal_tpik_angle_*` is added to each bone's angles.
+4. `scale_bones`, per-bone exponential `smoothing`, then the blend with the player's pose (`blend_per_bone` overrides it) are applied. `lock_bones` keep the player's pose.
+5. Unmapped children of the upper arms (fingers, helper bones) follow their parent. The result is cached for the frame and written to the player model.
+
+This works with any player model that has the ValveBiped arm bones (plus `Spine4` for the clamp).
+
+### Options reference
 
 ```lua
-GCAL:RegisterSecondHandAnim("radio_press", {
-    model = "myaddon/c_radio_press.mdl",
-    thirdperson = true
-})
-```
-
-GCAL's TPIK is a **direct bone copy** solver (ARC9-style): it reads each mapped bone's animated matrix from the source viewmodel, offsets the entire arm into player body-space using the upper arm (shoulder) as a reference, clamps the position to `Spine4 ± target_radius` to prevent stretching, blends the result with the player model's rest pose, and writes the final matrices to the player model. There is no IK solver and no anchor transform, so the system works with **any** armature — standard ValveBiped, QCI-included, or fully custom. A separate clone of the animation's registered model renders addon-owned props such as spray cans or tablets; obvious viewmodel arm materials are hidden automatically.
-
-TPIK-specific per-animation settings live in `GCAL.TPIKOptions`, not the main `RegisterAnim` table:
-
-```lua
-GCAL:RegisterTPIKOptions("radio_hold", {
+GCAL:RegisterTPIKOptions("myaddon_radio_hold", {
     sequence = "radio_hold_thirdperson",
     model = true,
     model_bone = "ValveBiped.Bip01_L_Hand",
@@ -501,342 +581,146 @@ GCAL:RegisterTPIKOptions("radio_hold", {
     keep_materials = { "tablet_screen" },
     target_radius = 38,
     smoothing = 18,
-    offset_x = 0,   -- forward/back
-    offset_y = 0,   -- right/left
-    offset_z = 0,   -- up/down
+    offset_x = 0, -- forward/back
+    offset_y = 0, -- right/left
+    offset_z = 0  -- up/down
 })
 ```
 
-You can also assign directly with `GCAL.TPIKOptions.radio_hold = { ... }`. Use `sequence` when the firstperson sequence is not suitable for thirdperson posing. GCAL keeps the normal `model`/`camModel` on the firstperson sequence and creates a separate hidden TPIK source model on the requested sequence. The thirdperson prop clone follows the TPIK sequence too, so addon-owned props stay matched to the thirdperson arm pose.
-
-`RegisterTPIKOptions` validates option keys against a whitelist — unknown keys print a console error. Removed and renamed keys print a one-time `[GCAL] Deprecated:` warning (see the table after the option list). Option types are normalized (`number` via `tonumber`, `bool` via `tobool`, `string` via `tostring`).
-
-Valid TPIK option keys:
+`GCAL:RegisterTPIKOptions(name, options)` returns `true` / `false` and replaces any options previously registered for that name. Unknown keys print an error with a stack trace; renamed and removed keys print a one-time deprecation warning ([15](#15-deprecated-and-removed-fields)). Values are coerced: numbers through `tonumber` (0 on failure), bools through `tobool`, strings through `tostring`. Assigning `GCAL.TPIKOptions[name] = { ... }` directly skips validation. Options are read when a track starts or its animation is re-registered.
 
 | Key | Type | Default | Description |
-| :-- | :-- | :-- | :-- |
-| `sequence` | string | — | TPIK-specific sequence name (falls back to firstperson sequence). Aliases: `anim`, `animation`. |
-| `model` | bool | true | Enables the thirdperson prop clone. `false` disables it. |
-| `model_bone` | string | — | Limits prop-distance validation to one source-model bone. |
-| `model_max_distance` | string | 32 | Hides the prop if the nearest hitbox/bone is farther than this. `0` disables the check. |
-| `hide_materials` | table | — | Additional material name tokens to hide on the prop clone. |
-| `keep_materials` | table | — | Material name tokens to preserve (overrides auto-hide). |
-| `target_radius` | number | 38 | Spine-relative clamp radius for bone positions. Prevents stretching. |
-| `smoothing` | number | 18 | Per-bone exponential smoothing speed. `0` disables smoothing. |
-| `offset_x` | number | 0 | Forward/back position offset in render-angle space. |
-| `offset_y` | number | 0 | Right/left position offset. |
-| `offset_z` | number | 0 | Up/down position offset. |
-| `model_offset` | table | — | Per-bone world-space position offset for the third-person model clone (spray cans, tablets, etc.) `{ boneName = Vector(x,y,z), ... }`. Useful for fine-tuning a prop's appearance without retouching the model. |
-| `clone_offset_x` | number | 0 | Forward/back position offset for the whole third-person model clone, relative to the player's aim. The clone already follows the solved hand, so this is a fine-tuning offset. |
-| `clone_offset_y` | number | 0 | Right/left position offset. |
-| `clone_offset_z` | number | 0 | Up/down position offset. |
-| `blend_per_bone` | table | — | Per-bone blend overrides: `{ "BoneName" = 0.5, ... }`. Partial bone name matching supported. |
-| `lock_bones` | table | — | List of bone names (or partial matches) to keep at the rest pose: `{ "Hand", "Finger" }`. |
-| `scale_bones` | table | — | Per-bone scale multipliers: `{ "UpperArm" = 1.2, "Hand" = 0.9 }`. Scales distance from rest pose. |
+| :-- | :--- | :------ | :---------- |
+| `sequence` | string | firstperson sequence | Thirdperson-only sequence; falls back to the firstperson one if not found. Aliases: `anim`, `animation`. The prop clone follows it too. |
+| `model` | bool | true | Enables the prop clone. `false` disables it. |
+| `model_bone` | string | | Only this source bone counts for the distance check. |
+| `model_max_distance` | number | 32 | Hides the clone when its nearest hitbox center or bone is farther than this from the player's hand. 0 disables the check. |
+| `hide_materials` | table/string | | Extra material-name substrings to hide on the clone. |
+| `keep_materials` | table/string | | Material-name substrings to keep visible; beats auto-hiding and `hide_materials`. |
+| `target_radius` | number | 38 | Half-size of the clamp box around `Spine4`. |
+| `smoothing` | number | 18 | Per-bone smoothing speed, clamped to 0..60. 0 disables smoothing. |
+| `offset_x` / `offset_y` / `offset_z` | number | 0 | Forward / right / up offset in eye-angle space, after the clamp. |
+| `blend_per_bone` | table | | `{ [nameSubstring] = blend }`: fixed blend for matching bones (0 = full animation, 1 = player's pose). Replaces the track's blend in and out for those bones. |
+| `lock_bones` | table | | Bone-name substrings kept at the player's pose. |
+| `scale_bones` | table | | `{ [nameSubstring] = scale }`: scales each matching bone's distance from its rest position. |
+| `model_offset` | table | | `{ [boneName] = Vector(x, y, z) }`: world-space offset per prop-clone bone. |
+| `clone_offset_x` / `clone_offset_y` / `clone_offset_z` | number | 0 | Forward / right / up offset of the whole prop clone, in eye-angle space. |
 
-Deprecated and removed TPIK keys (each prints a one-time warning):
-
-| Key | Status |
-| :-- | :-- |
-| `thirdperson_model`, `thirdperson_model_bone`, `thirdperson_model_max_distance`, `thirdperson_hide_materials`, `thirdperson_keep_materials`, `thirdperson_target_radius`, `thirdperson_smoothing` | Renamed to the key without the `thirdperson_` prefix. They are also moved over automatically when set on the `RegisterAnim` table. |
-| `ignore_bones` | Renamed to `lock_bones` (both kept the bone at its rest pose). Lists are merged. |
-| `blend_strength` | Removed. Use `blend_weight` on the animation. |
-| `blend_curve` | Removed. Use `lerp_curve` or `easing_in` / `easing_out` on the animation. |
-| `distance_fade`, `fade_start`, `fade_end` | Removed. Remote players already stop rendering past 2000 units. |
-| `pole_source`, `pole_native` | Removed (the IK solver is gone). |
-| `model_skin`, `model_bodygroups`, `model_material`, `render_mode`, `render_fx`, `offset_relative_to`, `offset_space`, `angular_offset_x/y/z`, `update_rate`, `interpolate`, `force_update` | Removed. They were accepted but never implemented. |
-
-The per-animation `offset_x/y/z` values are added on top of the global convar adjustments (`gcal_tpik_offset_x/y/z`) and per-animation cookie adjustments. They are applied after clamping, so they can push the arm beyond the clamp range.
-
-The model clone is a separate `ClientsideModel` that renders addon-owned props (spray cans, tablets, etc.) on the player in third person. `model_offset` provides per-bone tweaks (e.g. shift the spray can in the hand forward); `clone_offset_x/y/z` is a simpler whole-clone shift for the same purpose. Both are added on top of the global `gcal_clone_offset_x/y/z` convars and per-animation cookies.
+Bone rules match by plain substring of the player bone name. When several `scale_bones` or `blend_per_bone` keys match one bone, which one wins is undefined, so keep keys distinct.
 
 ```lua
-GCAL:RegisterTPIKOptions("my_anim", {
-    clone_offset_x = 1,   -- shift the whole prop forward by 1
-    model_offset = {
-        ["ValveBiped.Bip01_L_Hand"] = Vector(0, 0, -2), -- and pull the hand bone down 2
-    },
-})
-```
-
-### NEW: Advanced TPIK Examples
-
-**Important Note:** TPIK (thirdperson rendering) is **disabled for legacy VManip animations** (`legacy = true`). To enable thirdperson support for your animations, port them to native GCAL by removing the `legacy` flag and using native GCAL registration. This encourages developers to take advantage of GCAL's modern features and improved thirdperson system.
-
-**Porting from Legacy VManip to Native GCAL:**
-
-```lua
--- OLD: Legacy VManip
-VManip:RegisterAnim("my_anim", {
-    model = "c_vmanip_mymodel.mdl",
-    lerp_peak = 0.5,
-    -- legacy = true (set automatically by VManip shim)
-})
-
--- NEW: Native GCAL with TPIK support
-GCAL:RegisterSecondHandAnim("my_anim", {
-    model = "c_vmanip_mymodel.mdl",
-    sequence = "my_anim",  -- Be explicit about sequence
-    lerp_peak = 0.5,
-    -- legacy flag removed - now gets full TPIK support!
-})
-
--- Optional: Add TPIK customization
-GCAL:RegisterTPIKOptions("my_anim", {
-    sequence = "my_anim_tp",  -- Custom thirdperson sequence
-    target_radius = 35,
-    smoothing = 20,
-    model = true  -- Enable prop rendering in thirdperson
-})
-```
-
-**Queue System with Callbacks:**
-
-```lua
-GCAL:RegisterSecondHandAnim("tablet_open", {
-    model = "myaddon/c_tablet.mdl",
-    sequence = "open",
-    can_interrupt = false,  -- Cannot be interrupted, other anims will queue
-    on_start = function(trackID, animName, track)
-        print("Tablet opening animation started!")
-    end,
-    on_finish = function(trackID, animName, track)
-        print("Tablet is now open")
-        -- Auto-play idle animation
-        GCAL:QueueAnim("tablet_idle", trackID)
-    end,
-    on_interrupt = function(trackID, oldAnim, newAnim)
-        print("Tablet opening was interrupted by " .. newAnim)
-    end
-})
-
--- If you try to play another animation on the same track while tablet_open is active:
-GCAL:Play("tablet_open", "left_arm")  -- Starts playing
-GCAL:Play("tablet_close", "left_arm") -- Automatically queued, will play after tablet_open finishes
-```
-
-**Bone-Specific TPIK Control:**
-
-```lua
-GCAL:RegisterTPIKOptions("spray_can", {
+GCAL:RegisterTPIKOptions("myaddon_spray", {
     sequence = "spray_tp",
-    -- Lock fingers to rest pose for cleaner look
-    lock_bones = { "Finger" },
-    -- Scale the hand closer to body
-    scale_bones = {
-        ["Hand"] = 0.8,
-        ["UpperArm"] = 1.1
-    },
-    -- Custom blend per bone group
-    blend_per_bone = {
-        ["Finger"] = 0.3,  -- Fingers blend less
-        ["Hand"] = 0.7     -- Hand blends more
-    }
+    lock_bones = { "Finger" },                             -- fingers keep the player's pose
+    scale_bones = { ["Hand"] = 0.8, ["UpperArm"] = 1.1 },  -- hand closer to the body
+    blend_per_bone = { ["Forearm"] = 0.3 }                 -- forearm stays 70% animated
 })
 ```
 
-**Conditional and Delayed Playback:**
+### Prop clone
 
-Check conditions in your own code before playing, and delay with a timer:
+A second clientside model of the registered model, playing the TPIK sequence, renders addon props (spray cans, tablets) on the player. Each frame it copies the source pose, shifted so the source hand lands on the player's solved hand, then adds `clone_offset_*`, `gcal_clone_offset_*`, the per-animation clone adjustment and `model_offset`. It uses `model_scale` and the source model's skin and bodygroups.
+
+Materials whose names look like viewmodel arms (`c_arm`, `/arms`, `_arms`, `arm_`, `forearm`, `/hands`, `_hands`, `hand_`, `glove`, `sleeve`, `player_shared`) are hidden automatically. If that would hide every material, they are restored.
 
 ```lua
-GCAL:RegisterSecondHandAnim("binoculars", {
-    model = "myaddon/c_binoculars.mdl"
+GCAL:RegisterTPIKOptions("myaddon_tablet", {
+    clone_offset_x = 1,                                              -- whole prop 1 unit forward
+    model_offset = { ["ValveBiped.Bip01_L_Hand"] = Vector(0, 0, -2) } -- and this bone 2 units down
 })
-
-local function TryBinoculars()
-    local ply = LocalPlayer()
-    if not IsValid(ply) or ply:GetVelocity():Length() >= 5 then return end -- only while standing still
-
-    timer.Simple(0.2, function() GCAL:Play("binoculars") end)
-end
 ```
 
-**Reacting to Playback Progress:**
+### ARC9
 
-```lua
-hook.Add("Think", "MyAddon_ReloadClick", function()
-    if GCAL:GetCurrentAnim("left_arm") ~= "reload_sequence" then return end
+On ARC9 weapons with native TPIK available (`ARC9.TPIK.NativeExtensionPoints`, `arc9_tpik` on, weapon not `NoTPIK`), the render method is `arc9_tpik`: GCAL waits for ARC9's `ARC9_TPIK_PostSolve` hook and overlays its tracks on ARC9's pose. Everywhere else, including ARC9 weapons without native TPIK, the method is `normal`: GCAL's own pass in `PrePlayerDraw`. A strategy chooses the method with `thirdPersonMethod` ([9](#9-weapon-base-strategies)).
 
-    local track = GCAL:GetTrack("left_arm")
-    if GCAL:GetCycle("left_arm") >= 0.5 and not track.myClickPlayed then
-        track.myClickPlayed = true
-        LocalPlayer():EmitSound("weapons/reload_click.wav")
-    end
-end)
-```
+### Global tuning
 
-Thirdperson rendering is selected by method: ARC9 weapons with active native TPIK use `arc9_tpik`, and all other weapons (including ARC9 weapons without native TPIK) use `normal`. The `arc9_tpik` method waits for ARC9's native `ARC9_TPIK_PostSolve` hook before overlaying active GCAL tracks. When ARC9's native TPIK is disabled, GCAL falls back to its own direct-bone-copy TPIK instead of disabling thirdperson entirely. This works because GCAL's TPIK is now a simple bone copy (ARC9-style) rather than the old IK solver that could interfere with ARC9's rendering.
+`gcal_tpik_offset_x/y/z`, `gcal_tpik_angle_p/y/r`, `gcal_tpik_target_radius_add`, `gcal_tpik_smoothing_add` and `gcal_clone_offset_x/y/z`, plus the per-animation TPIK adjustments from the menu, are added on top of the registered options. `gcal_anim_offset_*` and `gcal_anim_angle_*` only affect firstperson.
 
-Track timing is advanced once per rendered frame through a shared updater. Firstperson and thirdperson hooks only render the resulting state, so drawing both views cannot shorten an animation or skip short clips.
-
-The playground exposes separate TPIK adjustment sliders under the global controls and under each animation's right-click adjustment menu. `gcal_anim_offset_*` and `gcal_anim_angle_*` affect normal firstperson placement. `gcal_tpik_offset_*` and `gcal_tpik_angle_*` are applied after the source-to-player offset and clamping, so they nudge the final thirdperson pose. `gcal_tpik_target_radius_add` and `gcal_tpik_smoothing_add` are additive nudges on top of each animation's registered TPIK values. For the thirdperson model clone (spray can, tablet, etc.), use `gcal_clone_offset_x/y/z` convars and the per-animation `model_offset` / `clone_offset_x/y/z` options to nudge alignment.
+Other players' animations are covered in [10](#10-multiplayer-and-networking).
 
 ---
 
-## 6. Easing Functions
+## 8. Camera bone (cambone)
 
-GCAL includes a built-in easing library for natural movement. Available options:
+GCAL can drive the local player's firstperson view from the first attachment of the animation's model, replicating VManip's camera bone. It is on by default for every animation whose model has an attachment.
 
-- `Linear`
-- `InQuad`, `OutQuad`, `InOutQuad`
-- `InCubic`, `OutCubic`, `InOutCubic`
-- `OutElastic` (Great for "snappy" or "bouncy" movements)
-- `Legacy` (Matches the original VManip power-curve behavior; this is the default)
-
-`Legacy` blends with `t ^ lerp_curve`, in first person and in thirdperson TPIK. Setting `easing_in` or `easing_out` to another name uses that function for the matching transition; `lerp_curve` then only applies to a side still left on `Legacy`.
-
----
-
-## 7. Legacy Compatibility
-
-If your addon already uses VManip, you don't need to change anything!
-
-- `VManip:RegisterAnim` is automatically redirected to `GCAL:RegisterAnim`.
-- `VMLegs:PlayAnim` is redirected to the GCAL legs track.
-- GCAL automatically scans all addons for `vmanip/anims/*.lua` and imports them.
-- Legacy helpers such as `VManip:QueueAnim`, `VManip:QuitHolding(anim)`, `VManip:PlaySegment`, `VManip:GetCycle`, and camera attachment offsets are supported.
-- Legacy sequence resolution is tolerant of common old-addon mistakes: GCAL tries the registered animation name, an explicit `sequence`, a lowercase name, normalized and partial normalized legacy-name matches, a `c_vmanip...` model-filename match, and the only model sequence when one exists.
-- If a legacy model reports zero sequences, GCAL can fall back to a compatible surrogate animation or a pose-only compatibility mode instead of hard-failing immediately.
-- Chen patch behavior for flipped viewmodels, player legs, and MWBase/TFA/ArcCW special handling is built into the compatibility layer.
-- Legacy flipped-viewmodel handling follows the weapon's default flip state (`ViewModelFlipDefault`) for the target arm side, while `ViewModelFlipDefault != ViewModelFlip` controls source-model mirroring. Native GCAL tracks keep their registered hand/bone targets instead of being globally remapped by legacy flip state.
-
-### Migrating From VManip To Natives
-
-If you maintain a VManip-style addon and want to switch to GCAL natives, the shim keeps everything working — no rush. When you're ready, replace the legacy patterns with the natives from section 3.5. Here are the most common migrations:
-
-**Reading the gesture model**
+When a track starts with `gcal_cambone` on and the animation's `cambone` isn't `false`, GCAL creates a hidden camera model (`camModel`) at the world origin playing the same sequence. Each frame it reads that model's first attachment. In `CalcView` (firstperson, view entity is the player, while some track's blend is below 1) GCAL first runs the other `CalcView` hooks, then passes the result through the cambone handlers for each track. The default handler, `"vmanip"` at priority 0, adds `(attachment.Ang - cam_ang) * cam_angint * (1 - lerpVal)` to the view angles.
 
 ```lua
--- VManip
-local vm = VManip.VMGesture
-if IsValid(vm) then vm:SetPos(...) end
+GCAL:RegisterAnim("myaddon_look", {
+    model = "myaddon/c_look.mdl",
+    cam_ang = Angle(-79.75, 0, -90), -- rest angle of the camera attachment
+    cam_angint = { 1, 1, 1 }         -- pitch, yaw, roll intensity
+})
 
--- GCAL
-local vm = GCAL:GetGestureModel("left_arm")
-if IsValid(vm) then vm:SetPos(...) end
-```
-
-Note: GCAL uses per-track lookups. If your addon supports multiple tracks, pick the right one (`"left_arm"`, `"right_arm"`, `"both_arms"`, or your custom track ID).
-
-**Polling the lerp / cycle / current anim**
-
-```lua
--- VManip
-local cycle = VManip.Cycle
-local lerp = VManip.VMatrixlerp
-local anim = VManip.CurGesture
-
--- GCAL
-local cycle = GCAL:GetCycle("left_arm")
-local lerp = GCAL:GetLerp("left_arm")
-local anim = GCAL:GetCurrentAnim("left_arm")
-```
-
-All GCAL getters take the track ID and return `nil`/`0` if the track is not active. They are safe to call from `Think` without `IsValid` checks.
-
-**Playing and queuing**
-
-```lua
--- VManip
-VManip:PlayAnim("foo")
-VManip:QueueAnim("bar")
-VManip:QuitHolding()
-VManip:Remove()
-
--- GCAL
-GCAL:Play("foo")
-GCAL:QueueAnim("bar", "left_arm")
-GCAL:QuitHolding("left_arm")
-GCAL:StopTrack("left_arm")
-```
-
-Note: `QuitHolding` and `StopTrack` take the track ID. The VManip shim's `QuitHolding()` without an arg still works for backward compat, but new code should pass the track ID.
-
-**State guards**
-
-```lua
--- VManip
-if VManip:IsActive() and VManip:GetLerp() < 0.1 then
-    -- full animation playing
-end
-
--- GCAL
-local track = GCAL:GetTrack("left_arm")
-if track and track.lerpVal < 0.1 then
-    -- full animation playing
-end
-
--- or use the dedicated helper:
-if GCAL:IsTrackActive("left_arm") and GCAL:GetLerp("left_arm") < 0.1 then
-    -- ...
-end
-```
-
-**Querying leg / foot animations**
-
-```lua
--- VMLegs
-VMLegs:PlayAnim("forward")
-VMLegs:GetCurrentAnim()
-
--- GCAL
-GCAL:Play("legs_forward", "legs")
-GCAL:GetCurrentAnim("legs")
-```
-
-GCAL's legs track uses a `"legs_"` prefix when registered via `GCAL:Play` directly. The VMLegs shim still works, and registering via `VMLegs:RegisterAnim(name, data)` is equivalent to `GCAL:RegisterAnim("legs_" .. name, data)`.
-
-**Camera-bone attachment**
-
-```lua
--- VManip (Chen patch)
-VManip.Cam_Ang = Angle(-79.75, 0, -90)
-VManip.Cam_AngInt = { 1, 1, 1 }
-VManip.Attachment = VManip:GetVMGesture():GetAttachment(0)
-
--- GCAL (per animation, via RegisterAnim)
-GCAL:RegisterAnim("my_anim", {
-    model = "...",
-    cam_ang = Angle(-79.75, 0, -90),
-    cam_angint = { 1, 1, 1 },
-    cambone = true,
+GCAL:RegisterSecondHandAnim("myaddon_calm_ping", {
+    model = "myaddon/c_ping.mdl",
+    cambone = false -- never moves the view, no camera model is created
 })
 ```
 
-GCAL reads `cam_ang` / `cam_angint` from the registration data and handles the attachment lookup per frame. The `cambone` field lets you opt out per-animation, and the global convar `gcal_cambone` controls the default.
+`cambone = true` behaves like leaving it unset: `gcal_cambone 0` disables cambone for every animation. The menu's "Cambone enabled" button toggles the convar. The fields are listed in [3](#3-registering-animations).
 
-**Removing the VManip dependency**
+### Custom cambone handlers
 
-Once all your code uses natives, you can drop the VManip shim calls. The shim itself stays in GCAL, so you can migrate one file at a time without breaking the others. After migration, consider:
+`GCAL:RegisterCamBoneHandler(id, priority, fn)` adds a handler. All handlers run in priority order (lower first) for every track with an attachment, each receiving the previous handler's output. Registering an existing id replaces it; `GCAL:RemoveCamBoneHandler(id)` removes it. Both return `true` / `false`. Replacing or removing `"vmanip"` changes cambone for every addon.
 
-- Removing the `legacy = true` flag from your registrations so GCAL uses the modern bone-copy path instead of the legacy VManip-style lerp.
-- Setting explicit `bones` / `source_bones` tables on your registrations (use `GCAL.GROUPS.LEFT_ARM` / `RIGHT_ARM` / `BOTH_ARMS`) instead of relying on the `hand` field defaulting to a specific arm.
-- Using `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` instead of mutating `VManip.VMCam` or `VManip.Cam_Ang` directly.
+```
+fn(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
+  -> origin, angles, fov
+```
 
-### Weapon Base Strategies
+| Argument | Description |
+| :------- | :---------- |
+| `id` | The handler's id. |
+| `track` | Runtime track (`name`, `camModel`, `attachment`, `lerpVal`, ...). |
+| `ply` | The local player. |
+| `origin`, `angles`, `fov` | View so far. Return them, modified or not. |
+| `attachment` | `{ Pos, Ang }` of the camera attachment. Never nil when handlers run. |
+| `camAng`, `camAngInt` | The track's `cam_ang` and `cam_angint`. |
+| `lerpVal` | Blend, 1 = weapon pose, 0 = full animation. Scale your effect by `1 - lerpVal` so it fades with the animation. |
+| `handler` | The handler's table `{ id, priority, fn }`. |
 
-GCAL resolves special weapon-base behavior through ordered clientside strategies instead of scattering one-off checks through the renderer.
+To give one animation its own camera response, zero its `cam_angint` so the default handler adds nothing for it, then handle it yourself:
 
-Built-in strategy order:
+```lua
+GCAL:RegisterAnim("myaddon_recoil", {
+    model = "myaddon/c_recoil.mdl",
+    cam_angint = { 0, 0, 0 } -- the default "vmanip" handler adds nothing for this animation
+})
 
-1. `tfa`
-2. `arccw`
-3. `mwbase`
-4. Normal GCAL rendering fallback
+GCAL:RegisterCamBoneHandler("myaddon_recoil", 10,
+    function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal)
+        if track.name ~= "myaddon_recoil" then return origin, angles, fov end
 
-Each strategy can detect a weapon base, choose the viewmodel entity GCAL should render against, choose the entity that owns the target arm bones, and block legacy VManip playback during base-specific reload states.
+        local delta = attachment.Ang - camAng
+        local weight = 1 - lerpVal
+        return origin, Angle(
+            angles.p + delta.p * 0.5 * weight, -- dampened pitch
+            angles.y + delta.y * 2.0 * weight, -- amplified yaw
+            angles.r + delta.r * weight
+        ), fov
+    end)
+```
 
-Current built-in behavior:
+`GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)` runs the handler chain for one track; GCAL's `CalcView` hook uses it.
 
-| Strategy | Detection | Viewmodel handling | Notes |
-| :------- | :-------- | :----------------- | :---- |
-| `tfa` | `weapon.IsTFAWeapon` | Uses the owner's normal viewmodel. | Matches Chen's patch: no TFA-specific VM hook and no forced hands-first target. TFA still uses the shared `PreDrawPlayerHands` path for `UseHands` weapons, falls back to the player hands entity when the VM has no arm bones, and uses `TFA_PreReload` reload blocking. |
-| `arccw` | `weapon.ArcCW` | Uses the owner's normal viewmodel. | Matches Chen's patch: `UseHands` weapons render through `PreDrawPlayerHands`, skip the generic `PostDrawViewModel` pass, and keep VM-first arm targeting. Reload playback is blocked while ArcCW reports `reloading`. |
-| `arc9` | ARC9 markers or TPIK methods | Uses the owner's normal viewmodel. | Thirdperson: `arc9_tpik` layers on top of ARC9's native post-solve hook when available; otherwise falls back to `normal` (GCAL's own direct-bone-copy TPIK). |
-| `mwbase` | valid `weapon.m_ViewModel` | Uses `weapon.m_ViewModel`. | Custom VM entity is used for arms and legs when present. |
+---
 
-To add another special weapon base, register a strategy clientside:
+## 9. Weapon-base strategies
+
+Special weapon-base behaviour lives in clientside strategies instead of one-off checks in the renderer. GCAL checks them in order and uses the first whose `detect` returns true (cached per weapon for 0.5 s). Built-in order: `tfa`, `arccw`, `arc9`, `mwbase`. New strategies are appended; registering an existing id replaces it in place. With no match GCAL uses the regular viewmodel and hands entity.
+
+| Strategy | Detection | Behaviour |
+| :------- | :-------- | :-------- |
+| `tfa` | `weapon.IsTFAWeapon` | Owner's viewmodel. |
+| `arccw` | `weapon.ArcCW` | Owner's viewmodel. Blocks every GCAL animation while `GetNWBool("reloading")`. Legacy reload checks are skipped while the crosshair is drawn or the viewmodel cycle is past 0.99. |
+| `arc9` | `ARC9`, `ARC9Weapon`, `Base == "arc9_base"`, or `DoTPIK` + `GetWM` | Owner's viewmodel. Blocks animations while `GetReloading()`. Thirdperson method `arc9_tpik` when available ([7](#7-thirdperson-tpik)). |
+| `mwbase` | valid `weapon.m_ViewModel` | Renders against `weapon.m_ViewModel`. Blocks animations while `GetIsReloading()`. |
+
+For every strategy the arm target is the viewmodel when it has any target bone, otherwise the hands entity (`GCAL:FindArmTarget`), unless the strategy sets `resolveArmTarget`. Separately, while a VManip animation is active (blend < 1) GCAL strips `IN_RELOAD` in firstperson and returns `"no"` from `TFA_PreReload`.
 
 ```lua
 if CLIENT then
@@ -846,10 +730,6 @@ if CLIENT then
         end,
 
         resolveViewModel = function(ply, weapon, vm, handsEnt, context)
-            return IsValid(weapon.ExampleViewModel) and weapon.ExampleViewModel or vm
-        end,
-
-        resolveLegsViewModel = function(ply, weapon, vm, handsEnt, context)
             return IsValid(weapon.ExampleViewModel) and weapon.ExampleViewModel or vm
         end,
 
@@ -863,40 +743,227 @@ if CLIENT then
 
         preActCheck = function(ply, weapon, animName, vm, strategy)
             if IsValid(vm) and vm:GetCycle() > 0.99 then return true end
+        end,
+
+        thirdPersonMethod = function(ply, weapon, strategy)
+            return "normal"
         end
     })
 end
 ```
 
-Only `detect` is required. Omit callbacks you do not need. If no strategy matches, GCAL uses the regular viewmodel and player hands entities passed by Garry's Mod. Legacy `VManipVMEntity` hooks are still respected as a fallback for external addons that provide their own compatibility hook.
+| Callback | Called | Return |
+| :------- | :----- | :----- |
+| `detect(ply, weapon)` | **Required.** Strategy lookup. | Truthy if the strategy handles this weapon. |
+| `resolveViewModel(ply, weapon, vm, handsEnt, context)` | Each frame, building the render context. | Entity to render against (invalid keeps `vm`). When present, `VManipVMEntity` listeners aren't consulted. |
+| `resolveArmTarget(ply, weapon, vm, handsEnt, targetBones, context)` | Per track, per frame. | Entity to write arm bones to (invalid falls back to `FindArmTarget`). |
+| `prePlayAnim(ply, weapon, animName, strategy)` | Every `GCAL:Play`, through `VManipPrePlayAnim`. | `false` blocks the animation, native and legacy alike. |
+| `preActCheck(ply, weapon, animName, vm, strategy)` | Legacy animations only, through `VManipPreActCheck`. | `true` skips the reload checks. |
+| `thirdPersonMethod(ply, weapon, strategy)` | Thirdperson rendering. | `"arc9_tpik"` or `"normal"`. Any other value renders like `"normal"`. |
 
-### Registering Conflicting Workshop Addons
-
-If your addon is incompatible with GCAL, register its Workshop ID clientside so GCAL can warn players when both addons are mounted:
-
-```lua
-GCAL:RegisterConflictingWorkshopAddon("1234567890", "Example Addon")
-```
-
-The first argument is your addon's Steam Workshop item ID as a string. The second argument is the display name shown in GCAL's warning output.
-
-```lua
-if CLIENT then
-    GCAL:RegisterConflictingWorkshopAddon("1234567890", "My Addon")
-end
-```
-
-GCAL checks mounted Workshop addons by ID and also keeps older file-based VManip detection as a fallback.
+Omit callbacks you don't need. The built-ins also define `resolveLegsViewModel`, but it is only reachable through a `VManipLegsVMEntity` hook that GCAL itself never runs, so legs don't use strategies.
 
 ---
 
-## 8. DynaBase Support
+## 10. Multiplayer and networking
 
-GCAL includes optional support for the [wOS] DynaBase Dynamic Animation Manager. It does not require DynaBase to be installed; sources are safely queued and registered only when `wOS.DynaBase` and `WOS_DYNABASE` exist.
+### Server API
 
-DynaBase mounts are for player-model animation sources, not GCAL's first-person arm gestures. Use them when your addon also ships player animation mount models that should appear in DynaBase's animation manager.
+The server doesn't play animations; it tells clients to.
 
-### Registering a DynaBase Source
+| Function | Description |
+| :------- | :---------- |
+| `GCAL:Play(name, trackID, recipients)` | Clients run `GCAL:Play(name, trackID)`. `recipients` is a player, a table of players or a `CRecipientFilter`; nil broadcasts. |
+| `GCAL:Play(ply_or_filter, name, trackID)` | Same, with recipients first. |
+| `GCAL:StopTrack(trackID, recipients)` | Clients stop `trackID` (every track when nil). |
+| `GCAL:StopAllTracks(recipients)` | Clients stop every track. |
+
+The server doesn't check the registry; the animation must be registered on the clients. The legacy `VManip_SimplePlay` and `VManip_StopHold` net messages still work for old server code.
+
+### Thirdperson sync
+
+When a track starts on a client and its animation doesn't set `thirdperson = false` or `local_only` (and it isn't on `legs`), GCAL tells the server, which relays the start to the players in the sender's PVS. Stops, hold releases and segment changes follow. Sync doesn't depend on the sender's own `gcal_thirdperson`. `local_only` tracks never send anything.
+
+A receiving client builds its own copy of the track and renders it on that player through the normal TPIK path when:
+
+- `gcal_mp_tpik` (default 1) and its own `gcal_thirdperson` are on;
+- the animation is registered there, enabled in its menu, with TPIK left on;
+- the sender isn't dormant and is within 2000 units. Starts for dormant or distant players are skipped.
+
+Each player can have at most 4 remote tracks, and the server rate-limits sync messages per player. Only the thirdperson pose and the prop clone are replicated: no firstperson, cambone, sounds or gun mode. Legacy VManip animations never sync.
+
+---
+
+## 11. Migrating from VManip and VMLegs
+
+If your addon uses VManip it keeps working without changes. When you're ready, port it file by file; the shim stays in GCAL.
+
+### What the shim does
+
+- `VManip:RegisterAnim(name, data)` registers a legacy animation on `legacy_left_arm`. It copies only `model`, `sequence`, `lerp_peak`, `lerp_speed_in`, `lerp_speed_out`, `lerp_curve`, `speed`, `startcycle`, `loop`, `holdtime`, `sounds`, `preventquit`, `block_code`, `block_code_scope`, `locktoply`, `assurepos`, `cam_ang`, `cam_angint`, `segmented` and `addon_name` / `addon`, and forces left-arm bones, `Legacy` easing, `legacy = true` and `thirdperson = false`.
+- `lua/vmanip/anims/*.lua` from every addon is included automatically on both realms (and scanned again shortly after `InitPostEntity`); `addon_name` defaults to the file name.
+- Registrations made before GCAL loads are held by `aaa_gcal_shim.lua` and imported once it does.
+- `VManip:PlayAnim(name)` plays on `legacy_left_arm`. Like VManip it refuses while that track is busy, in a vehicle, when dead, without a weapon, with the `duel` hold type, or during a viewmodel reload. `VManip:QueueAnim` has its own queue slot.
+- The VManip globals (`VManip.VMGesture`, `VMCam`, `Cam_Ang`, `Cam_AngInt`, `CurGesture`, `CurGestureData`, `VMatrixlerp`, `Cycle`, `Attachment`, ...) are synced from that track every frame. `VManip()` is callable and `Entity:VManip(matrix)` exists, for MW Base.
+- Legacy flip handling targets the arm from the weapon's `ViewModelFlipDefault`, and `ViewModelFlipDefault ~= ViewModelFlip` mirrors the source model. Native tracks keep their registered hand and aren't remapped. Chen's patch behaviour for flipped viewmodels, player legs and TFA/ArcCW/MW Base is built into the compat layer and the strategies.
+- `VMLegs:RegisterAnim(name, data)` registers `"legs_" .. name` on the `legs` track. It copies only `model`, `speed`, `forwardboost` and `upwardboost`, and forces `sequence = name`.
+- `VMLegs:PlayAnim(name)` plays that animation and builds the player-legs model (your player model bonemerged to the animation, upper body hidden). `GCAL:Play("legs_" .. name, "legs")` is not equivalent: it plays the animation model without player legs. Keep using `VMLegs:PlayAnim` for legs.
+
+### API mapping
+
+`t` is the track ID: `"left_arm"` (or your own track) for native animations, `"legacy_left_arm"` for animations still registered through VManip.
+
+| VManip / VMLegs | GCAL native |
+| :-------------- | :---------- |
+| `VManip:RegisterAnim(name, data)` | `GCAL:RegisterSecondHandAnim(name, data)` with an explicit `sequence` |
+| `VManip:PlayAnim(name)` | `GCAL:Play(name)` |
+| `VManip:IsActive()` (blend < 1) | `GCAL:IsTrackActive(t) and GCAL:GetLerp(t) < 1` |
+| `VManip:IsValid()` | `GCAL:IsTrackActive(t)` |
+| `VManip:Remove()`, `VManip:Reset()` | `GCAL:StopTrack(t)` (also drops the queued animation) |
+| `VManip:GetVMGesture()`, `VManip.VMGesture` | `GCAL:GetGestureModel(t)` |
+| `VManip.VMCam` | `GCAL:GetCamModel(t)` |
+| `VManip.Cam_Ang`, `VManip.Cam_AngInt` | `cam_ang`, `cam_angint` registration fields |
+| `VManip.Attachment` | `GCAL:GetTrack(t).attachment` |
+| `VManip:GetCurrentAnim()`, `VManip.CurGesture` | `GCAL:GetCurrentAnim(t)` |
+| `VManip:GetCycle()`, `VManip:SetCycle(c)`, `VManip.Cycle` | `GCAL:GetCycle(t)`, `GCAL:SetCycle(t, c)` |
+| `VManip:GetLerp()`, `VManip.VMatrixlerp` | `GCAL:GetLerp(t)` |
+| `VManip:IsSegmented()`, `GetCurrentSegment()`, `GetSegmentCount()`, `IsPreventQuit()` | Same names on `GCAL` with `(t)` |
+| `VManip:QueueAnim(name)` | `GCAL:QueueAnim(name, t)` |
+| `VManip:QuitHolding(anim)` | `GCAL:QuitHolding(t, anim)` |
+| `VManip:PlaySegment(seq, last, sounds)` | `GCAL:PlaySegment(t, seq, last, sounds)` |
+| `VManip:GetAnim(name)` | `GCAL:GetAnim(name)` |
+| `VManipPostPlayAnim` | `GCALTrackStarted` (fires at start, not when the blend begins) |
+| `VManipRemove` | `GCALTrackStopped` |
+| `VManipSegmentFinish`, `VManipPrePlaySegment`, `VManipPlaySegment` | `GCALSegmentFinish`, `GCALPrePlaySegment`, `GCALPlaySegment` (track ID first) |
+| `VManipPreHoldQuit`, `VManipHoldQuit` | `GCALPreHoldQuit`, `GCALHoldQuit` |
+| `VManipPrePlayAnim` | Unchanged; it fires for native animations too |
+| `VManip_SimplePlay` net message from the server | Server `GCAL:Play(name, t, recipients)` |
+| `VMLegs:PlayAnim(name)` | Keep it; no native call builds the player legs |
+| `VMLegs:GetCurrentAnim()` | `GCAL:GetCurrentAnim("legs")` (keeps the `legs_` prefix) |
+
+### Porting example
+
+```lua
+-- VManip
+VManip:RegisterAnim("myaddon_grab", { model = "c_vmanip_grab.mdl", lerp_peak = 0.5 })
+VManip:PlayAnim("myaddon_grab")
+local gesture = VManip.VMGesture
+local lerp = VManip.VMatrixlerp
+
+-- GCAL
+GCAL:RegisterSecondHandAnim("myaddon_grab", {
+    model = "c_vmanip_grab.mdl",
+    sequence = "grab", -- be explicit: native lookup isn't tolerant
+    lerp_peak = 0.5
+})
+GCAL:Play("myaddon_grab")
+local gesture = GCAL:GetGestureModel("left_arm")
+local lerp = GCAL:GetLerp("left_arm")
+
+-- Optional, now possible: thirdperson tuning
+GCAL:RegisterTPIKOptions("myaddon_grab", { sequence = "grab_tp", target_radius = 35, smoothing = 20 })
+```
+
+After porting:
+
+- Remove any `legacy = true` and pass `sequence` explicitly.
+- Use a native track instead of sharing `legacy_left_arm`.
+- Native animations don't block reloads and skip VManip's start checks. If you relied on that, use a strategy `prePlayAnim`, `VManipPrePlayAnim`, `block_code` or your own checks.
+- Put thirdperson tweaks in `GCAL:RegisterTPIKOptions`, not in `VManip.*` globals.
+
+---
+
+## 12. Debugging
+
+### Debug HUD
+
+`gcal_debug 1` turns on console logging (`[GCAL DEBUG]`) and the debug HUD on the left of the screen:
+
+- a header with the number of registered animations and active tracks;
+- the weapon line: class, matched strategy (`default` when none), and `flipped` in legacy flip mode;
+- the global toggles row, for example `on: tpik cambone muted speed x1.50`;
+- per track: track ID, animation and `[gcal]` / `[legacy]`; the model; the resolved sequence (red when not found, or pose-only); the TPIK sequence row when it differs; cycle and blend bars with phase (`in`, `out`, `hold`, `loop`, `segment`) and weight; bones moved, sounds played, segment, hold and gun mode; flags such as `tpik`, `cambone`, `locktoply`, `assurepos`, `no-interrupt`, `prevent-quit`, `blocks <scope>` and `queued: <name>`;
+- recent events: the last 8 events from the past 12 seconds, colour-coded (failures, warnings, deprecations). Add your own with `GCAL:AddDebugEvent(text, color)`.
+
+GCAL also listens for unhandled Lua errors from its own files and from known conflicting addons. It prints a short `[GCAL]` summary with the first Lua frames and, on the client, one rate-limited notification; full details stay in the console.
+
+### Commands
+
+| Command | Description |
+| :------ | :---------- |
+| `gcal_list_anims` | Lists registered animations with their default track. |
+| `gcal_play <animation> [track]` | Plays a registered animation. Autocompletes names. |
+| `gcal_stop [track]` | Stops one track, or every track; also drops their queued animations. |
+| `gcal_debug_sequences <animation>` | Lists the model's sequences, checks the one the animation uses, warns about zero-sequence models and suggests case fixes. |
+| `gcal_debug_sequences <model.mdl> [sequence]` | Same for any model, without registering an animation. |
+| `gcal_debug_track [track]` | Dumps a track: state, TPIK info, weapon strategy, flip state, arm target entity, matched bones and source/target deltas. Defaults to `legacy_left_arm`; native animations play on `left_arm` (or their own track), so pass it. |
+| `gcal_menu_open` | Opens the GCAL menu. It also opens from the "GCAL" icon on the C-menu desktop. |
+
+### Troubleshooting checklist
+
+If an animation does not play:
+
+- Run `gcal_list_anims` and confirm the animation is registered on the client.
+- Run `gcal_debug_sequences <animation>` and confirm the model exposes the sequence you expect.
+- Check whether the player disabled it in the menu (`GCALAnimSuppressed`) or a weapon-base strategy blocks it (reloading).
+- If the track is held by a `can_interrupt = false` animation, the new one was queued.
+- Legacy animations refuse to start while `legacy_left_arm` is busy (see [11](#11-migrating-from-vmanip-and-vmlegs)).
+- Enable `gcal_debug 1` and read the recent events.
+
+If the hand does not move:
+
+- Confirm the source model contains the source bones GCAL reads and the viewmodel or hands contain the target bones (the HUD's `bones` count).
+- Try explicit `hand`, `source_hand`, `bones` or `source_bones` values instead of relying on defaults.
+- Use `gcal_debug_track <track>` to inspect the weapon-base strategy, arm target entity and matched bones.
+
+If the timing is off:
+
+- The cycle runs at `speed` cycles per second, not at the sequence's authored rate.
+- If the arm snaps back at the end, `lerp_peak` plus the blend-out is longer than the clip.
+
+If thirdperson looks wrong:
+
+- Verify firstperson first. TPIK copies the same source animation.
+- Add a TPIK `sequence` if the firstperson sequence is a poor thirdperson pose.
+- Tune `target_radius`, `smoothing`, `offset_x/y/z`, `model_offset` and `clone_offset_x/y/z`, or use the menu's per-animation TPIK sliders.
+- Set `model = false` to separate the arm copy from the prop clone.
+- Use `model_bone` and `model_max_distance` when a prop vanishes or drifts away from the hand.
+- The player model needs ValveBiped arm bones and `Spine4`.
+
+---
+
+## 13. Convar reference
+
+All convars are clientside and saved.
+
+| Convar | Default | Description |
+| :----- | :------ | :---------- |
+| `gcal_debug` | 0 | Debug HUD and console logging. |
+| `gcal_thirdperson` | 1 | Project GCAL tracks onto the local player in thirdperson; also needed to see other players' synced animations. |
+| `gcal_mp_tpik` | 1 | Receive and render other players' TPIK animations. |
+| `gcal_cambone` | 1 | Camera bone for all animations. |
+| `gcal_playback_speed` | 1 | Global playback speed multiplier (menu slider 0.1 to 3). |
+| `gcal_mute_sounds` | 0 | Mutes animation sounds. |
+| `gcal_sound_pitch` | 100 | Animation sound pitch (menu presets 75, 100, 140). |
+| `gcal_anim_offset_x/y/z` | 0 | Firstperson forward / right / up offset of the source model. |
+| `gcal_anim_angle_p/y/r` | 0 | Firstperson angle offset of the source model. |
+| `gcal_tpik_offset_x/y/z` | 0 | Thirdperson offset, applied after the clamp. |
+| `gcal_tpik_angle_p/y/r` | 0 | Added to each TPIK bone's angles. |
+| `gcal_tpik_target_radius_add` | 0 | Added to `target_radius`. Negative tightens, positive loosens. |
+| `gcal_tpik_smoothing_add` | 0 | Added to `smoothing`; the result is clamped to 0..60. |
+| `gcal_clone_offset_x/y/z` | 0 | Offset of the thirdperson prop clone. |
+| `gcal_menu_keep_open` | 1 | Keeps the menu window open after releasing the context menu key. |
+| `gcal_conflict_popup` | 1 | Shows the conflicting-addon popup at startup. |
+
+---
+
+## 14. Integrations
+
+### DynaBase
+
+GCAL has optional support for the [wOS] DynaBase Dynamic Animation Manager. DynaBase doesn't need to be installed: sources are queued and only registered when `wOS.DynaBase` and `WOS_DYNABASE` exist.
+
+DynaBase mounts are player-model animation sources, not GCAL's firstperson arm gestures. Use them when your addon also ships player animation mount models that should appear in DynaBase's animation manager.
 
 ```lua
 GCAL:RegisterDynaBaseSource({
@@ -908,19 +975,13 @@ GCAL:RegisterDynaBaseSource({
 })
 ```
 
-GCAL registers the source during DynaBase's `InitLoadAnimations` hook and includes the right model during `PreLoadAnimations`.
-
-For a simpler mount declaration:
+GCAL registers the source during DynaBase's `InitLoadAnimations` hook and includes the right model during `PreLoadAnimations`. For a simpler declaration, with `shared` for every gender or arrays when one gender needs several models:
 
 ```lua
 GCAL:RegisterDynaBaseMount("My Shared Animation Mount", {
     shared = "models/player/myaddon/shared_mount.mdl"
 })
-```
 
-You can also provide arrays if one gender needs multiple source models:
-
-```lua
 GCAL:RegisterDynaBaseMount("My Layered Mount", {
     male = {
         "models/player/myaddon/m_base_mount.mdl",
@@ -930,243 +991,69 @@ GCAL:RegisterDynaBaseMount("My Layered Mount", {
 })
 ```
 
-Use `GCAL:IsDynaBaseAvailable()` if your addon wants to branch behavior when DynaBase is installed.
+Use `GCAL:IsDynaBaseAvailable()` to branch when DynaBase is installed.
 
----
+### Registering conflicting Workshop addons
 
-## 9. Common Addon Patterns
-
-### Clientside Initialization
-
-Register animations clientside after GCAL exists. If your file is loaded by an addon autorun, a simple client guard is usually enough:
+If your addon is incompatible with GCAL, register its Workshop ID clientside so GCAL warns players who mount both:
 
 ```lua
-if not CLIENT then return end
-if not GCAL then return end
-
-GCAL:RegisterSecondHandAnim("myaddon_ping", {
-    model = "myaddon/c_ping.mdl",
-    sequence = "ping",
-    addon_name = "My Addon"
-})
-```
-
-If your addon can load before GCAL, defer registration until a safe hook or include order you control. Do not register the same animation every frame.
-
-### Play Without Spamming
-
-Before playing a long gesture, check the target track:
-
-```lua
-local track = "left_arm"
-
-if not GCAL:IsTrackActive(track) then
-    GCAL:Play("myaddon_ping", track)
+if CLIENT then
+    GCAL:RegisterConflictingWorkshopAddon("1234567890", "My Addon")
 end
 ```
 
-For actions that should replace themselves, just call `GCAL:Play` on the same track. GCAL will stop the previous runtime track cleanly.
-
-### Block Your Own Logic While a Gesture Runs
-
-Use `block_code` when your addon needs to wait for an animation before continuing an interaction:
-
-```lua
-GCAL:RegisterSecondHandAnim("myaddon_insert_battery", {
-    model = "myaddon/c_battery.mdl",
-    sequence = "insert",
-    block_code = true,
-    block_code_scope = "myaddon_battery"
-})
-
-hook.Add("Think", "MyAddonBatteryThink", function()
-    if GCAL:IsCodeBlocked("myaddon_battery") then return end
-
-    -- Regular battery logic.
-end)
-```
-
-### Add Thirdperson TPIK Only When Needed
-
-Start with normal firstperson registration. Add `GCAL.TPIKOptions` only when thirdperson needs a different sequence or solver tuning:
-
-```lua
-GCAL:RegisterSecondHandAnim("myaddon_spray", {
-    model = "myaddon/c_spray.mdl",
-    sequence = "spray_firstperson",
-    addon_name = "My Addon"
-})
-
-GCAL:RegisterTPIKOptions("myaddon_spray", {
-    sequence = "spray_thirdperson",
-    model_bone = "ValveBiped.Bip01_L_Hand",
-    model_max_distance = 24,
-    target_radius = 34,
-    smoothing = 14
-})
-```
-
-### Recommended Naming
-
-Use stable, namespaced animation names so other addons and users can understand debug output:
-
-```lua
-GCAL:RegisterSecondHandAnim("myaddon_tablet_open", { ... })
-GCAL:RegisterSecondHandAnim("myaddon_tablet_close", { ... })
-GCAL:RegisterSecondHandAnim("myaddon_tablet_press", { ... })
-```
-
-Avoid very generic names like `open`, `use`, or `idle` unless the animation is internal and cannot conflict.
+The first argument is the Steam Workshop item ID as a string, the second the name shown in GCAL's warning. GCAL checks mounted Workshop addons one second after it loads, so register at load time (from autorun), not from a later hook. It also detects the legacy `autorun/client/cl_vmanip.lua` file, and uses the list to attribute Lua errors. Players can turn the popup off with `gcal_conflict_popup 0`.
 
 ---
 
-## 10. Debugging Tools
+## 15. Deprecated and removed fields
 
-GCAL listens for unhandled Lua errors originating from its own files. Client errors produce one rate-limited notification while full details remain in the console; server errors receive the same concise GCAL console prefix.
+Registering with any of these still works. GCAL prints one `[GCAL] Deprecated:` console warning per animation and key, naming the file and line that registered it.
 
-### Troubleshooting Checklist
+### Animation fields
 
-If an animation does not play:
+**Renamed** (the old name still works for now):
 
-- Run `gcal_list_anims` and confirm the animation name is registered.
-- Run `gcal_debug_sequences <animation>` and confirm the model exposes the sequence you expect.
-- Check that `model` is relative to `models/`, for example `myaddon/c_tool.mdl`, not `models/myaddon/c_tool.mdl`.
-- Confirm the target track is not already occupied if your addon is intentionally avoiding replacement with `GCAL:IsTrackActive`.
-- Enable `gcal_debug 1` and watch the HUD on the left of the screen. For each active track it shows the model, the resolved sequence (red when not found), cycle and blend bars with timing and phase (in / out / hold / loop / segment), bones moved, sounds played, segment and hold state, gun mode, and flags such as TPIK, cambone, no-interrupt, block_code and queued anims. Below that it lists the last few debug messages and deprecation warnings, colour-coded.
+| Old | New |
+| :-- | :-- |
+| `onstart`, `OnStart` | `on_start` |
+| `onfinish`, `OnFinish` | `on_finish` |
+| `oninterrupt`, `OnInterrupt` | `on_interrupt` |
+| `easeintime` / `easeouttime` | `ease_in_time` / `ease_out_time` |
+| `soundvolume`, `soundlevel`, `soundflags` | `sound_volume`, `sound_level`, `sound_flags` |
+| `blendweight` | `blend_weight` |
+| `modelscale`, `modelskin`, `modelbodygroups` | `model_scale`, `model_skin`, `model_bodygroups` |
+| `gunmode`, `gunbones` | `gun_mode`, `gun_bones` |
+| `bonegroup` | `bone_group` (or `hand`) |
+| `thirdperson_model`, `thirdperson_model_bone`, `thirdperson_model_max_distance`, `thirdperson_hide_materials`, `thirdperson_keep_materials`, `thirdperson_target_radius`, `thirdperson_smoothing` | The same key without the prefix, in `GCAL:RegisterTPIKOptions`. Moved there automatically. |
 
-If the hand does not move:
+`sound_volume` used to double as the sound level (default 75). It is now a 0-1 volume; values above 1 warn and are used as `sound_level`.
 
-- Confirm the source model contains the source bones GCAL is reading.
-- Confirm the target viewmodel or hands entity contains the target bones GCAL is writing.
-- Try explicit `hand`, `source_hand`, `bones`, or `source_bones` values instead of relying on defaults.
-- Use `gcal_debug_track [track]` to inspect the selected weapon-base strategy, arm target entity, and matched bones.
+**Removed** (ignored; do this instead):
 
-If thirdperson looks wrong:
+| Field | Replacement |
+| :---- | :---------- |
+| `on_cycle` | Poll `GCAL:GetCycle(trackID)` from a `Think` hook. |
+| `delay_start` | `timer.Simple(delay, function() GCAL:Play(name) end)` |
+| `play_condition` | Check your condition before calling `GCAL:Play`, or return `false` from `VManipPrePlayAnim`. |
+| `screen_shake` | Call `util.ScreenShake` from `on_start`. |
+| `blend_mode` | None. Only `"normal"` was ever implemented. |
+| `disable_pred` | None. It never had an effect. |
+| `viewmodel_fov` (`vm_fov`, `fov`) | Change the FOV from your own `CalcView` hook, scaled by `1 - GCAL:GetLerp(trackID)`. |
+| `viewmodel_offset` (`vm_offset`) | Offset the viewmodel from your own `CalcViewModelView` hook. |
 
-- First verify firstperson works. TPIK depends on a valid source animation.
-- Add `GCAL:RegisterTPIKOptions(name, { sequence = "..." })` if the firstperson sequence is not a good thirdperson pose.
-- Tune `target_radius`, `smoothing`, `offset_x/y/z`, `model_offset`, and `clone_offset_x/y/z` in `GCAL.TPIKOptions`.
-- Use `model = false` to isolate arm solving from prop rendering.
-- Use `model_bone` and `model_max_distance` when addon props drift away from the solved hand.
+### TPIK options
 
-Use these console commands during development:
-
-- `gcal_debug 1`: Enables the real-time HUD (tracks, weapon base, recent events) and console logging. Your own addon can push lines into the HUD event list with `GCAL:AddDebugEvent(text, color)`.
-- `gcal_playback_speed <multiplier>`: Changes global GCAL playback speed. The menu exposes this as a slider from `0.1` to `3`.
-- `gcal_mute_sounds 1`: Mutes sounds emitted by GCAL animations.
-- `gcal_sound_pitch <pitch>`: Changes GCAL animation sound pitch. The menu uses `75`, `100`, and `140` presets.
-- `gcal_thirdperson 1`: Enables experimental projection of active GCAL arm tracks onto the local player model in thirdperson.
-- `gcal_tpik_offset_x/y/z <value>`: Changes global thirdperson TPIK source placement without affecting firstperson placement.
-- `gcal_tpik_angle_p/y/r <value>`: Changes global thirdperson TPIK source angle offsets.
-- `gcal_tpik_target_radius_add <value>`: Adds to the thirdperson hand-goal clamp radius. Negative values tighten it; positive values loosen it.
-- `gcal_tpik_smoothing_add <value>`: Adds to the shoulder-local TPIK smoothing speed. The effective value is clamped to `0..60`.
-- `gcal_clone_offset_x/y/z <value>`: Shifts the whole thirdperson model clone in render-angle space without affecting firstperson placement.
-- `gcal_list_anims`: Lists every animation currently registered in GCAL.
-- `gcal_play <animation> [track]`: Plays a registered animation from the client console. Supports animation-name autocomplete.
-- `gcal_debug_sequences <animation>`: Prints the runtime sequence list for the animation model, checks its sequence, and warns when the model exposes zero sequences.
-- `gcal_debug_sequences <model.mdl> [sequence]`: Same check for any model, without registering an animation first.
-- `gcal_debug_track [track]`: Dumps the current track state, selected weapon-base strategy, current and last arm target entity, matched bones, source/target deltas, and active flip-side information.
-- `gcal_stop [track]`: Stops one track, or all active tracks when no track is provided.
-- `gcal_menu_open`: Opens the GCAL desktop-window menu.
-- `gcal_cambone <0|1>`: Toggles the global camera bone (view-angle driving) feature. The menu also exposes this as a "Cambone enabled: on/off" button.
-
----
-
-## 11. Camera Bone (Cambone)
-
-GCAL can drive the local player's first-person view angles from an animation's attachment, replicating the original VManip camera-bone feel. The feature is on by default and works for every registered animation that has an attachment on its model — no extra setup is required.
-
-### How It Works
-
-When a track is active and the player is in first person, GCAL reads the first attachment's world angle from a hidden clone of the gesture model (the `camModel`). Each frame, the difference between this animated angle and a reference angle (`Angle(-79.75, 0, -90)` by default) is computed, scaled per-axis by `cam_angint`, and added to the player's view angles. The result: as the gesture's camera bone swings, the player's view rotates to match.
-
-Animations can declare their own reference/intensity via the registration table:
-
-```lua
-GCAL:RegisterAnim("my_recoil", {
-    model = "myaddon/c_recoil.mdl",
-    cam_ang = Angle(-79.75, 0, -90), -- reference (rest) angle for the camera attachment
-    cam_angint = { 1, 1, 1 },        -- per-axis intensity multipliers (pitch, yaw, roll)
-    cambone = true                   -- explicitly enable cambone for this animation
-})
-```
-
-| Field        | Type          | Description                                                                                                                |
-| :----------- | :------------ | :------------------------------------------------------------------------------------------------------------------------ |
-| `cam_ang`    | Angle         | Reference (rest) angle of the camera attachment. Default is `Angle(-79.75, 0, -90)`.                                       |
-| `cam_angint` | table         | 3-component per-axis intensity multiplier `{ pitch, yaw, roll }`. Default is `{1, 1, 1}`.                                  |
-| `cambone`    | bool          | Per-animation toggle. `true` always enables cambone for this animation, `false` always disables it, `nil` follows the global convar. |
-
-### Per-Animation Toggle
-
-Set `cambone = false` in the registration table to disable cambone for a specific animation:
-
-```lua
-GCAL:RegisterSecondHandAnim("calm_ping", {
-    model = "myaddon/c_ping.mdl",
-    cambone = false                   -- never drive view angles from this animation
-})
-```
-
-When `cambone = true`, GCAL will create a `camModel` for the animation regardless of the global convar. When `cambone = nil` (not set), the animation follows `gcal_cambone`. When `cambone = false`, no `camModel` is created for the animation — saving the cost of an extra clientside model.
-
-### Global Toggle
-
-The global convar `gcal_cambone` (default `1`) controls cambone for all tracks whose registration does not explicitly set `cambone`. Disable it with:
-
-```
-gcal_cambone 0
-```
-
-The GCAL menu exposes a "Cambone enabled: on/off" button in the Actions section that toggles this convar.
-
-### Custom Cambone Handlers
-
-Addons can override or augment the default VManip-style behavior by registering their own cambone handler:
-
-```lua
-GCAL:RegisterCamBoneHandler("my_recoil_dampener", 10, function(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
-    -- Dampen pitch, amplify yaw
-    local delta = attachment.Ang - camAng
-    angles = Angle(
-        angles.p + delta.p * 0.5 * camAngInt[1],
-        angles.y + delta.y * 2.0 * camAngInt[2],
-        angles.r + delta.r * 1.0 * camAngInt[3]
-    )
-    return origin, angles, fov
-end)
-```
-
-Handlers are called in **priority order** (lower first), and each handler receives the output of the previous one. The default `"vmanip"` handler is registered at priority 0 and replicates the original VManip formula. To replace it entirely, register a handler at priority 0 with the same id (it overrides the default) or call `GCAL:RemoveCamBoneHandler("vmanip")`.
-
-Handler function signature:
-
-```
-fn(id, track, ply, origin, angles, fov, attachment, camAng, camAngInt, lerpVal, handler)
-  -> origin, angles, fov
-```
-
-| Argument      | Description                                                                |
-| :------------ | :------------------------------------------------------------------------- |
-| `id`          | The handler's registered id string.                                        |
-| `track`       | The runtime track table (has `camModel`, `attachment`, `camAng`, `camAngInt`, `lerpVal`). |
-| `ply`         | The local player.                                                          |
-| `origin`      | Current view origin (usually unchanged).                                  |
-| `angles`      | Current view angles — modify and return these.                            |
-| `fov`         | Current field of view.                                                     |
-| `attachment`  | The animated attachment table with `.Pos` and `.Ang`. May be `nil`.        |
-| `camAng`      | The reference (rest) angle.                                                |
-| `camAngInt`   | The 3-element per-axis intensity table.                                    |
-| `lerpVal`     | The track's current lerp value (`1` = weapon pose, `0` = full animation). |
-| `handler`     | The handler's own registered table.                                       |
-
-API:
-
-| Function                             | Purpose                                                                    |
-| :----------------------------------- | :------------------------------------------------------------------------- |
-| `GCAL:RegisterCamBoneHandler(id, priority, fn)` | Registers a new handler with the given priority.                 |
-| `GCAL:RemoveCamBoneHandler(id)`      | Removes a handler by id.                                                  |
-| `GCAL:ComputeCamBoneView(track, ply, origin, angles, fov)` | Internal: runs all handlers in order. Used by the `CalcView` hook. |
+| Key | Status |
+| :-- | :----- |
+| `thirdperson_model`, `thirdperson_model_bone`, `thirdperson_model_max_distance`, `thirdperson_hide_materials`, `thirdperson_keep_materials`, `thirdperson_target_radius`, `thirdperson_smoothing` | Renamed to the key without the `thirdperson_` prefix. |
+| `ignore_bones` | Renamed to `lock_bones` (both keep the bone at the player's pose). Lists are merged. |
+| `blend_strength` | Removed. Use `blend_weight` on the animation. |
+| `blend_curve` | Removed. Use `lerp_curve` or `easing_in` / `easing_out` on the animation. |
+| `distance_fade`, `fade_start`, `fade_end` | Removed. Remote players already stop rendering past 2000 units. |
+| `pole_source`, `pole_native` | Removed (the IK solver is gone). |
+| `model_skin`, `model_bodygroups`, `model_material`, `render_mode`, `render_fx`, `offset_relative_to`, `offset_space`, `angular_offset_x/y/z`, `update_rate`, `interpolate`, `force_update` | Removed. They were accepted but never implemented. |
 
 ---
 

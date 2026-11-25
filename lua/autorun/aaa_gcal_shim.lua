@@ -53,7 +53,7 @@ local function ParseRegisterArgs(arg1, arg2, arg3)
     return arg2, arg3
 end
 
-function VManip:RegisterAnim(arg1, arg2, arg3)
+VManip.RegisterAnim = VManip.RegisterAnim or function(self, arg1, arg2, arg3)
     local name, data = ParseRegisterArgs(arg1, arg2, arg3)
     if not name or not data then return end
 
@@ -62,7 +62,7 @@ function VManip:RegisterAnim(arg1, arg2, arg3)
     self.Anims[name] = data
 end
 
-function VManip:GetAnim(name)
+VManip.GetAnim = VManip.GetAnim or function(self, name)
     self.Anims = self.Anims or GCAL.Anims or {}
     return self.Anims[name]
 end
@@ -86,7 +86,7 @@ VManip.PlaySegment = VManip.PlaySegment or StubFalse
 VManip.Anims = VManip.Anims or GCAL.Anims or {}
 VManip.ActiveTracks = VManip.ActiveTracks or GCAL.ActiveTracks or {}
 
-function VMLegs:RegisterAnim(arg1, arg2, arg3)
+VMLegs.RegisterAnim = VMLegs.RegisterAnim or function(self, arg1, arg2, arg3)
     local name, data = ParseRegisterArgs(arg1, arg2, arg3)
     if not name or not data then return end
 
@@ -95,7 +95,7 @@ function VMLegs:RegisterAnim(arg1, arg2, arg3)
     self.Anims["legs_" .. name] = data
 end
 
-function VMLegs:GetAnim(name)
+VMLegs.GetAnim = VMLegs.GetAnim or function(self, name)
     self.Anims = self.Anims or GCAL.Anims or {}
     return self.Anims["legs_" .. name] or self.Anims[name]
 end
