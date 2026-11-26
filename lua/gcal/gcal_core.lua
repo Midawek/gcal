@@ -70,6 +70,8 @@ if CLIENT then
         "Global GCAL thirdperson TPIK target radius adjustment.")
     GCAL.TPIKSmoothingAdd = CreateClientConVar("gcal_tpik_smoothing_add", "0", true, false,
         "Global GCAL thirdperson TPIK smoothing adjustment.")
+    GCAL.TPIKUseIK = CreateClientConVar("gcal_tpik_ik", "1", true, false,
+        "Solve GCAL thirdperson arms with two-bone IK. 0 uses the old direct bone copy.")
     GCAL.CamBone = CreateClientConVar("gcal_cambone", "1", true, false,
         "Enable GCAL camera bone (view angle driving from animation attachments) for all tracks.")
     GCAL.CloneOffsetX = CreateClientConVar("gcal_clone_offset_x", "0", true, false,
@@ -458,6 +460,7 @@ local TPIK_REMOVED_OPTIONS = {
 
 local TPIK_VALID_OPTIONS = {
     sequence = "string",
+    ik = "bool",
     model = "bool",
     model_bone = "string",
     model_max_distance = "number",

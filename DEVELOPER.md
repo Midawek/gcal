@@ -562,18 +562,22 @@ When the local player is drawn in thirdperson (`ShouldDrawLocalPlayer()` or anot
 Each frame, for each TPIK track:
 
 1. The TPIK source model (the TPIK `sequence` copy, or the firstperson source model) is placed at the player's eye with the eye angles, scaled by `model_scale`.
-2. Every mapped bone is offset by the difference between the player's and the source model's upper arm, then clamped per axis to `Spine4 ± target_radius` so the arm can't stretch.
-3. `offset_x/y/z`, `gcal_tpik_offset_*` and the per-animation TPIK adjustment are added after the clamp, so they can push past it. `gcal_tpik_angle_*` is added to each bone's angles.
-4. `scale_bones`, per-bone exponential `smoothing`, then the blend with the player's pose (`blend_per_bone` overrides it) are applied. `lock_bones` keep the player's pose.
-5. Unmapped children of the upper arms (fingers, helper bones) follow their parent. The result is cached for the frame and written to the player model.
+2. The source's animated hand becomes the hand target: offset by the difference between the player's and the source model's shoulders (the midpoint of both upper arms), then clamped per axis to `Spine4 ± target_radius`.
+3. `offset_x/y/z`, `gcal_tpik_offset_*` and the per-animation TPIK adjustment are added after the clamp, so they can push past it. `gcal_tpik_angle_*` is added to the hand's angles.
+4. The target and hand angles are smoothed (`smoothing`) relative to `Spine4`, so hands don't trail behind a moving player. The blend with the player's pose (`blend_per_bone` overrides it) moves the target, the hand angles and the elbow direction toward the player's own pose.
+5. A two-bone IK solve places the upper arm, forearm and hand using the player model's own bone lengths, so the arm never stretches or detaches. The elbow bends the way the animation's elbow does. If the target is out of reach, the arm points at it fully extended.
+6. Bone twist and finger poses are copied from the animation relative to their parent bone; unmapped children (helper bones, finger tips) follow their parent. The result is cached for the frame and written to the player model.
 
-This works with any player model that has the ValveBiped arm bones (plus `Spine4` for the clamp).
+An arm is solved with IK only when its `UpperArm`, `Forearm` and `Hand` are all mapped and none of `UpperArm` / `Forearm` is in `lock_bones`. Other mapped bones, or every bone when `ik = false` or `gcal_tpik_ik 0`, use the older direct method: each bone is copied from the source with the shoulder offset and clamp, then blended per bone.
+
+This works with any player model that has the ValveBiped arm bones (plus `Spine4` for the clamp and smoothing).
 
 ### Options reference
 
 ```lua
 GCAL:RegisterTPIKOptions("myaddon_radio_hold", {
     sequence = "radio_hold_thirdperson",
+    ik = true,
     model = true,
     model_bone = "ValveBiped.Bip01_L_Hand",
     model_max_distance = 32,
@@ -592,6 +596,7 @@ GCAL:RegisterTPIKOptions("myaddon_radio_hold", {
 | Key | Type | Default | Description |
 | :-- | :--- | :------ | :---------- |
 | `sequence` | string | firstperson sequence | Thirdperson-only sequence; falls back to the firstperson one if not found. Aliases: `anim`, `animation`. The prop clone follows it too. |
+| `ik` | bool | true | Solves the arms with two-bone IK. `false` uses the direct bone copy. |
 | `model` | bool | true | Enables the prop clone. `false` disables it. |
 | `model_bone` | string | | Only this source bone counts for the distance check. |
 | `model_max_distance` | number | 32 | Hides the clone when its nearest hitbox center or bone is farther than this from the player's hand. 0 disables the check. |
@@ -601,8 +606,8 @@ GCAL:RegisterTPIKOptions("myaddon_radio_hold", {
 | `smoothing` | number | 18 | Per-bone smoothing speed, clamped to 0..60. 0 disables smoothing. |
 | `offset_x` / `offset_y` / `offset_z` | number | 0 | Forward / right / up offset in eye-angle space, after the clamp. |
 | `blend_per_bone` | table | | `{ [nameSubstring] = blend }`: fixed blend for matching bones (0 = full animation, 1 = player's pose). Replaces the track's blend in and out for those bones. |
-| `lock_bones` | table | | Bone-name substrings kept at the player's pose. |
-| `scale_bones` | table | | `{ [nameSubstring] = scale }`: scales each matching bone's distance from its rest position. |
+| `lock_bones` | table | | Bone-name substrings kept at the player's pose. Locking a `Hand` keeps the IK target at the player's hand; locking an `UpperArm` or `Forearm` turns IK off for that arm. |
+| `scale_bones` | table | | `{ [nameSubstring] = scale }`: scales each matching bone's distance from its rest position. With IK only the `Hand` entry is used (it scales the target). |
 | `model_offset` | table | | `{ [boneName] = Vector(x, y, z) }`: world-space offset per prop-clone bone. |
 | `clone_offset_x` / `clone_offset_y` / `clone_offset_z` | number | 0 | Forward / right / up offset of the whole prop clone, in eye-angle space. |
 
@@ -947,6 +952,7 @@ All convars are clientside and saved.
 | `gcal_sound_pitch` | 100 | Animation sound pitch (menu presets 75, 100, 140). |
 | `gcal_anim_offset_x/y/z` | 0 | Firstperson forward / right / up offset of the source model. |
 | `gcal_anim_angle_p/y/r` | 0 | Firstperson angle offset of the source model. |
+| `gcal_tpik_ik` | 1 | Two-bone IK for thirdperson arms. 0 uses the direct bone copy for every animation. |
 | `gcal_tpik_offset_x/y/z` | 0 | Thirdperson offset, applied after the clamp. |
 | `gcal_tpik_angle_p/y/r` | 0 | Added to each TPIK bone's angles. |
 | `gcal_tpik_target_radius_add` | 0 | Added to `target_radius`. Negative tightens, positive loosens. |
